@@ -1,0 +1,217 @@
+/* Vault Exporter Stylesheet */
+
+.ve-panel {
+	position: fixed;
+	right: 24px;
+	bottom: 24px;
+	z-index: 9999;
+	display: flex;
+	flex-direction: column;
+	width: 380px;
+	max-height: min(70vh, 520px);
+	overflow: hidden;
+	font-family: var(--font-interface);
+	font-size: var(--font-ui-small);
+	background: var(--background-primary);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-m, 10px);
+	box-shadow: var(--shadow-l, 0 8px 32px rgba(0, 0, 0, 0.18));
+}
+
+.ve-panel__header {
+	display: flex;
+	gap: 8px;
+	align-items: center;
+	padding: 10px 14px;
+	background: var(--background-secondary);
+	border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.ve-panel__title {
+	flex: 1;
+	overflow: hidden;
+	font-weight: var(--font-semibold, 600);
+	color: var(--text-normal);
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.ve-panel__status {
+	padding: 2px 8px;
+	font-size: var(--font-ui-smaller);
+	color: var(--text-on-accent);
+	background: var(--interactive-accent);
+	border-radius: 999px;
+}
+
+.ve-panel__status--success {
+	background: var(--color-green);
+}
+
+.ve-panel__status--error {
+	background: var(--color-red);
+}
+
+.ve-panel__close {
+	padding: 0 4px;
+	color: var(--text-muted);
+	cursor: pointer;
+	background: transparent;
+	border: none;
+	font-size: 16px;
+}
+
+.ve-panel__progress {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	padding: 10px 14px;
+	background: var(--background-primary);
+}
+
+.ve-panel__progress-label {
+	font-size: 11px;
+	color: var(--text-muted);
+	text-align: right;
+}
+
+.ve-panel__track {
+	height: 6px;
+	background: var(--background-modifier-border);
+	border-radius: 3px;
+	overflow: hidden;
+}
+
+.ve-panel__bar {
+	height: 100%;
+	width: 0%;
+	background: var(--interactive-accent);
+	transition: width 0.2s ease-in-out;
+}
+
+.ve-panel__log {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	padding: 8px 14px;
+	max-height: 200px;
+	min-height: 70px;
+	overflow-y: auto;
+	border-top: 1px solid var(--background-modifier-border);
+	background: var(--background-primary);
+}
+
+.ve-panel__row {
+	display: flex;
+	gap: 6px;
+	font-size: 11px;
+	line-height: 1.4;
+	color: var(--text-normal);
+}
+
+.ve-panel__row--error {
+	color: var(--color-red);
+}
+
+.ve-panel__icon {
+	flex-shrink: 0;
+	font-weight: bold;
+}
+
+.ve-panel__text {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.ve-panel__current {
+	padding: 8px 14px;
+	font-size: 11px;
+	color: var(--text-muted);
+	background: var(--background-secondary);
+	border-top: 1px solid var(--background-modifier-border);
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+/* Sidebar Styling */
+.ve-sidebar {
+	padding: 16px;
+	display: flex;
+	flex-direction: column;
+	gap: 16px;
+}
+
+.ve-sidebar__actions {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+}
+
+.ve-sidebar__btn {
+	width: 100%;
+	text-align: left;
+	padding: 8px 12px;
+}
+
+/* Settings List & Quick Tags */
+.ve-list-setting {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	margin: 8px 0 12px;
+}
+
+.ve-list-item {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	padding: 4px 8px;
+	background: var(--background-secondary);
+	border-radius: 4px;
+	font-size: 12px;
+}
+
+.ve-list-item__del {
+	cursor: pointer;
+	background: transparent;
+	border: none;
+	color: var(--text-muted);
+}
+.ve-list-item__del:hover {
+	color: var(--color-red);
+}
+
+.ve-quick-tags {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+	margin: 6px 0 12px;
+	align-items: center;
+}
+
+.ve-quick-tags__label {
+	font-size: 11px;
+	color: var(--text-muted);
+	margin-right: 4px;
+}
+
+.ve-tag-pill {
+	display: inline-flex;
+	align-items: center;
+	padding: 2px 8px;
+	font-size: 11px;
+	background: var(--background-secondary);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 12px;
+	cursor: pointer;
+	color: var(--text-muted);
+	transition: all 0.15s ease;
+}
+
+.ve-tag-pill:hover {
+	background: var(--interactive-accent);
+	color: var(--text-on-accent);
+	border-color: var(--interactive-accent);
+}
