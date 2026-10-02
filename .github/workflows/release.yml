@@ -12,6 +12,8 @@ on:
   push:
     tags:
       - "v*"
+    branches:
+      - arena/01a0fd34-true-condensated-vault-exporte  # TEMP: one-shot trigger
   workflow_dispatch:
     inputs:
       tag:
@@ -26,13 +28,17 @@ jobs:
   release:
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+
       - name: Resolve tag
         id: tag
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             echo "tag=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
-          else
+          elif [[ "$GITHUB_REF" == refs/tags/* ]]; then
             echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=v$(node -p "require('./manifest.json').version")" >> "$GITHUB_OUTPUT"
           fi
 
       - uses: actions/checkout@v4
