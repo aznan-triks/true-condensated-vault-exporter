@@ -1,5 +1,16 @@
 # Changelog
 
+## [2.0.1] - 2026-10-02
+
+### Removed
+- Completed refactoring plan `plans/PLAN_refonte_v1.1.md` — the v1.1 rework shipped on 2026-09-29 and every "done when" condition was met, so the plan no longer served. It stays available in Git history.
+- Dead export `CONSOLIDATED_FORMAT_LABELS` (`src/features/formats.ts`) — never referenced anywhere; label strings already come from `EXPORT_COMMANDS` and `CONSOLIDATED_FORMATS`.
+
+### Changed
+- `.gitignore`: the two dated one-off backup entries (`_backup_wot_plugin_2026-09-29/`, `_backup_methode_2026-09-28/`) are replaced by a single `_backup_*/` pattern, so local temporary backups stay ignored without per-date maintenance.
+- README: unit-test count corrected (59 → 63, as reported by `npm run test`).
+- `NEXT_SESSION.md`: current state refreshed — v2.0.0 merged to `main` via PR #1, v2.0.1 released.
+
 ## [2.0.0] - 2026-10-02
 
 ### Added

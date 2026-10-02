@@ -5,5 +5,4 @@ main.js
 .claude-memory/
 
 # Backups locaux temporaires
-_backup_wot_plugin_2026-09-29/
-_backup_methode_2026-09-28/
+_backup_*/
