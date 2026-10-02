@@ -19,47 +19,16 @@ export class VaultExporterSettingsTab extends PluginSettingTab {
 
 		containerEl.createEl('h2', { text: 'Vault Exporter Settings' });
 
-		// SECTION 1: EXECUTION ENGINE
-		containerEl.createEl('h3', { text: 'Execution Engine' });
 		new Setting(containerEl)
-			.setName('Execution Engine')
-			.setDesc('Choose native TypeScript (recommended, portable) or external Python scripts.')
-			.addDropdown((drop) => {
-				drop.addOption('native', 'Native TypeScript Engine (Fast & Zero-dependency)');
-				drop.addOption('external-python', 'External Python Scripts (Fallback / Legacy)');
-				drop.setValue(this.plugin.settings.executionEngine);
-				drop.onChange(async (val) => {
-					this.plugin.settings.executionEngine = val as any;
+			.setName('Document Title')
+			.setDesc('Title written at the top of consolidated exports.')
+			.addText((text) => {
+				text.setValue(this.plugin.settings.documentTitle);
+				text.onChange(async (val) => {
+					this.plugin.settings.documentTitle = val.trim();
 					await this.plugin.saveSettings();
-					this.display();
 				});
 			});
-
-		if (this.plugin.settings.executionEngine === 'external-python') {
-			new Setting(containerEl)
-				.setName('Python NotebookLM Script')
-				.setDesc('Relative path to python export script for NotebookLM.')
-				.addText((text) => {
-					text.setValue(this.plugin.settings.pythonNotebooklmScript);
-					text.onChange(async (val) => {
-						this.plugin.settings.pythonNotebooklmScript = val.trim();
-						await this.plugin.saveSettings();
-					});
-					new VaultPathSuggest(this.app, text.inputEl, () => this.plugin.gateway.getAllFiles());
-				});
-
-			new Setting(containerEl)
-				.setName('Python Trello/HTML Script')
-				.setDesc('Relative path to python export script for Trello/HTML.')
-				.addText((text) => {
-					text.setValue(this.plugin.settings.pythonTrelloScript);
-					text.onChange(async (val) => {
-						this.plugin.settings.pythonTrelloScript = val.trim();
-						await this.plugin.saveSettings();
-					});
-					new VaultPathSuggest(this.app, text.inputEl, () => this.plugin.gateway.getAllFiles());
-				});
-		}
 
 		// SECTION 2: SCOPE & EXCLUSIONS
 		containerEl.createEl('h3', { text: 'Scope & Exclusions' });
@@ -69,7 +38,7 @@ export class VaultExporterSettingsTab extends PluginSettingTab {
 			.setDesc('Vault-relative root folder to scan. Leave empty to scan the entire vault.')
 			.addText((text) => {
 				text.setValue(this.plugin.settings.scopeRoot);
-				text.setPlaceholder('e.g. WoT or leave blank');
+				text.setPlaceholder('e.g. Notes or leave blank');
 				text.onChange(async (val) => {
 					this.plugin.settings.scopeRoot = val.trim();
 					await this.plugin.saveSettings();
@@ -156,44 +125,42 @@ export class VaultExporterSettingsTab extends PluginSettingTab {
 			});
 
 		new Setting(containerEl)
-			.setName('Export Individual Split Files')
-			.setDesc('Also export cleaned split files to an external destination folder.')
-			.addToggle((toggle) => {
-				toggle.setValue(this.plugin.settings.exportSplitFiles);
-				toggle.onChange(async (val) => {
-					this.plugin.settings.exportSplitFiles = val;
+			.setName('Split Export Mode')
+			.setDesc('Folder-grouped: one consolidated .txt per category . Individual: 1-to-1 markdown notes.')
+			.addDropdown((drop) => {
+				drop.addOption('folder-grouped', 'Folder-grouped (1 .txt per category folder)');
+				drop.addOption('individual-files', 'Individual notes (1-to-1 markdown files)');
+				drop.setValue(this.plugin.settings.splitMode);
+				drop.onChange(async (val) => {
+					this.plugin.settings.splitMode = val as any;
 					await this.plugin.saveSettings();
-					this.display();
 				});
 			});
 
-		if (this.plugin.settings.exportSplitFiles) {
-			new Setting(containerEl)
-				.setName('Split Export Mode')
-				.setDesc('Folder-grouped: one consolidated .txt per category (legacy parity). Individual: 1-to-1 markdown notes.')
-				.addDropdown((drop) => {
-					drop.addOption('folder-grouped', 'Folder-grouped (1 .txt per category folder)');
-					drop.addOption('individual-files', 'Individual notes (1-to-1 markdown files)');
-					drop.setValue(this.plugin.settings.splitMode);
-					drop.onChange(async (val) => {
-						this.plugin.settings.splitMode = val as any;
-						await this.plugin.saveSettings();
-					});
+		new Setting(containerEl)
+			.setName('Split Group Folder')
+			.setDesc('Folder-grouped mode: each direct subfolder of this folder becomes one file. Empty = scope root.')
+			.addText((text) => {
+				text.setValue(this.plugin.settings.splitGroupFolder);
+				text.onChange(async (val) => {
+					this.plugin.settings.splitGroupFolder = val.trim();
+					await this.plugin.saveSettings();
 				});
+				new VaultPathSuggest(this.app, text.inputEl, () => this.plugin.gateway.getAllFolders());
+			});
 
-			new Setting(containerEl)
-				.setName('Split Files Destination Folder')
-				.setDesc('Absolute disk path or relative folder for split files.')
-				.addText((text) => {
-					text.setValue(this.plugin.settings.splitOutputFolder);
-					text.inputEl.style.width = '100%';
-					text.onChange(async (val) => {
-						this.plugin.settings.splitOutputFolder = val.trim();
-						await this.plugin.saveSettings();
-					});
-					new VaultPathSuggest(this.app, text.inputEl, () => this.plugin.gateway.getAllFolders());
+		new Setting(containerEl)
+			.setName('Split Files Destination Folder')
+			.setDesc('Vault-relative folder or absolute disk path (desktop only) for split files.')
+			.addText((text) => {
+				text.setValue(this.plugin.settings.splitOutputFolder);
+				text.inputEl.style.width = '100%';
+				text.onChange(async (val) => {
+					this.plugin.settings.splitOutputFolder = val.trim();
+					await this.plugin.saveSettings();
 				});
-		}
+				new VaultPathSuggest(this.app, text.inputEl, () => this.plugin.gateway.getAllFolders());
+			});
 
 		// SECTION 4: MARKDOWN PROCESSING & ADVANCED
 		containerEl.createEl('h3', { text: 'Markdown Processing & Lore Formatting' });

@@ -61,6 +61,12 @@
 	font-size: 16px;
 }
 
+.ve-panel__cancel {
+	padding: 2px 8px;
+	font-size: 12px;
+	cursor: pointer;
+}
+
 .ve-panel__progress {
 	display: flex;
 	flex-direction: column;

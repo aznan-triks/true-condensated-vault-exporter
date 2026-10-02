@@ -3,14 +3,13 @@
  * Wraps Obsidian Vault operations for reading notes and writing outputs.
  */
 
-import { App, TFile } from 'obsidian';
-import { VaultFile } from '../core/types';
+import { App, TFile, normalizePath } from 'obsidian';
+import { ExportGateway, ExporterSettings, VaultFile } from '../core/types';
 import { isFileIncluded } from '../core/filter';
-import { ExporterSettings } from '../core/types';
 import * as fs from 'fs';
 import * as path from 'path';
 
-export class ObsidianVaultGateway {
+export class ObsidianVaultGateway implements ExportGateway {
 	constructor(private readonly app: App) {}
 
 	/**
@@ -82,7 +81,7 @@ export class ObsidianVaultGateway {
 		}
 
 		// Vault-relative path
-		const norm = targetPath.replace(/\\/g, '/');
+		const norm = normalizePath(targetPath);
 		const parentDir = norm.split('/').slice(0, -1).join('/');
 		if (parentDir && !this.app.vault.getAbstractFileByPath(parentDir)) {
 			await this.app.vault.createFolder(parentDir);
@@ -94,19 +93,5 @@ export class ObsidianVaultGateway {
 		} else {
 			await this.app.vault.create(norm, content);
 		}
-	}
-
-	/**
-	 * Returns base filesystem path of vault if desktop.
-	 */
-	getBasePath(): string | null {
-		const adapter = this.app.vault.adapter as any;
-		if (typeof adapter.getBasePath === 'function') {
-			return adapter.getBasePath();
-		}
-		if (typeof adapter.basePath === 'string') {
-			return adapter.basePath;
-		}
-		return null;
 	}
 }

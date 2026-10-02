@@ -1,13 +1,10 @@
-﻿/**
+/**
  * HTML consolidated document generator.
  * Produces a standalone, styled HTML document with a dynamic Table of Contents.
  */
 
-import { VaultFile, ExporterSettings } from './types';
-import { parseFrontmatter } from './frontmatter';
-import { transformWikilinks } from './wikilink';
-import { removeComments, cleanCallouts } from './markdownClean';
-import { renderDataviewBlocks } from './dataviewEngine';
+import { ExporterSettings } from './types';
+import { CleanedNote, visibleMetadata } from './pipeline';
 
 function escapeHtml(text: string): string {
 	return text
@@ -29,7 +26,7 @@ export function simpleMarkdownToHtml(md: string): string {
 		const rawLine = lines[i] ?? '';
 		const line = rawLine.trimEnd();
 
-		if (line.startsWith('`')) {
+		if (line.startsWith('```')) {
 			if (inCode) {
 				htmlLines.push('</code></pre>');
 				inCode = false;
@@ -125,50 +122,37 @@ export function simpleMarkdownToHtml(md: string): string {
 	return htmlLines.join('\n');
 }
 
-export function formatForHtml(files: VaultFile[], settings: ExporterSettings): string {
+export function formatForHtml(notes: CleanedNote[], settings: ExporterSettings): string {
 	const tocItems: string[] = [];
 	const contentSections: string[] = [];
 
-	for (let i = 0; i < files.length; i++) {
-		const file = files[i];
-		if (!file) continue;
-
-		const parsed = parseFrontmatter(file.content);
+	notes.forEach((note, i) => {
 		const docId = 'doc-' + i;
-		const docTitle = parsed.metadata.title || file.name.replace(/\.md$/, '');
+		tocItems.push('<li><a href="#' + docId + '">' + escapeHtml(note.title) + ' <span class="path-hint">(' + escapeHtml(note.path) + ')</span></a></li>');
 
-		tocItems.push('<li><a href=\x22#' + docId + '\x22>' + escapeHtml(docTitle) + ' <span class=\x22path-hint\x22>(' + escapeHtml(file.path) + ')</span></a></li>');
+		const badges = visibleMetadata(note, settings)
+			.map(([k, v]) => '<span class="badge">' + escapeHtml(k + ': ' + v) + '</span>')
+			.join('\n');
 
-		let body = settings.stripFrontmatter ? parsed.contentWithoutFrontmatter : file.content;
-		if (settings.renderDataview) {
-			body = renderDataviewBlocks(body, files);
-		}
-		body = removeComments(body);
-		body = cleanCallouts(body);
-		body = transformWikilinks(body, 'clean-text');
-
-		const htmlBody = simpleMarkdownToHtml(body);
-
-		contentSections.push(
-			'<article id=\x22' + docId + '\x22 class=\x22vault-document\x22>\n' +
-			'  <header class=\x22doc-header\x22>\n' +
-			'    <h1 class=\x22doc-title\x22>' + escapeHtml(docTitle) + '</h1>\n' +
-			'    <div class=\x22doc-meta\x22>\n' +
-			'      <span class=\x22badge\x22>' + escapeHtml(file.path) + '</span>\n' +
-			(parsed.metadata.category ? '      <span class=\x22badge category\x22>' + escapeHtml(parsed.metadata.category) + '</span>\n' : '') +
-			(parsed.metadata.order ? '      <span class=\x22badge order\x22>' + escapeHtml(parsed.metadata.order) + '</span>\n' : '') +
-			'    </div>\n' +
-			'  </header>\n' +
-			'  <div class=\x22doc-content\x22>\n' +
-			htmlBody + '\n' +
-			'  </div>\n' +
-			'</article>\n'
-		);
-	}
+		contentSections.push([
+			'<article id="' + docId + '" class="vault-document">',
+			'<header class="doc-header">',
+			'<h1 class="doc-title">' + escapeHtml(note.title) + '</h1>',
+			'<div class="doc-meta">',
+			'<span class="badge">' + escapeHtml(note.path) + '</span>',
+			badges,
+			'</div>',
+			'</header>',
+			'<div class="doc-content">',
+			simpleMarkdownToHtml(note.body),
+			'</div>',
+			'</article>',
+		].join('\n'));
+	});
 
 	const css = settings.customCss || '';
-	return '<!DOCTYPE html>\n<html lang=\x22fr\x22>\n<head>\n<meta charset=\x22UTF-8\x22>\n' +
-		'<title>World of Trois - Obsidian Vault Export</title>\n' +
+	return '<!DOCTYPE html>\n<html>\n<head>\n<meta charset="UTF-8">\n' +
+		'<title>' + escapeHtml(settings.documentTitle) + '</title>\n' +
 		'<style>\n' +
 		'  body { font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Helvetica, Arial, sans-serif; background: #1e1e24; color: #e6e6e6; margin: 0; padding: 24px; display: flex; gap: 32px; }\n' +
 		'  nav#toc { width: 320px; position: sticky; top: 24px; max-height: calc(100vh - 48px); overflow-y: auto; background: #2b2b36; padding: 16px; border-radius: 8px; border: 1px solid #3d3d4d; flex-shrink: 0; }\n' +
@@ -184,8 +168,6 @@ export function formatForHtml(files: VaultFile[], settings: ExporterSettings): s
 		'  h1.doc-title { margin: 0 0 8px 0; font-size: 24px; color: #fff; }\n' +
 		'  .doc-meta { display: flex; gap: 8px; flex-wrap: wrap; }\n' +
 		'  .badge { background: #3c3c4f; padding: 2px 8px; border-radius: 4px; font-size: 12px; color: #9aa0a6; }\n' +
-		'  .badge.category { background: #7c5cbf; color: #fff; }\n' +
-		'  .badge.order { background: #4a5568; color: #fff; }\n' +
 		'  table { border-collapse: collapse; width: 100%; margin: 16px 0; }\n' +
 		'  th, td { border: 1px solid #3d3d4d; padding: 8px 12px; text-align: left; }\n' +
 		'  th { background: #323242; }\n' +
@@ -194,8 +176,8 @@ export function formatForHtml(files: VaultFile[], settings: ExporterSettings): s
 		'  code { font-family: Consolas, monospace; font-size: 13px; }\n' +
 		'  ' + css + '\n' +
 		'</style>\n</head>\n<body>\n' +
-		'<nav id=\x22toc\x22>\n' +
-		'  <h2>Sommaire (' + files.length + ' notes)</h2>\n' +
+		'<nav id="toc">\n' +
+		'  <h2>' + escapeHtml(settings.documentTitle) + ' (' + notes.length + ' notes)</h2>\n' +
 		'  <ul>\n    ' + tocItems.join('\n    ') + '\n  </ul>\n</nav>\n' +
-		'<main id=\x22content\x22>\n  ' + contentSections.join('\n') + '\n</main>\n</body>\n</html>';
+		'<main id="content">\n' + contentSections.join('\n') + '\n</main>\n</body>\n</html>';
 }

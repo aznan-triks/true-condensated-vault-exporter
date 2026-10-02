@@ -2,15 +2,15 @@
  * Main plugin entrypoint for Vault Exporter.
  */
 
-import { Plugin, WorkspaceLeaf } from 'obsidian';
-import { DEFAULT_SETTINGS, ExporterSettings } from './core/types';
+import { Notice, Plugin, WorkspaceLeaf } from 'obsidian';
+import { ExporterSettings, mergeSettings } from './core/types';
 import { ObsidianVaultGateway } from './obsidian/vaultGateway';
-import { EXPORT_COMMANDS, executeExportCommand, CommandContext } from './commands/registry';
+import { EXPORT_COMMANDS, executeExportCommand, cancelRunningExport, CommandContext } from './commands/registry';
 import { ExporterSidebarView, VIEW_TYPE_EXPORTER_SIDEBAR } from './ui/SidebarView';
 import { VaultExporterSettingsTab } from './settings/SettingsTab';
 
 export default class VaultExporterPlugin extends Plugin {
-	override settings: ExporterSettings = { ...DEFAULT_SETTINGS };
+	override settings: ExporterSettings = mergeSettings(undefined);
 	gateway!: ObsidianVaultGateway;
 
 	override async onload(): Promise<void> {
@@ -42,13 +42,23 @@ export default class VaultExporterPlugin extends Plugin {
 				},
 			});
 		}
+
+		this.addCommand({
+			id: 'cancel-export',
+			name: 'Cancel running export',
+			icon: 'square',
+			callback: () => {
+				if (!cancelRunningExport()) {
+					new Notice('No export is running.');
+				}
+			},
+		});
 	}
 
 	override onunload(): void {}
 
 	async loadSettings(): Promise<void> {
-		const loaded = await this.loadData();
-		this.settings = Object.assign({}, DEFAULT_SETTINGS, loaded);
+		this.settings = mergeSettings(await this.loadData());
 	}
 
 	async saveSettings(): Promise<void> {

@@ -4,7 +4,7 @@
  */
 
 export interface VaultFile {
-	/** Relative path from vault root, e.g. 'WoT/01_Univers/Chronologie.md' or 'index.md' */
+	/** Relative path from vault root, e.g. 'Notes/Topic/Doc.md' or 'index.md' */
 	path: string;
 	/** File basename without path, e.g. 'Chronologie.md' */
 	name: string;
@@ -14,7 +14,11 @@ export interface VaultFile {
 	mtime?: number;
 }
 
+export type WikilinkFormat = 'clean-text' | 'keep-wikilink' | 'markdown' | 'canonical-alias';
+
 export interface ExporterSettings {
+	/** Title written at the top of consolidated exports */
+	documentTitle: string;
 	/** Folder from which relative scanning occurs, empty string means vault root */
 	scopeRoot: string;
 	/** Folders to strictly exclude (exact relative paths or prefix match) */
@@ -23,79 +27,68 @@ export interface ExporterSettings {
 	excludedFiles: string[];
 	/** Path prefix substrings that cause exclusion if found anywhere in folder path (e.g. '00_') */
 	excludedPrefixes: string[];
-	/** Output path for NotebookLM consolidated file (relative to vault or absolute) */
+	/** Output path for NotebookLM consolidated file (vault-relative or absolute) */
 	notebooklmOutputPath: string;
 	/** Output path for HTML consolidated file */
 	htmlOutputPath: string;
 	/** Output path for Markdown consolidated file */
 	markdownOutputPath: string;
-	/** Output path for PDF file */
-	pdfOutputPath: string;
-	/** Whether to also export individual split files */
-	exportSplitFiles: boolean;
-	/** Split files export mode: 'folder-grouped' (.txt per folder) or 'individual-files' (1-to-1 .md) */
+	/** Split mode: 'folder-grouped' (.txt per top folder under scope) or 'individual-files' (1-to-1 .md) */
 	splitMode: 'folder-grouped' | 'individual-files';
-	/** Destination folder for split files */
+	/** Folder whose direct subfolders become split groups (empty = scope root) */
+	splitGroupFolder: string;
+	/** Destination folder for split files (vault-relative or absolute) */
 	splitOutputFolder: string;
 	/** Whether to remove YAML frontmatter during export */
 	stripFrontmatter: boolean;
 	/** Whether to evaluate in-memory Dataview queries */
 	renderDataview: boolean;
-	/** Target format for wikilinks: 'clean-text', 'keep-wikilink', 'markdown', or 'canonical-alias' */
-	wikilinkFormat: 'clean-text' | 'keep-wikilink' | 'markdown' | 'canonical-alias';
+	/** Target format for wikilinks */
+	wikilinkFormat: WikilinkFormat;
 	/** Frontmatter property keys to ignore/strip during export */
 	ignoredProperties: string[];
 	/** Whether to include Obsidian .canvas files in exports */
 	includeCanvas: boolean;
-	/** Additional custom CSS to inject into HTML/PDF export */
+	/** Additional custom CSS to inject into HTML export */
 	customCss: string;
-	/** External python script path for NotebookLM export fallback (optional) */
-	pythonNotebooklmScript: string;
-	/** External python script path for Trello/split export fallback (optional) */
-	pythonTrelloScript: string;
-	/** Preferred execution engine: 'native' | 'external-python' */
-	executionEngine: 'native' | 'external-python';
+	/** Number of notes processed between two UI yields (keeps Obsidian responsive, allows cancel) */
+	yieldEvery: number;
 }
 
 export const DEFAULT_SETTINGS: ExporterSettings = {
+	documentTitle: 'Vault export',
 	scopeRoot: '',
-	excludedFolders: [
-		'WoT/00_Metatrois (Gestion)',
-		'00_Metatrois (Gestion)',
-		'.obsidian',
-		'.trash',
-		'sessions',
-		'.git',
-	],
-	excludedFiles: [
-		'INSTRUCTIONS.md',
-		'CLAUDE.md',
-		'World of Trois _ NotebookLM.txt',
-	],
-	excludedPrefixes: ['00_'],
-	notebooklmOutputPath: 'World of Trois _ NotebookLM.txt',
-	htmlOutputPath: 'World of Trois _ Obsidian.html',
-	markdownOutputPath: 'World of Trois _ Consolidated.md',
-	pdfOutputPath: 'World of Trois _ Obsidian.pdf',
-	exportSplitFiles: true,
+	excludedFolders: ['.obsidian', '.trash', '.git'],
+	excludedFiles: [],
+	excludedPrefixes: [],
+	notebooklmOutputPath: 'Vault export - NotebookLM.txt',
+	htmlOutputPath: 'Vault export.html',
+	markdownOutputPath: 'Vault export.md',
 	splitMode: 'folder-grouped',
-	splitOutputFolder: 'G:\\.shortcut-targets-by-id\\1CYFRRCV46sPfjqWbqKB7hj7O2rznEzBT\\Histoire des Trois Trois\\Wiki Trois',
+	splitGroupFolder: '',
+	splitOutputFolder: 'Vault export - split',
 	stripFrontmatter: true,
 	renderDataview: true,
-	wikilinkFormat: 'canonical-alias',
-	ignoredProperties: [
-		'canvas',
-		'icon',
-		'trello_board_card_id',
-		'trello_plugin_note_id',
-		'cssclasses',
-	],
+	wikilinkFormat: 'clean-text',
+	ignoredProperties: ['cssclasses'],
 	includeCanvas: true,
 	customCss: '',
-	pythonNotebooklmScript: 'export_obsidian_notebooklm.py',
-	pythonTrelloScript: 'export_obsidian_trello.py',
-	executionEngine: 'native',
+	yieldEvery: 25,
 };
+
+/** Keeps only known keys, so obsolete saved settings are dropped on load. */
+export function mergeSettings(loaded: unknown): ExporterSettings {
+	const result: ExporterSettings = { ...DEFAULT_SETTINGS };
+	if (loaded && typeof loaded === 'object') {
+		for (const key of Object.keys(DEFAULT_SETTINGS) as (keyof ExporterSettings)[]) {
+			const value = (loaded as Record<string, unknown>)[key];
+			if (value !== undefined) {
+				(result as unknown as Record<string, unknown>)[key] = value;
+			}
+		}
+	}
+	return result;
+}
 
 export interface FileMetadata {
 	title: string;
@@ -118,3 +111,10 @@ export interface ExportProgress {
 }
 
 export type ProgressCallback = (progress: ExportProgress) => void;
+
+/** What the export features need from the host (implemented by the Obsidian gateway, faked in tests). */
+export interface ExportGateway {
+	loadVaultFiles(settings: ExporterSettings): Promise<VaultFile[]>;
+	/** Writes a text file to a vault-relative or absolute path, creating parent folders. */
+	writeFile(targetPath: string, content: string): Promise<void>;
+}
