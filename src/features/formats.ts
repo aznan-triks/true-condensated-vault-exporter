@@ -33,9 +33,3 @@ export const CONSOLIDATED_FORMATS = {
 } satisfies Record<string, ConsolidatedFormat>;
 
 export type ConsolidatedFormatId = keyof typeof CONSOLIDATED_FORMATS;
-
-export const CONSOLIDATED_FORMAT_LABELS: Record<string, string> = {
-	notebooklm: 'NotebookLM (consolidated text)',
-	html: 'HTML document',
-	markdown: 'Consolidated Markdown',
-};
