@@ -36,7 +36,8 @@ Tests : `tests/core.test.ts` (Vitest).
 
 ## Livraison
 
-- Compte GitHub requis : `aznan-triks` (déduit du champ `author` de `manifest.json`/`package.json`, cohérent avec les autres projets publics du même auteur). Pas de remote configuré à ce jour.
+- Compte GitHub requis : `aznan-triks` (déduit du champ `author` de `manifest.json`/`package.json`, cohérent avec les autres projets publics du même auteur). Remote origin configuré : `https://github.com/aznan-triks/true-condensated-vault-exporter.git` (branche `main`).
+- Script de synchronisation 1-clic : `sync.bat` / `sync.ps1`.
 - Avant toute action git : `gh auth status`, basculer avec `gh auth switch --hostname github.com --user aznan-triks` si besoin — le switch ne tient pas durablement entre les push, revérifier avant **chaque** push.
 - Versioning : MINEUR = nouvelle commande d'export ou format de sortie ; PATCH = fix/refacto/UI mineur.
 
