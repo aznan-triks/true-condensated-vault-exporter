@@ -61,6 +61,24 @@ describe('filter', () => {
 		// different folder casing: not the same configured output
 		expect(isFileIncluded('OUT/exports/Vault export.md', opts)).toBe(true);
 	});
+
+	it('never re-ingests clean-export artifacts', () => {
+		const opts = { ...options };
+		expect(isFileIncluded('A/one (clean export).md', opts)).toBe(false);
+		expect(isFileIncluded('Notes/My Note (CLEAN EXPORT).md', opts)).toBe(false);
+		// unrelated files with a similar name are untouched
+		expect(isFileIncluded('A/one.md', opts)).toBe(true);
+	});
+
+	it('onlyPath restricts inclusion to a single file (context commands)', () => {
+		const opts = { ...options, onlyPath: 'WoT/01_Univers/Chronologie.md' };
+		expect(isFileIncluded('WoT/01_Univers/Chronologie.md', opts)).toBe(true);
+		expect(isFileIncluded('WoT/01_Univers/Monde.md', opts)).toBe(false);
+		expect(isFileIncluded('index.md', opts)).toBe(false);
+		// normalized comparison (backslashes, trailing slash)
+		const opts2 = { ...options, onlyPath: 'WoT\\01_Univers\\Chronologie.md' };
+		expect(isFileIncluded('WoT/01_Univers/Chronologie.md', opts2)).toBe(true);
+	});
 });
 
 describe('wikilink', () => {
@@ -369,7 +387,7 @@ describe('formatters and split export', () => {
 		const settings = { ...DEFAULT_SETTINGS, wikilinkFormat: 'keep-wikilink' as const };
 		const html = formatForHtml(notesFor(settings), settings, NOW);
 		expect(html).toContain('<!DOCTYPE html>');
-		expect(html).toContain('Vault export (2 notes)');
+		expect(html).toContain('2 documents');
 		expect(html).toContain('[[WoT/01_Univers/Monde|Monde]]');
 	});
 
@@ -421,6 +439,15 @@ describe('formatters and split export', () => {
 		// both notes contain a level-1 heading with the same slug-free check: ids must be prefixed
 		expect(html).toContain('id="doc-0-event-1"');
 		expect(html).toContain('id="doc-1-monde"');
+	});
+
+	it('HTML ships a client-side document filter', () => {
+		const html = formatForHtml(notesFor(DEFAULT_SETTINGS), DEFAULT_SETTINGS, NOW);
+		expect(html).toContain('<input id="ve-search"');
+		expect(html).toContain('data-doc-id="doc-0"');
+		expect(html).toContain('window.veFilter = apply;');
+		// every toc item is associated with its document
+		expect((html.match(/data-doc-id="doc-\d+"/g) ?? []).length).toBe(2);
 	});
 
 	it('HTML supports dark/light theming and export date', () => {

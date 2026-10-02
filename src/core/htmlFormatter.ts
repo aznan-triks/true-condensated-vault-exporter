@@ -265,6 +265,9 @@ function themeCss(customCss: string): string {
   body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background: var(--ve-bg); color: var(--ve-text); margin: 0; padding: 24px; display: flex; gap: 32px; }
   nav#toc { width: 320px; position: sticky; top: 24px; align-self: flex-start; max-height: calc(100vh - 48px); overflow-y: auto; background: var(--ve-panel); padding: 16px; border-radius: 8px; border: 1px solid var(--ve-border); flex-shrink: 0; }
   nav#toc h2 { font-size: 16px; margin-top: 0; border-bottom: 1px solid var(--ve-border); padding-bottom: 8px; color: var(--ve-strong); }
+  nav#toc #ve-search { width: 100%; box-sizing: border-box; margin: 10px 0 6px; padding: 6px 9px; border: 1px solid var(--ve-border); border-radius: 6px; background: var(--ve-bg); color: var(--ve-text); font-size: 12px; }
+  nav#toc #ve-search:focus { outline: none; border-color: var(--ve-accent); }
+  #ve-count { font-size: 11px; color: var(--ve-muted); margin-bottom: 8px; }
   nav#toc ul { list-style: none; padding-left: 0; margin: 0 0 8px 0; font-size: 13px; }
   nav#toc li { margin-bottom: 5px; }
   nav#toc ul ul { padding-left: 14px; margin-top: 3px; font-size: 12px; }
@@ -323,7 +326,7 @@ export function formatForHtml(notes: CleanedNote[], settings: ExporterSettings, 
 			id: docId + '-' + slugify(t),
 		}));
 
-		let toc = '<li><a class="toc-doc" href="#' + docId + '">' + escapeHtml(note.title);
+		let toc = '<li class="toc-item" data-doc-id="' + docId + '"><a class="toc-doc" href="#' + docId + '">' + escapeHtml(note.title);
 		toc += ' <span class="path-hint">(' + escapeHtml(note.path) + ')</span></a>';
 		if (subs.length > 0) {
 			toc += '<ul>';
@@ -364,9 +367,49 @@ export function formatForHtml(notes: CleanedNote[], settings: ExporterSettings, 
 		'<style>\n' + themeCss(settings.customCss) +
 		'</style>\n</head>\n<body id="top">\n' +
 		'<nav id="toc">\n' +
-		'  <h2>' + escapeHtml(settings.documentTitle) + ' (' + notes.length + ' notes)</h2>\n' +
+		'  <h2>' + escapeHtml(settings.documentTitle) + '</h2>\n' +
+		'  <input id="ve-search" type="search" placeholder="Filter documents…" aria-label="Filter documents">\n' +
+		'  <div id="ve-count" class="ve-count">' + notes.length + ' documents</div>\n' +
 		'  <ul>\n    ' + tocItems.join('\n    ') + '\n  </ul>\n</nav>\n' +
 		'<main id="content">\n' + contentSections.join('\n') + '\n' +
 		'<footer class="ve-footer">Exported ' + escapeHtml(exportedAt) + ' · ' + notes.length + ' documents · Vault Exporter</footer>\n' +
-		'</main>\n</body>\n</html>';
+		'</main>\n' +
+		searchFilterScript() +
+		'</body>\n</html>';
+}
+
+/**
+ * Tiny dependency-free client-side filter: hides documents (and their TOC
+ * entries) that do not match the query, updates the visible count.
+ */
+function searchFilterScript(): string {
+	// No user data is interpolated, so the script is safe to inline.
+	return '<script>\n(function () {\n' +
+		'  var input = document.getElementById("ve-search");\n' +
+		'  var count = document.getElementById("ve-count");\n' +
+		'  if (!input) return;\n' +
+		'  var docs = Array.prototype.slice.call(document.querySelectorAll("article.vault-document"));\n' +
+		'  var items = {};\n' +
+		'  Array.prototype.slice.call(document.querySelectorAll("#toc .toc-item")).forEach(function (li) {\n' +
+		'    items[li.getAttribute("data-doc-id")] = li;\n' +
+		'  });\n' +
+		'  var total = docs.length;\n' +
+		'  function apply() {\n' +
+		'    var q = input.value.trim().toLowerCase();\n' +
+		'    var visible = 0;\n' +
+		'    docs.forEach(function (d) {\n' +
+		'      var show = !q || d.textContent.toLowerCase().indexOf(q) !== -1;\n' +
+		'      d.style.display = show ? "" : "none";\n' +
+		'      if (show) visible++;\n' +
+		'      var li = items[d.id];\n' +
+		'      if (li) li.style.display = show ? "" : "none";\n' +
+		'    });\n' +
+		'    if (count) count.textContent = q ? visible + " of " + total + " match" + (visible === 1 ? "" : "es") : total + " documents";\n' +
+		'  }\n' +
+		'  input.addEventListener("input", apply);\n' +
+		'  input.addEventListener("keydown", function (e) {\n' +
+		'    if (e.key === "Escape") { input.value = ""; apply(); }\n' +
+		'  });\n' +
+		'  window.veFilter = apply;\n' +
+		'})();\n</script>';
 }

@@ -74,6 +74,12 @@ export interface ExporterSettings {
 	customCss: string;
 	/** Number of notes processed between two UI yields (keeps Obsidian responsive, allows cancel) */
 	yieldEvery: number;
+	/**
+	 * When set (in-memory only, never persisted by default), restrict the
+	 * export to this exact vault-relative path. Used by context commands
+	 * such as "Export current note".
+	 */
+	onlyFile?: string;
 }
 
 export const DEFAULT_SETTINGS: ExporterSettings = {

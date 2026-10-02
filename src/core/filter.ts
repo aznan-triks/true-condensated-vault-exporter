@@ -10,6 +10,8 @@ export interface FilterOptions {
 	excludedFiles: string[];
 	excludedPrefixes: string[];
 	includeCanvas?: boolean;
+	/** When set, only this exact vault-relative path is included. */
+	onlyPath?: string;
 	/**
 	 * Configured output locations (consolidated files, ZIP, split folder)
 	 * expressed as vault-relative paths. Any file equal to, or inside, one
@@ -24,6 +26,14 @@ export interface FilterOptions {
  */
 export function normalizePath(p: string): string {
 	return p.replace(/\\/g, '/').replace(/^\/+/, '').replace(/\/+$/, '').trim();
+}
+
+/** Suffix of the files produced by "Export current note as clean Markdown". */
+export const CLEAN_EXPORT_SUFFIX = ' (clean export).md';
+
+/** True when the file is one of our own clean-export artifacts (never re-exported). */
+export function isCleanExportArtifact(fileName: string): boolean {
+	return fileName.toLowerCase().endsWith(CLEAN_EXPORT_SUFFIX);
 }
 
 /**
@@ -43,9 +53,22 @@ export function isFileIncluded(relativePath: string, options: FilterOptions): bo
 		return false;
 	}
 
+	// Our own clean-export artifacts are never re-ingested (prevents a second
+	// feedback loop for the "Export current note" command).
+	const base = normPath.split('/').pop() ?? '';
+	if (isCleanExportArtifact(base)) {
+		return false;
+	}
+
 	const parts = normPath.split('/');
 	const fileName = parts[parts.length - 1] ?? '';
 	const parentFolder = parts.length > 1 ? parts.slice(0, -1).join('/') : '';
+
+	// 0. Only-path override (context commands) wins over everything else
+	const normOnly = options.onlyPath ? normalizePath(options.onlyPath) : '';
+	if (normOnly && normPath !== normOnly) {
+		return false;
+	}
 
 	// 1. Check scope root if specified
 	const normScope = normalizePath(options.scopeRoot);

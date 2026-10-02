@@ -11,6 +11,7 @@ import {
 	relativeTime,
 } from '../src/features/exportHistory';
 import { DEFAULT_SETTINGS, ExportGateway, VaultFile } from '../src/core/types';
+import { isFileIncluded, reservedOutputPaths } from '../src/core/filter';
 
 /* ---------------- ZIP writer ---------------- */
 
@@ -191,6 +192,38 @@ describe('orchestrator', () => {
 		expect(result.written[0]!.bytes).toBeGreaterThan(1000);
 		expect(result.totalBytes).toBe(result.written[0]!.bytes);
 		expect(result.durationMs).toBeGreaterThanOrEqual(0);
+	});
+
+	it('single-note export (onlyFile) writes only that note', async () => {
+		const files: VaultFile[] = [
+			{ path: 'A/one.md', name: 'one.md', content: 'one body' },
+			{ path: 'B/two.md', name: 'two.md', content: 'two body' },
+		];
+		const written = new Map<string, string>();
+		const gateway: ExportGateway = {
+			// same inclusion logic as the real gateway
+			loadVaultFiles: async (s) => files.filter((f) => isFileIncluded(f.path, {
+				scopeRoot: s.scopeRoot,
+				excludedFolders: s.excludedFolders,
+				excludedFiles: s.excludedFiles,
+				excludedPrefixes: s.excludedPrefixes,
+				includeCanvas: s.includeCanvas,
+				reservedPaths: reservedOutputPaths(s),
+				onlyPath: s.onlyFile,
+			})),
+			writeFile: async (p, c) => { written.set(p, c); },
+			writeBinary: async () => {},
+		};
+		const result = await runExports(
+			gateway,
+			{ ...DEFAULT_SETTINGS, onlyFile: 'A/one.md', markdownOutputPath: 'A/one (clean export).md' },
+			['markdown'],
+			() => {}
+		);
+		expect([...written.keys()]).toEqual(['A/one (clean export).md']);
+		expect(written.get('A/one (clean export).md')).toContain('one body');
+		expect(written.get('A/one (clean export).md')).not.toContain('two body');
+		expect(result.written).toHaveLength(1);
 	});
 });
 

@@ -17,14 +17,14 @@ Plugin Obsidian (TypeScript) qui exporte un coffre (ou un sous-dossier, ou un ta
 
 | Dossier | Rôle |
 |---|---|
-| `src/core/` | Logique pure — aucun import `obsidian`. `types.ts` (settings + `ParsedFile` + gateway), `pipeline.ts` (`parseVault`/`cleanNote`/`createExportContext`), `filter.ts` (inclusion + chemins réservés), `wikilink.ts` (+ `buildLinkResolver`), `dataviewEngine.ts` (évaluateur d'expressions WHERE), `canvasParser.ts` (ordre visuel + groupes), `frontmatter.ts`, `markdownClean.ts`, formateurs (`htmlFormatter` avec `renderInline`/TOC 2 niveaux, `markdownFormatter`, `notebooklmFormatter`), `zip.ts` (CRC32 + build ZIP deflate via `zlib` externe) |
+| `src/core/` | Logique pure — aucun import `obsidian`. `types.ts` (settings + `ParsedFile` + gateway), `pipeline.ts` (`parseVault`/`cleanNote`/`createExportContext`), `filter.ts` (inclusion + chemins réservés + `onlyPath`), `wikilink.ts` (+ `buildLinkResolver`), `dataviewEngine.ts` (évaluateur d'expressions WHERE), `canvasParser.ts` (ordre visuel + groupes), `frontmatter.ts`, `markdownClean.ts`, formateurs (`htmlFormatter` avec `renderInline`/TOC 2 niveaux/recherche client, `markdownFormatter`, `notebooklmFormatter`), `zip.ts` (CRC32 + build ZIP deflate via `zlib` externe) |
 | `src/obsidian/` | Seule couche qui touche l'API Obsidian/Node : `vaultGateway.ts` (lecture parallèle batch 8, tag filter, écritures texte/binaire async, `getVaultFilesInfo`, `revealOutput`), `appSetting.ts` (cast `app.setting` interne), `obsidian-internal.d.ts` (augmentations de types : `Shell`, `SettingTab.id`) |
 | `src/features/` | `exportOrchestrator.ts` (`runExports` multi-cibles → `ExportResult`, ZIP), `formats.ts` (registre des formats consolidés), `exportSplit.ts`, `exportHistory.ts` (persistance + formatage) |
 | `src/commands/registry.ts` | `EXPORT_COMMANDS` — source unique pilotant Command Palette + sidebar ; `executeTargets`, `isExportRunning`, `UiContext` |
 | `src/ui/` | `SidebarView` (stats de scope, multi-cibles, historique), `ProgressPanel` (log, annulation, récap + Open folder), `VaultPathSuggest` |
 | `src/settings/SettingsTab.ts` | Onglet de réglages (dont Advanced : `customCss`, `yieldEvery`) |
 
-Tests : `tests/core.test.ts` + `tests/features.test.ts` (Vitest, 59 tests).
+Tests : `tests/core.test.ts` + `tests/features.test.ts` (Vitest, 63 tests).
 
 - Couches et droits : `core/` n'importe ni `obsidian` ni `features/` (invariant déclaré en tête de `src/core/types.ts`) ; `obsidian/vaultGateway.ts` seul lecteur du coffre ; `features/` sans import `obsidian` (constaté 2026-09-29).
 - Contrôle des couches : automatique, describe `architecture` de `tests/core.test.ts` (dans `npm run check`).
@@ -42,6 +42,7 @@ Tests : `tests/core.test.ts` + `tests/features.test.ts` (Vitest, 59 tests).
 - ⚠️ APIs Obsidian internes (`Shell`, `app.setting`, `SettingTab.id`) → non typées dans le d.ts : les casts vivent dans `src/obsidian/` (`obsidian-internal.d.ts`, `appSetting.ts`) ; garder `Platform.isMobile` en garde-fou.
 - ⚠️ `zlib`/`fs`/`path` dans `core`/`obsidian` → externes au bundle (`esbuild.config.mjs`) : OK dans Electron (desktop-only) et dans les tests Node, interdit partout ailleurs.
 - ⚠️ Le d.ts d'`obsidian` installé est plus récent que `minAppVersion` — vérifier les APIs dans `node_modules/obsidian/obsidian.d.ts` avant d'utiliser une nouvelle méthode.
+- ⚠️ `onlyFile` et `settingsOverride` sont des overrides **en mémoire** (commandes contextuelles) : ne jamais les écrire dans `saveData`. `mergeSettings` ne les persiste pas (absents de `DEFAULT_SETTINGS`), mais un `settings` modifié doit être reconstitué depuis `ctx.settings` à chaque run (`executeTargets` le fait déjà).
 
 ## Checklist UI (après tout changement visuel)
 

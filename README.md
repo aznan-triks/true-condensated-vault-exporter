@@ -37,10 +37,14 @@ Plugin Obsidian pour exporter un coffre (ou un sous-dossier, ou un tag) en forma
 | Run all exports | Tous les formats consolidés + split |
 | Export for NotebookLM (consolidated text) | Un seul fichier texte consolidé |
 | Export as consolidated Markdown | Un seul fichier markdown unifié |
-| Export as HTML document | Un document HTML autonome |
+| Export as HTML document | Un document HTML autonome (avec recherche intégrée) |
 | Export split files | Fichiers par dossier ou par note |
 | Export everything as ZIP bundle | Un `.zip` contenant tout |
+| Export current note's folder (all targets) | Exporte le dossier de la note active (scope temporaire) |
+| Export current note as clean Markdown | Écrit `<note> (clean export).md` à côté de la note |
 | Cancel running export | Interrompt l'export en cours |
+
+> Les commandes « current note » utilisent des overrides de réglages **en mémoire** (scope, chemin de sortie) : vos réglages persistés ne sont jamais modifiés.
 
 ## Réglages (extraits)
 
