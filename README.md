@@ -21,7 +21,7 @@ Plugin Obsidian pour exporter un coffre (ou un sous-dossier, ou un tag) en forma
 - **Canvases** : les `.canvas` sont convertis en texte lisible (ordre visuel haut→bas, groupes en sections).
 - **Anti boucle de ré-export** : les sorties précédentes (fichiers consolidés, ZIP, dossier split) sont automatiquement exclus du périmètre — exporter deux fois n'ingère pas la première sortie.
 - **Robustesse** : lectures parallèles, note illisible = skip + rapport (pas d'arrêt total), écritures asynchrones, annulation propre par `AbortSignal`.
-- **100 % TypeScript**, moteur pur testable : 59 tests unitaires, aucune dépendance runtime.
+- **100 % TypeScript**, moteur pur testable : 63 tests unitaires, aucune dépendance runtime.
 
 ## Installation
 
