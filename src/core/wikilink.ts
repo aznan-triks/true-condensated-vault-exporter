@@ -3,6 +3,8 @@
  * Transforms [[Note#Heading|Display]] into target format.
  */
 
+import { WikilinkFormat } from './types';
+
 export interface WikilinkMatch {
 	raw: string;
 	target: string;
@@ -37,7 +39,7 @@ export function extractWikilinks(content: string): WikilinkMatch[] {
 
 export function transformWikilinks(
 	content: string,
-	format: 'clean-text' | 'keep-wikilink' | 'markdown' | 'canonical-alias' = 'clean-text',
+	format: WikilinkFormat = 'clean-text',
 	resolveLink?: (target: string) => string | undefined
 ): string {
 	if (format === 'keep-wikilink') {

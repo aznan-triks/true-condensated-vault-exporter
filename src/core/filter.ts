@@ -20,7 +20,7 @@ export function normalizePath(p: string): string {
 
 /**
  * Checks if a file path is included according to blacklist criteria.
- * @param relativePath Vault-relative path, e.g. 'WoT/80_Histroisre/Doc.md' or 'index.md'
+ * @param relativePath Vault-relative path, e.g. 'Notes/Topic/Doc.md' or 'index.md'
  * @param options Filter options
  */
 export function isFileIncluded(relativePath: string, options: FilterOptions): boolean {

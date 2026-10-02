@@ -17,6 +17,7 @@ export class ProgressPanel {
 	private readonly logEl: HTMLElement;
 	private readonly currentEl: HTMLElement;
 	private readonly closeBtn: HTMLElement;
+	private readonly cancelBtn: HTMLElement;
 	private timer: number | null = null;
 	private finished = false;
 
@@ -39,6 +40,16 @@ export class ProgressPanel {
 			}
 			this.destroy();
 		});
+
+		this.cancelBtn = header.createEl('button', { cls: 've-panel__cancel', text: 'Cancel' });
+		this.cancelBtn.addEventListener('click', () => {
+			if (!this.finished) {
+				this.options.onCancel?.();
+			}
+		});
+		if (!options.onCancel) {
+			this.cancelBtn.hide();
+		}
 
 		const progress = this.root.createDiv({ cls: 've-panel__progress' });
 		this.progressEl = progress.createSpan({ cls: 've-panel__progress-label', text: '0 / 0' });
@@ -76,9 +87,11 @@ export class ProgressPanel {
 		}
 	}
 
-	finish(success: boolean, summary: string): void {
+	finish(outcome: 'success' | 'cancelled' | 'error', summary: string): void {
 		this.finished = true;
-		this.statusEl.setText(success ? 'Done' : 'Failed');
+		this.cancelBtn.hide();
+		const success = outcome !== 'error';
+		this.statusEl.setText(outcome === 'success' ? 'Done' : outcome === 'cancelled' ? 'Cancelled' : 'Failed');
 		this.statusEl.className = 've-panel__status ' + (success ? 've-panel__status--success' : 've-panel__status--error');
 		this.barEl.style.width = '100%';
 		this.currentEl.setText(summary);

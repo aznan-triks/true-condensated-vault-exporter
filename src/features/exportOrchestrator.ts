@@ -1,109 +1,79 @@
 /**
- * Master export orchestrator.
+ * Master export orchestrator: load once, clean once, render each requested target.
+ * Cancellable through an AbortSignal checked between every note and every written file.
  */
 
-import { ExporterSettings, ProgressCallback } from '../core/types';
-import { ObsidianVaultGateway } from '../obsidian/vaultGateway';
-import { runNotebookLMExport } from './exportNotebookLM';
-import { runHtmlExport } from './exportHtml';
-import { runMarkdownExport } from './exportMarkdown';
-import { runSplitFilesExport } from './exportSplit';
-import { executePythonScript } from './pythonRunner';
+import { ExportGateway, ExporterSettings, ProgressCallback } from '../core/types';
+import { CleanedNote, cleanNote } from '../core/pipeline';
+import { CONSOLIDATED_FORMATS, ConsolidatedFormatId } from './formats';
+import { buildSplitFiles } from './exportSplit';
 
-export type ExportTarget = 'all' | 'notebooklm' | 'html' | 'markdown' | 'split';
+export type ExportTarget = 'all' | ConsolidatedFormatId | 'split';
+
+export class ExportCancelledError extends Error {
+	constructor() {
+		super('Export cancelled.');
+		this.name = 'ExportCancelledError';
+	}
+}
+
+function checkCancelled(signal?: AbortSignal): void {
+	if (signal?.aborted) {
+		throw new ExportCancelledError();
+	}
+}
+
+/** Lets Obsidian repaint and process clicks (e.g. Cancel) during long loops. */
+function yieldToUi(): Promise<void> {
+	return new Promise((resolve) => setTimeout(resolve, 0));
+}
 
 export async function runExports(
-	gateway: ObsidianVaultGateway,
+	gateway: ExportGateway,
 	settings: ExporterSettings,
 	target: ExportTarget,
-	onProgress: ProgressCallback
+	onProgress: ProgressCallback,
+	signal?: AbortSignal
 ): Promise<void> {
-	if (settings.executionEngine === 'external-python') {
-		const vaultRoot = gateway.getBasePath();
-		if (!vaultRoot) {
-			throw new Error('Vault root path not accessible for external python runner.');
-		}
-
-		if (target === 'all' || target === 'notebooklm') {
-			onProgress({
-				stage: 'Python: NotebookLM',
-				current: 1,
-				total: 2,
-				log: 'Launching ' + settings.pythonNotebooklmScript + '...',
-			});
-			const res = await executePythonScript(settings.pythonNotebooklmScript, vaultRoot, (l) => {
-				onProgress({ stage: 'Python: NotebookLM', current: 1, total: 2, log: l });
-			});
-			if (!res.success) {
-				throw new Error('Python NotebookLM script failed:\n' + res.output);
-			}
-		}
-
-		if (target === 'all' || target === 'html' || target === 'split') {
-			onProgress({
-				stage: 'Python: HTML/Trello',
-				current: 2,
-				total: 2,
-				log: 'Launching ' + settings.pythonTrelloScript + '...',
-			});
-			const res = await executePythonScript(settings.pythonTrelloScript, vaultRoot, (l) => {
-				onProgress({ stage: 'Python: HTML/Trello', current: 2, total: 2, log: l });
-			});
-			if (!res.success) {
-				throw new Error('Python HTML/Trello script failed:\n' + res.output);
-			}
-		}
-
-		onProgress({
-			stage: 'Finished',
-			current: 2,
-			total: 2,
-			log: 'All Python exports completed successfully.',
-		});
-		return;
-	}
-
-	// Native TypeScript Engine
-	onProgress({
-		stage: 'Scanning Vault',
-		current: 0,
-		total: 100,
-		log: 'Indexing vault notes and evaluating filters...',
-	});
-
+	onProgress({ stage: 'Scanning vault', current: 0, total: 1, log: 'Indexing vault notes...' });
 	const files = await gateway.loadVaultFiles(settings);
-
 	if (files.length === 0) {
 		throw new Error('No files matched the inclusion criteria.');
 	}
 
-	onProgress({
-		stage: 'Vault Indexed',
-		current: files.length,
-		total: files.length,
-		log: 'Found ' + files.length + ' matching documents in scope.',
-	});
-
-	if (target === 'all' || target === 'notebooklm') {
-		await runNotebookLMExport(gateway, settings, files, onProgress);
+	const notes: CleanedNote[] = [];
+	const every = Math.max(1, settings.yieldEvery);
+	for (const [i, file] of files.entries()) {
+		checkCancelled(signal);
+		notes.push(cleanNote(file, files, settings));
+		if ((i + 1) % every === 0) {
+			onProgress({ stage: 'Cleaning notes', current: i + 1, total: files.length, currentFile: file.path, log: 'Cleaned ' + (i + 1) + ' notes' });
+			await yieldToUi();
+		}
 	}
+	onProgress({ stage: 'Cleaning notes', current: files.length, total: files.length, log: 'Cleaned ' + files.length + ' notes.' });
 
-	if (target === 'all' || target === 'html') {
-		await runHtmlExport(gateway, settings, files, onProgress);
-	}
+	const exportedAt = new Date().toISOString();
+	const formatIds = (Object.keys(CONSOLIDATED_FORMATS) as ConsolidatedFormatId[])
+		.filter((id) => target === 'all' || target === id);
 
-	if (target === 'all' || target === 'markdown') {
-		await runMarkdownExport(gateway, settings, files, onProgress);
+	for (const [i, id] of formatIds.entries()) {
+		checkCancelled(signal);
+		const format = CONSOLIDATED_FORMATS[id];
+		const outPath = format.outputPath(settings);
+		onProgress({ stage: format.label, current: i, total: formatIds.length, log: 'Writing ' + outPath });
+		await gateway.writeFile(outPath, format.render(notes, settings, exportedAt));
+		await yieldToUi();
 	}
 
 	if (target === 'all' || target === 'split') {
-		await runSplitFilesExport(settings, files, onProgress);
+		const outputs = buildSplitFiles(notes, settings);
+		for (const [i, out] of outputs.entries()) {
+			checkCancelled(signal);
+			onProgress({ stage: 'Split', current: i + 1, total: outputs.length, currentFile: out.path, log: 'Writing ' + out.path });
+			await gateway.writeFile(out.path, out.content);
+		}
 	}
 
-	onProgress({
-		stage: 'Completed',
-		current: files.length,
-		total: files.length,
-		log: 'Export workflow finished successfully.',
-	});
+	onProgress({ stage: 'Completed', current: 1, total: 1, log: 'Export finished.' });
 }

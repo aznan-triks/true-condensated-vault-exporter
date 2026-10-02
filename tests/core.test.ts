@@ -5,14 +5,15 @@ import { parseFrontmatter } from '../src/core/frontmatter';
 import { removeComments, cleanCallouts, sanitizeWhitespace } from '../src/core/markdownClean';
 import { parseDataviewQuery, evaluateDataviewQuery, renderDataviewBlocks } from '../src/core/dataviewEngine';
 import { formatForNotebookLM } from '../src/core/notebooklmFormatter';
-import { formatForHtml } from '../src/core/htmlFormatter';
+import { formatForHtml, simpleMarkdownToHtml } from '../src/core/htmlFormatter';
 import { formatForMarkdown } from '../src/core/markdownFormatter';
 import { parseCanvasContent } from '../src/core/canvasParser';
-import { runSplitFilesExport } from '../src/features/exportSplit';
-import { DEFAULT_SETTINGS, VaultFile } from '../src/core/types';
+import { buildSplitFiles } from '../src/features/exportSplit';
+import { runExports, ExportCancelledError } from '../src/features/exportOrchestrator';
+import { cleanNote } from '../src/core/pipeline';
+import { DEFAULT_SETTINGS, ExportGateway, ExporterSettings, VaultFile, mergeSettings } from '../src/core/types';
 import * as fs from 'fs';
 import * as path from 'path';
-import * as os from 'os';
 
 describe('filter', () => {
 	const options = {
@@ -161,7 +162,7 @@ describe('formatters and split export', () => {
 		{
 			path: 'WoT/80_Histroisre/Ev1.md',
 			name: 'Ev1.md',
-			content: '---\ntitle: Event 1\ncanvas: hide\n---\nDescription with [[WoT/01_Univers/Monde|Monde]]',
+			content: '---\ntitle: Event 1\ncanvas: hide\nstatus: draft\n---\nDescription with [[WoT/01_Univers/Monde|Monde]]',
 		},
 		{
 			path: 'WoT/01_Univers/Monde.md',
@@ -169,58 +170,135 @@ describe('formatters and split export', () => {
 			content: '---\ntitle: Monde\n---\nContenu du Monde',
 		},
 	];
+	const notesFor = (settings: ExporterSettings) => sampleFiles.map((f) => cleanNote(f, sampleFiles, settings));
+	const NOW = '2026-01-01T00:00:00.000Z';
 
-	it('formats for NotebookLM with stripped ignored properties', () => {
-		const output = formatForNotebookLM(sampleFiles, {
-			...DEFAULT_SETTINGS,
-			ignoredProperties: ['canvas'],
-		});
-		expect(output).toContain('WORLD OF TROIS - ARCHIVES DU LORE COMPLET (NOTEBOOKLM EXPORT)');
+	it('formats for NotebookLM, hiding ignored properties', () => {
+		const settings = { ...DEFAULT_SETTINGS, stripFrontmatter: false, ignoredProperties: ['canvas'] };
+		const output = formatForNotebookLM(notesFor(settings), settings, NOW);
+		expect(output).toContain('VAULT EXPORT (NOTEBOOKLM EXPORT)');
 		expect(output).toContain('DOCUMENT [1/2] : WoT/80_Histroisre/Ev1.md');
-		expect(output).not.toContain('canvas: hide');
+		expect(output).toContain('status : draft');
+		expect(output).not.toContain('hide');
 	});
 
-	it('generates folder-grouped split files', async () => {
-		const tempDir = path.join(os.tmpdir(), 'vault-exporter-test-' + Date.now());
-		const count = await runSplitFilesExport(
-			{
-				...DEFAULT_SETTINGS,
-				exportSplitFiles: true,
-				splitMode: 'folder-grouped',
-				splitOutputFolder: tempDir,
-			},
-			sampleFiles,
-			() => {}
-		);
-
-		expect(count).toBe(2);
-		const file80 = path.join(tempDir, '80_Histroisre.txt');
-		const file01 = path.join(tempDir, '01_Univers.txt');
-		expect(fs.existsSync(file80)).toBe(true);
-		expect(fs.existsSync(file01)).toBe(true);
-		expect(fs.readFileSync(file80, 'utf8')).toContain('Event 1');
-		expect(fs.readFileSync(file01, 'utf8')).toContain('Contenu du Monde');
-
-		// Cleanup
-		fs.rmSync(tempDir, { recursive: true, force: true });
-	});
-
-	it('formats for HTML', () => {
-		const html = formatForHtml(sampleFiles, DEFAULT_SETTINGS);
+	it('HTML honors the wikilink format setting', () => {
+		const settings = { ...DEFAULT_SETTINGS, wikilinkFormat: 'keep-wikilink' as const };
+		const html = formatForHtml(notesFor(settings), settings);
 		expect(html).toContain('<!DOCTYPE html>');
-		expect(html).toContain('Sommaire (2 notes)');
-		expect(html).toContain('doc-0');
+		expect(html).toContain('Vault export (2 notes)');
+		expect(html).toContain('[[WoT/01_Univers/Monde|Monde]]');
+	});
+
+	it('HTML does not treat inline code as a code fence', () => {
+		const html = simpleMarkdownToHtml('`inline` text\nnext line');
+		expect(html).not.toContain('<pre>');
 	});
 
 	it('formats for consolidated Markdown', () => {
-		const md = formatForMarkdown(sampleFiles, DEFAULT_SETTINGS);
-		expect(md).toContain('# World of Trois - Archives Complètes');
-		expect(md).toContain('## Table des Matières');
+		const md = formatForMarkdown(notesFor(DEFAULT_SETTINGS), DEFAULT_SETTINGS, NOW);
+		expect(md).toContain('# Vault export');
 		expect(md).toContain('1. [Event 1](#event-1-0)');
-		expect(md).toContain('2. [Monde](#monde-1)');
-		expect(md).toContain('## 1. Event 1 <a id="event-1-0"></a>');
 		expect(md).toContain('## 2. Monde <a id="monde-1"></a>');
 		expect(md).toContain('Description with Monde');
-		expect(md).toContain('Contenu du Monde');
+	});
+
+	it('groups split files by first folder under the scope root', () => {
+		const settings = { ...DEFAULT_SETTINGS, scopeRoot: 'WoT', splitOutputFolder: 'out' };
+		const outputs = buildSplitFiles(notesFor(settings), settings);
+		expect(outputs.map((o) => o.path).sort()).toEqual(['out/01_Univers.txt', 'out/80_Histroisre.txt']);
+		expect(outputs.find((o) => o.path === 'out/80_Histroisre.txt')?.content).toContain('Event 1');
+	});
+
+	it('groups split files by subfolders of the split group folder', () => {
+		const settings = { ...DEFAULT_SETTINGS, splitGroupFolder: 'WoT', splitOutputFolder: 'out' };
+		const extra = [...sampleFiles, { path: 'index.md', name: 'index.md', content: 'home' }];
+		const notes = extra.map((f) => cleanNote(f, extra, settings));
+		expect(buildSplitFiles(notes, settings).map((o) => o.path).sort()).toEqual(['out/01_Univers.txt', 'out/80_Histroisre.txt', 'out/Root.txt']);
+	});
+
+	it('individual split files keep frontmatter when not stripped', () => {
+		const settings = { ...DEFAULT_SETTINGS, splitMode: 'individual-files' as const, stripFrontmatter: false, splitOutputFolder: 'out' };
+		const outputs = buildSplitFiles(notesFor(settings), settings);
+		expect(outputs[0]?.path).toBe('out/WoT/80_Histroisre/Ev1.md');
+		expect(outputs[0]?.content.startsWith('---\ntitle: Event 1')).toBe(true);
+	});
+});
+
+describe('orchestrator', () => {
+	function fakeGateway(files: VaultFile[]) {
+		const written = new Map<string, string>();
+		const gateway: ExportGateway = {
+			loadVaultFiles: async () => files,
+			writeFile: async (p, c) => { written.set(p, c); },
+		};
+		return { gateway, written };
+	}
+	const files: VaultFile[] = Array.from({ length: 60 }, (_, i) => ({
+		path: 'A/n' + i + '.md', name: 'n' + i + '.md', content: 'body ' + i,
+	}));
+
+	it('writes every consolidated format and split files for target all', async () => {
+		const { gateway, written } = fakeGateway(files);
+		await runExports(gateway, DEFAULT_SETTINGS, 'all', () => {});
+		expect([...written.keys()].sort()).toEqual([
+			'Vault export - NotebookLM.txt',
+			'Vault export - split/A.txt',
+			'Vault export.html',
+			'Vault export.md',
+		]);
+	});
+
+	it('writes only the requested target', async () => {
+		const { gateway, written } = fakeGateway(files);
+		await runExports(gateway, DEFAULT_SETTINGS, 'html', () => {});
+		expect([...written.keys()]).toEqual(['Vault export.html']);
+	});
+
+	it('stops mid-run when cancelled and writes nothing afterwards', async () => {
+		const { gateway, written } = fakeGateway(files);
+		const controller = new AbortController();
+		const run = runExports(gateway, { ...DEFAULT_SETTINGS, yieldEvery: 10 }, 'all', (p) => {
+			if (p.stage === 'Cleaning notes' && p.current >= 20) controller.abort();
+		}, controller.signal);
+		await expect(run).rejects.toBeInstanceOf(ExportCancelledError);
+		expect(written.size).toBe(0);
+	});
+
+	it('fails explicitly when no file matches', async () => {
+		const { gateway } = fakeGateway([]);
+		await expect(runExports(gateway, DEFAULT_SETTINGS, 'all', () => {})).rejects.toThrow('No files matched');
+	});
+});
+
+describe('settings', () => {
+	it('drops obsolete saved keys and keeps known ones', () => {
+		const merged = mergeSettings({ pdfOutputPath: 'x.pdf', executionEngine: 'external-python', scopeRoot: 'WoT' });
+		expect(merged.scopeRoot).toBe('WoT');
+		expect('pdfOutputPath' in merged).toBe(false);
+		expect('executionEngine' in merged).toBe(false);
+	});
+});
+
+describe('architecture', () => {
+	function tsFiles(dir: string): string[] {
+		return fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
+			e.isDirectory() ? tsFiles(path.join(dir, e.name)) : e.name.endsWith('.ts') ? [path.join(dir, e.name)] : []);
+	}
+	const importsOf = (file: string) =>
+		[...fs.readFileSync(file, 'utf8').matchAll(/from\s+'([^']+)'/g)].map((m) => m[1]);
+
+	it('core and features never import obsidian', () => {
+		for (const file of [...tsFiles('src/core'), ...tsFiles('src/features')]) {
+			expect(importsOf(file), file).not.toContain('obsidian');
+		}
+	});
+
+	it('core never imports features, ui, commands or the gateway', () => {
+		for (const file of tsFiles('src/core')) {
+			for (const imp of importsOf(file)) {
+				expect(imp, file).not.toMatch(/features|ui|commands|obsidian\//);
+			}
+		}
 	});
 });
