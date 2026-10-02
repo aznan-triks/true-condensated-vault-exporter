@@ -12,8 +12,6 @@ on:
   push:
     tags:
       - "v*"
-    branches:
-      - arena/01a0fd34-true-condensated-vault-exporte  # TEMP: one-shot trigger
   workflow_dispatch:
     inputs:
       tag:
