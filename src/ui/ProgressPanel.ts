@@ -1,12 +1,22 @@
 /**
- * Visual floating progress panel with live logs and cancel support.
+ * Visual floating progress panel with live logs, cancel support and a
+ * completion summary (file count, size, "Open folder" shortcut).
  * Styled in matching Obsidian look & feel.
  */
+
+import { formatBytes } from '../features/exportHistory';
 
 export interface PanelOptions {
 	title: string;
 	autoCloseMs?: number;
 	onCancel?: () => void;
+}
+
+export interface FinishInfo {
+	fileCount?: number;
+	bytes?: number;
+	skipped?: number;
+	onReveal?: () => void;
 }
 
 export class ProgressPanel {
@@ -60,13 +70,11 @@ export class ProgressPanel {
 		this.currentEl = this.root.createDiv({ cls: 've-panel__current', text: 'Initializing...' });
 	}
 
-	update(current: number, total: number, label?: string): void {
+	update(current: number, total: number, label?: string, file?: string): void {
 		const ratio = total > 0 ? Math.min(1, current / total) : 0;
 		this.barEl.style.width = (ratio * 100) + '%';
-		this.progressEl.setText(current + ' / ' + total);
-		if (label) {
-			this.currentEl.setText(label);
-		}
+		this.progressEl.setText(current + ' / ' + total + (label ? ' · ' + label : ''));
+		this.currentEl.setText(file || label || 'Working...');
 	}
 
 	log(message: string, isError = false): void {
@@ -85,16 +93,37 @@ export class ProgressPanel {
 		while (this.logEl.children.length > 80) {
 			this.logEl.lastElementChild?.remove();
 		}
+		this.logEl.scrollTop = this.logEl.scrollHeight;
 	}
 
-	finish(outcome: 'success' | 'cancelled' | 'error', summary: string): void {
+	finish(outcome: 'success' | 'cancelled' | 'error', summary: string, info?: FinishInfo): void {
 		this.finished = true;
 		this.cancelBtn.hide();
 		const success = outcome !== 'error';
 		this.statusEl.setText(outcome === 'success' ? 'Done' : outcome === 'cancelled' ? 'Cancelled' : 'Failed');
 		this.statusEl.className = 've-panel__status ' + (success ? 've-panel__status--success' : 've-panel__status--error');
 		this.barEl.style.width = '100%';
-		this.currentEl.setText(summary);
+
+		const parts: string[] = [summary];
+		if (info?.fileCount !== undefined) {
+			parts.push(info.fileCount + ' files');
+		}
+		if (info?.bytes !== undefined) {
+			parts.push(formatBytes(info.bytes));
+		}
+		if (info && info.skipped && info.skipped > 0) {
+			parts.push(info.skipped + ' skipped');
+		}
+		this.currentEl.setText(parts.join(' · '));
+
+		if (info?.onReveal) {
+			const footer = this.root.createDiv({ cls: 've-panel__footer' });
+			const revealBtn = footer.createEl('button', { cls: 've-panel__reveal', text: 'Open folder' });
+			revealBtn.addEventListener('click', () => {
+				info.onReveal?.();
+				this.destroy();
+			});
+		}
 
 		if (success && this.options.autoCloseMs && this.options.autoCloseMs > 0) {
 			this.timer = window.setTimeout(() => this.destroy(), this.options.autoCloseMs);

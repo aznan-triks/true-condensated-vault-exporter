@@ -143,22 +143,202 @@
 
 /* Sidebar Styling */
 .ve-sidebar {
-	padding: 16px;
+	padding: 12px;
 	display: flex;
 	flex-direction: column;
-	gap: 16px;
+	gap: 12px;
 }
 
-.ve-sidebar__actions {
+.ve-sidebar__header {
 	display: flex;
 	flex-direction: column;
+	gap: 2px;
+}
+
+.ve-sidebar__header h4 {
+	margin: 0;
+	font-size: 15px;
+}
+
+.ve-sidebar__vault {
+	font-size: 11px;
+	color: var(--text-muted);
+}
+
+.ve-card {
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-m, 8px);
+	background: var(--background-secondary);
+	padding: 10px 12px;
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+}
+
+.ve-card__title {
+	font-size: 11px;
+	font-weight: var(--font-semibold, 600);
+	text-transform: uppercase;
+	letter-spacing: 0.04em;
+	color: var(--text-muted);
+}
+
+.ve-card__value {
+	font-size: 14px;
+	font-weight: var(--font-medium, 500);
+	color: var(--text-normal);
+}
+
+.ve-card__hint {
+	font-size: 11px;
+	color: var(--text-muted);
+	line-height: 1.4;
+}
+
+.ve-target-list {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+}
+
+.ve-target {
+	display: flex;
+	align-items: center;
 	gap: 8px;
+	padding: 5px 8px;
+	border-radius: var(--radius-s, 5px);
+	cursor: pointer;
+	font-size: 13px;
+	color: var(--text-normal);
+	user-select: none;
 }
 
-.ve-sidebar__btn {
+.ve-target:hover {
+	background: var(--background-modifier-hover);
+}
+
+.ve-target--active {
+	background: color-mix(in srgb, var(--interactive-accent) 14%, transparent);
+}
+
+.ve-target--disabled {
+	opacity: 0.55;
+	pointer-events: none;
+}
+
+.ve-target__box {
+	width: 14px;
+	text-align: center;
+	font-size: 11px;
+	color: var(--interactive-accent);
+	flex-shrink: 0;
+}
+
+.ve-target__label {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.ve-sidebar__run {
+	margin-top: 8px;
 	width: 100%;
-	text-align: left;
-	padding: 8px 12px;
+	text-align: center;
+	padding: 7px 12px;
+}
+
+.ve-history {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+}
+
+.ve-history__row {
+	display: flex;
+	gap: 8px;
+	align-items: baseline;
+	padding: 4px 6px;
+	border-radius: var(--radius-s, 5px);
+}
+
+.ve-history__row:hover {
+	background: var(--background-modifier-hover);
+}
+
+.ve-history__icon {
+	flex-shrink: 0;
+	font-size: 12px;
+	font-weight: bold;
+}
+
+.ve-history__row--success .ve-history__icon {
+	color: var(--color-green);
+}
+
+.ve-history__row--cancelled .ve-history__icon {
+	color: var(--text-muted);
+}
+
+.ve-history__row--error .ve-history__icon {
+	color: var(--color-red);
+}
+
+.ve-history__main {
+	display: flex;
+	flex-direction: column;
+	min-width: 0;
+}
+
+.ve-history__label {
+	font-size: 12px;
+	color: var(--text-normal);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.ve-history__meta {
+	font-size: 10.5px;
+	color: var(--text-muted);
+}
+
+.ve-sidebar__footer {
+	display: flex;
+	justify-content: flex-end;
+}
+
+.ve-sidebar__settings {
+	font-size: 11px;
+	color: var(--text-muted);
+	background: transparent;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-s, 5px);
+	padding: 3px 8px;
+	cursor: pointer;
+}
+
+.ve-sidebar__settings:hover {
+	color: var(--text-normal);
+	border-color: var(--interactive-accent);
+}
+
+/* Progress panel footer (Open folder) */
+.ve-panel__footer {
+	padding: 8px 14px;
+	background: var(--background-primary);
+	border-top: 1px solid var(--background-modifier-border);
+	display: flex;
+	justify-content: flex-end;
+}
+
+.ve-panel__reveal {
+	font-size: 12px;
+	padding: 3px 10px;
+	border-radius: var(--radius-s, 5px);
+	background: var(--interactive-accent);
+	color: var(--text-on-accent);
+	border: none;
+	cursor: pointer;
 }
 
 /* Settings List & Quick Tags */
