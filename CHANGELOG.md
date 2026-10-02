@@ -5,6 +5,10 @@
 ### Added
 - **ZIP bundle export**: "Export everything as ZIP bundle" packs every consolidated format + the split files into a single, portable `.zip` (deflate-compressed, zero-dependency writer). Perfect for NotebookLM multi-source notebooks or sharing an export in one file. New setting: `zipOutputPath`.
 - **Multi-target exports**: the sidebar now lets you pick any combination of targets (NotebookLM, HTML, Markdown, Split, ZIP) and run them in one shot.
+- **Context commands**:
+  - "Export current note's folder (all targets)" — one click export of the folder containing the active note (in-memory scope override, settings untouched)
+  - "Export current note as clean Markdown" — writes `<note> (clean export).md` next to the note, using the same cleaning pipeline
+- **Client-side search in the HTML export**: filter box in the table of contents hides non-matching documents and TOC entries live, with a visible counter (zero-dependency inline script, works offline).
 - **Live scope preview**: the sidebar shows how many notes/canvases (and how many bytes) will actually be exported, refreshed on every settings change.
 - **Export history**: the last 5 export runs (targets, date, file count, size, outcome) are kept in the sidebar and persisted with the plugin data.
 - **"Open folder" shortcut**: after a successful export, a button reveals the first output file in the OS file manager (desktop).
@@ -12,6 +16,7 @@
 - **Real Dataview WHERE expressions**: `and`/`or` (with correct precedence and parentheses), comparisons `=`, `!=`, `>`, `<`, `>=`, `<=`, `in (a, b, c)`, `like "wild*card"`, and `contains`/`startswith`/`endswith` as functions *or* infix. Fields: `title`, `tags`, `category`, `order`, `statut`, any custom property, `file.name`, `file.path`, `file.folder`, `file.ctime`, `file.mtime`, `file.day`.
 - **HTML export, fully reworked**:
   - inline markdown rendering (bold, italic, strikethrough, inline code, links, images, bare autolinks) — previously shown as literal text
+  - (plus the client-side document search added in this release)
   - dark *and* light theme (follows the viewer's `prefers-color-scheme`), with CSS custom properties so `customCss` can restyle everything
   - two-level table of contents (documents + their headings, unique anchors), "Back to top" links, export date footer
   - merged multi-line blockquotes with callout styling, task lists (`- [x]`), ordered lists
@@ -29,7 +34,7 @@
 - Plugin data now persists `{ settings, history }`; the legacy format (bare settings object) is still read on load.
 
 ### Fixed
-- **Feedback loop on re-export**: previous export outputs (consolidated files, ZIP, split folder) are now automatically excluded from the export scope, so running the export twice no longer ingests the first run's results.
+- **Feedback loop on re-export**: previous export outputs (consolidated files, ZIP, split folder) are now automatically excluded from the export scope, so running the export twice no longer ingests the first run's results. Same protection applies to the `* (clean export).md` artifacts produced by the "Export current note" command.
 - `FROM "#tag"` (quoted) in Dataview blocks is now recognized as a tag, not a folder path.
 - Canvas: a group header is no longer duplicated when ungrouped nodes sit between two grouped ones.
 - Dataview `SORT date` no longer compares one side by `dateCreation` and the other by `dateRevision`.

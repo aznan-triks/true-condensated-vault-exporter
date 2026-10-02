@@ -69,13 +69,25 @@ function describeTargets(targets: ExportTarget[]): string {
 	return targets.map((t) => TARGET_LABELS[t]).join(' + ');
 }
 
+export interface ExecuteOptions {
+	/** In-memory settings overrides for this run only (never persisted). */
+	settingsOverride?: Partial<ExporterSettings>;
+	/** Overrides the panel/history label. */
+	label?: string;
+}
+
 /** Runs one or more export targets with progress panel, history and cancel support. */
-export async function executeTargets(ctx: UiContext, targets: ExportTarget[]): Promise<void> {
+export async function executeTargets(ctx: UiContext, targets: ExportTarget[], options?: ExecuteOptions): Promise<void> {
 	if (running) {
 		new Notice('An export is already running.');
 		return;
 	}
-	const label = describeTargets(targets);
+	const label = options?.label ?? describeTargets(targets);
+	// Context commands may narrow the run (scope folder, single note, custom
+	// output path) without touching the persisted settings.
+	const effectiveSettings: ExporterSettings = options?.settingsOverride
+		? { ...ctx.settings, ...options.settingsOverride }
+		: ctx.settings;
 	const controller = new AbortController();
 	running = controller;
 	const startedAt = Date.now();
@@ -91,7 +103,7 @@ export async function executeTargets(ctx: UiContext, targets: ExportTarget[]): P
 
 	try {
 		panel.log('Starting: ' + label);
-		result = await runExports(ctx.gateway, ctx.settings, targets, (progress) => {
+		result = await runExports(ctx.gateway, effectiveSettings, targets, (progress) => {
 			panel.update(progress.current, progress.total, progress.stage, progress.currentFile);
 			panel.log(progress.log);
 		}, controller.signal);

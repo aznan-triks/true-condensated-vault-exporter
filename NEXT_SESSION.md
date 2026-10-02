@@ -3,8 +3,9 @@
 ## État courant
 - Dépôt distant connecté : `aznan-triks/true-condensated-vault-exporter` (branche `main`).
 - **v2.0.0** livrée et synchronisée sur GitHub (session 2026-10-02, branche Arena `arena/01a0fc6f-true-condensated-vault-exporte` — merge à faire vers `main` si le workflow l'exige).
-- `npm run check` vert : 59 tests (2 fichiers), typecheck, build production (bundle 54 KB, external `fs`/`path`/`zlib`).
+- `npm run check` vert : 63 tests (2 fichiers), typecheck, build production (bundle ~56 KB, external `fs`/`path`/`zlib`).
 - ZIP validé avec `python3 zipfile` (intégrité CRC, deflate, noms d'entrées) sur un coffre de démo (4 notes + canvas).
+- Performance mesurée : 2000 notes + 50 blocs dataview (avec WHERE) nettoyés + rendus en ~400 ms.
 - Prochaine tâche prioritaire : essai réel dans le coffre World of Trois (checklist UI de `CONTEXT.md`) + merge vers `main`.
 
 ## Dernière session (2026-10-02) — refonte v2.0
@@ -13,6 +14,9 @@
 - **Réglages exposés** : `customCss` (textarea) et `yieldEvery` (Advanced) — définis mais injoignables avant.
 - Persistance : `saveData` passe de `{settings}` à `{settings, history}` ; lecture rétro-compatible avec l'ancien format.
 - APIs Obsidian internes typées localement : `Shell.revealInFileExplorer`, `app.setting`, `SettingTab.id` (`src/obsidian/obsidian-internal.d.ts`).
+- **Deuxième salve (même session)** :
+  - Commandes contextuelles : « Export current note's folder (all targets) » et « Export current note as clean Markdown » — overrides de réglages en mémoire (`settingsOverride` dans `executeTargets`), nouveaux champ `ExporterSettings.onlyFile` + `FilterOptions.onlyPath`.
+  - Recherche client-side dans l'HTML exporté : input dans le TOC, filtrage des articles + entrées TOC, compteur visible (script inline zéro dépendance, testé avec un DOM stub).
 
 ## Écarts / limites connues
 - Pas testé dans Obsidian (aucune capture) : sidebar, panneau, « Open folder », réglages — checklist à faire dans le coffre World of Trois.

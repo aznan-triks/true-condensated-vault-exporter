@@ -32,6 +32,7 @@ export class ObsidianVaultGateway implements ExportGateway {
 				excludedPrefixes: settings.excludedPrefixes,
 				includeCanvas: settings.includeCanvas,
 				reservedPaths: reserved,
+				onlyPath: settings.onlyFile,
 			})) {
 				return false;
 			}

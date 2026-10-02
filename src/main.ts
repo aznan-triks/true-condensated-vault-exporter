@@ -8,6 +8,7 @@ import { ObsidianVaultGateway } from './obsidian/vaultGateway';
 import {
 	EXPORT_COMMANDS,
 	executeExportCommand,
+	executeTargets,
 	cancelRunningExport,
 	UiContext,
 } from './commands/registry';
@@ -56,6 +57,47 @@ export default class VaultExporterPlugin extends Plugin {
 				},
 			});
 		}
+
+		this.addCommand({
+			id: 'export-active-folder',
+			name: 'Export current note\'s folder (all targets)',
+			icon: 'folder',
+			callback: async () => {
+				const file = this.app.workspace.getActiveFile();
+				if (!file) {
+					new Notice('Open a note first.');
+					return;
+				}
+				const folder = file.parent?.path ?? '';
+				await executeTargets(this.getUiContext(), ['all'], {
+					settingsOverride: { scopeRoot: folder },
+					label: 'Export folder: ' + (folder || '(root)'),
+				});
+			},
+		});
+
+		this.addCommand({
+			id: 'export-active-note',
+			name: 'Export current note as clean Markdown',
+			icon: 'file-plus',
+			callback: async () => {
+				const file = this.app.workspace.getActiveFile();
+				if (!file || !file.path.endsWith('.md')) {
+					new Notice('Open a markdown note first.');
+					return;
+				}
+				const dir = file.parent?.path ?? '';
+				const outPath = (dir ? dir + '/' : '') + file.name.replace(/\.md$/i, '') + ' (clean export).md';
+				await executeTargets(this.getUiContext(), ['markdown'], {
+					settingsOverride: {
+						scopeRoot: '',
+						onlyFile: file.path,
+						markdownOutputPath: outPath,
+					},
+					label: 'Clean export: ' + file.name,
+				});
+			},
+		});
 
 		this.addCommand({
 			id: 'cancel-export',
