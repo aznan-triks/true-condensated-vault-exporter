@@ -1,9 +1,9 @@
 {
   "id": "vault-exporter",
   "name": "Vault Exporter",
-  "version": "1.1.0",
+  "version": "2.0.0",
   "minAppVersion": "1.7.2",
-  "description": "Modular and customizable Obsidian vault exporter for NotebookLM, HTML, Markdown and split outputs.",
+  "description": "Export your vault to NotebookLM text, a styled HTML document, consolidated Markdown, split files, or a single ZIP bundle — with in-memory Dataview rendering, tag scoping, export history and live scope preview.",
   "author": "aznan-triks",
   "isDesktopOnly": true
 }

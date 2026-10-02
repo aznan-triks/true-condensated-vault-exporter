@@ -18,7 +18,7 @@ const SEPARATOR = '----------------------------------------';
 const ROOT_GROUP = 'Root';
 
 function joinPath(base: string, rel: string): string {
-	return base.replace(/[\/]+$/, '') + '/' + rel;
+	return base.replace(/[\\/]+$/, '') + '/' + rel;
 }
 
 function relativeToScope(notePath: string, scopeRoot: string): string {
@@ -48,11 +48,11 @@ export function buildSplitFiles(notes: CleanedNote[], settings: ExporterSettings
 	}
 
 	return [...groups.entries()].map(([group, groupNotes]) => {
-		const lines = [RULE, 'CATEGORY : ' + group, 'Documents : ' + groupNotes.length, RULE + '\n'];
+		const lines = [RULE, 'Folder : ' + group, 'Documents : ' + groupNotes.length, RULE + '\n'];
 		for (const note of groupNotes) {
-			lines.push('\n' + SEPARATOR, note.title, SEPARATOR + '\n', note.body, '\n');
+			lines.push('\n' + SEPARATOR, note.title, ' (' + note.path + ')', SEPARATOR + '\n', note.body, '\n');
 		}
-		const safeName = group.replace(/[<>:"/\|?*]/g, '_') + '.txt';
+		const safeName = group.replace(/[<>:"/\\|?*]/g, '_') + '.txt';
 		return { path: joinPath(base, safeName), content: lines.join('\n') };
 	});
 }

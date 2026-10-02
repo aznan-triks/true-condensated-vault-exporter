@@ -1,11 +1,16 @@
 /**
  * Single note-cleaning pipeline shared by every export format.
  * Pure TypeScript — no Obsidian imports allowed.
+ *
+ * The orchestrator builds an `ExportContext` once per run: every note's
+ * frontmatter is parsed exactly once (`parseVault`) and shared by the
+ * cleaner and the dataview engine.
  */
 
-import { ExporterSettings, FileMetadata, VaultFile } from './types';
-import { parseFrontmatter } from './frontmatter';
-import { transformWikilinks } from './wikilink';
+import { ExporterSettings, FileMetadata, ParsedFile, VaultFile } from './types';
+import { defaultFileMetadata, parseFrontmatter } from './frontmatter';
+import { buildLinkResolver, transformWikilinks } from './wikilink';
+import { normalizePath } from './filter';
 import { removeComments, cleanCallouts, sanitizeWhitespace } from './markdownClean';
 import { renderDataviewBlocks } from './dataviewEngine';
 import { parseCanvasContent } from './canvasParser';
@@ -21,37 +26,70 @@ export interface CleanedNote {
 	body: string;
 }
 
-export function cleanNote(file: VaultFile, allFiles: VaultFile[], settings: ExporterSettings): CleanedNote {
-	const baseName = file.name.replace(/\.(md|canvas)$/, '');
+/** What the cleaning pipeline and formatters need for one export run. */
+export interface ExportContext {
+	/** Every loaded file, parsed once */
+	parsed: ParsedFile[];
+	/** Resolves wikilink targets to real vault paths */
+	resolver: (target: string) => string | undefined;
+	settings: ExporterSettings;
+}
+
+/** Parses frontmatter of every loaded file exactly once. */
+export function parseVault(files: VaultFile[]): ParsedFile[] {
+	return files.map((file) => {
+		const parsed = parseFrontmatter(file.content);
+		const normPath = normalizePath(file.path);
+		const parts = normPath.split('/');
+		return {
+			path: normPath,
+			name: file.name.replace(/\.(md|canvas)$/i, ''),
+			folder: parts.length > 1 ? parts.slice(0, -1).join('/') : '',
+			metadata: parsed.metadata,
+			mtime: file.mtime,
+		};
+	});
+}
+
+export function createExportContext(files: VaultFile[], settings: ExporterSettings): ExportContext {
+	return {
+		parsed: parseVault(files),
+		resolver: buildLinkResolver(files),
+		settings,
+	};
+}
+
+export function cleanNote(file: VaultFile, ctx: ExportContext): CleanedNote {
+	const { settings, parsed, resolver } = ctx;
+	const baseName = file.name.replace(/\.(md|canvas)$/i, '');
 
 	if (file.path.endsWith('.canvas')) {
-		const parsedCanvas = parseFrontmatter('');
 		return {
 			path: file.path,
 			title: baseName,
 			isCanvas: true,
-			metadata: parsedCanvas.metadata,
+			metadata: defaultFileMetadata(),
 			rawFrontmatter: '',
 			body: parseCanvasContent(file.content),
 		};
 	}
 
-	const parsed = parseFrontmatter(file.content);
-	let body = parsed.contentWithoutFrontmatter;
+	const result = parseFrontmatter(file.content);
+	let body = result.contentWithoutFrontmatter;
 	if (settings.renderDataview) {
-		body = renderDataviewBlocks(body, allFiles);
+		body = renderDataviewBlocks(body, parsed);
 	}
 	body = removeComments(body);
 	body = cleanCallouts(body);
-	body = transformWikilinks(body, settings.wikilinkFormat);
+	body = transformWikilinks(body, settings.wikilinkFormat, resolver);
 	body = sanitizeWhitespace(body);
 
 	return {
 		path: file.path,
-		title: parsed.metadata.title || baseName,
+		title: result.metadata.title || baseName,
 		isCanvas: false,
-		metadata: parsed.metadata,
-		rawFrontmatter: parsed.rawFrontmatter ?? '',
+		metadata: result.metadata,
+		rawFrontmatter: result.rawFrontmatter ?? '',
 		body,
 	};
 }

@@ -30,7 +30,7 @@ export class VaultExporterSettingsTab extends PluginSettingTab {
 				});
 			});
 
-		// SECTION 2: SCOPE & EXCLUSIONS
+		// SECTION: SCOPE & EXCLUSIONS
 		containerEl.createEl('h3', { text: 'Scope & Exclusions' });
 
 		new Setting(containerEl)
@@ -46,7 +46,18 @@ export class VaultExporterSettingsTab extends PluginSettingTab {
 				new VaultPathSuggest(this.app, text.inputEl, () => this.plugin.gateway.getAllFolders());
 			});
 
-		// Excluded Folders List
+		new Setting(containerEl)
+			.setName('Scope Tag')
+			.setDesc('When set, only notes carrying this tag (body or frontmatter) are exported. Canvas files are excluded while a tag is active.')
+			.addText((text) => {
+				text.setValue(this.plugin.settings.scopeTag);
+				text.setPlaceholder('e.g. #chronologie or chronologie');
+				text.onChange(async (val) => {
+					this.plugin.settings.scopeTag = val.trim();
+					await this.plugin.saveSettings();
+				});
+			});
+
 		this.renderStringListSetting(
 			containerEl,
 			'Excluded Folders',
@@ -59,7 +70,6 @@ export class VaultExporterSettingsTab extends PluginSettingTab {
 			}
 		);
 
-		// Excluded Files List
 		this.renderStringListSetting(
 			containerEl,
 			'Excluded Files',
@@ -72,7 +82,6 @@ export class VaultExporterSettingsTab extends PluginSettingTab {
 			}
 		);
 
-		// Excluded Prefixes List
 		this.renderStringListSetting(
 			containerEl,
 			'Excluded Folder Prefixes',
@@ -85,7 +94,7 @@ export class VaultExporterSettingsTab extends PluginSettingTab {
 			}
 		);
 
-		// SECTION 3: OUTPUT PATHS & SPLIT MODE
+		// SECTION: OUTPUT PATHS & SPLIT MODE
 		containerEl.createEl('h3', { text: 'Output Paths & Split Options' });
 
 		new Setting(containerEl)
@@ -119,6 +128,18 @@ export class VaultExporterSettingsTab extends PluginSettingTab {
 				text.setValue(this.plugin.settings.markdownOutputPath);
 				text.onChange(async (val) => {
 					this.plugin.settings.markdownOutputPath = val.trim();
+					await this.plugin.saveSettings();
+				});
+				new VaultPathSuggest(this.app, text.inputEl, () => this.plugin.gateway.getAllFiles());
+			});
+
+		new Setting(containerEl)
+			.setName('ZIP Bundle Output')
+			.setDesc('Where the ZIP bundle (all consolidated formats + split files) is written. Vault-relative or absolute path.')
+			.addText((text) => {
+				text.setValue(this.plugin.settings.zipOutputPath);
+				text.onChange(async (val) => {
+					this.plugin.settings.zipOutputPath = val.trim();
 					await this.plugin.saveSettings();
 				});
 				new VaultPathSuggest(this.app, text.inputEl, () => this.plugin.gateway.getAllFiles());
@@ -162,12 +183,12 @@ export class VaultExporterSettingsTab extends PluginSettingTab {
 				new VaultPathSuggest(this.app, text.inputEl, () => this.plugin.gateway.getAllFolders());
 			});
 
-		// SECTION 4: MARKDOWN PROCESSING & ADVANCED
-		containerEl.createEl('h3', { text: 'Markdown Processing & Lore Formatting' });
+		// SECTION: MARKDOWN PROCESSING
+		containerEl.createEl('h3', { text: 'Markdown Processing' });
 
 		new Setting(containerEl)
 			.setName('Include Obsidian .canvas Files')
-			.setDesc('Extract text nodes and note links from .canvas files into clean text.')
+			.setDesc('Extract text nodes and note links from .canvas files into clean text (visual reading order, groups as sections).')
 			.addToggle((toggle) => {
 				toggle.setValue(this.plugin.settings.includeCanvas);
 				toggle.onChange(async (val) => {
@@ -189,7 +210,7 @@ export class VaultExporterSettingsTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName('Render In-Memory Dataview Queries')
-			.setDesc('Evaluate ```dataview blocks into static markdown tables during export.')
+			.setDesc('Evaluate ```dataview blocks into static markdown tables during export. Supports and/or, comparisons (=, !=, >, <, >=, <=), in (…), like "wild*card", contains/startswith/endswith.')
 			.addToggle((toggle) => {
 				toggle.setValue(this.plugin.settings.renderDataview);
 				toggle.onChange(async (val) => {
@@ -200,12 +221,12 @@ export class VaultExporterSettingsTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName('Wikilink Handling')
-			.setDesc('Format for converting [[wikilinks]]. Canonical-alias preserves target: Lien (Alias).')
+			.setDesc('Format for converting [[wikilinks]]. Canonical-alias preserves target: Lien (Alias). Markdown links resolve to real vault paths.')
 			.addDropdown((drop) => {
 				drop.addOption('canonical-alias', 'Canonical & Alias: Lien (Alias) [Legacy Parity]');
 				drop.addOption('clean-text', 'Clean text (Display alias or note title)');
 				drop.addOption('keep-wikilink', 'Keep raw [[wikilinks]]');
-				drop.addOption('markdown', 'Standard [Markdown](links)');
+				drop.addOption('markdown', 'Standard [Markdown](links) — resolved to real paths');
 				drop.setValue(this.plugin.settings.wikilinkFormat);
 				drop.onChange(async (val) => {
 					this.plugin.settings.wikilinkFormat = val as any;
@@ -213,7 +234,6 @@ export class VaultExporterSettingsTab extends PluginSettingTab {
 				});
 			});
 
-		// Ignored Frontmatter Properties List
 		this.renderStringListSetting(
 			containerEl,
 			'Ignored Frontmatter Properties',
@@ -226,6 +246,36 @@ export class VaultExporterSettingsTab extends PluginSettingTab {
 			},
 			true // Enable quick-add pills for detected frontmatter properties
 		);
+
+		// SECTION: ADVANCED
+		containerEl.createEl('h3', { text: 'Advanced' });
+
+		new Setting(containerEl)
+			.setName('Custom HTML CSS')
+			.setDesc('Extra CSS appended to the HTML export. Use to override the built-in theme (custom properties: --ve-bg, --ve-panel, --ve-text, --ve-accent…).')
+			.addTextArea((area) => {
+				area.setValue(this.plugin.settings.customCss);
+				area.setPlaceholder(':root { --ve-accent: #c0392b; }');
+				area.inputEl.rows = 6;
+				area.inputEl.style.width = '100%';
+				area.onChange(async (val) => {
+					this.plugin.settings.customCss = val;
+					await this.plugin.saveSettings();
+				});
+			});
+
+		new Setting(containerEl)
+			.setName('Yield Every N Notes')
+			.setDesc('Notes processed between two UI yields. Lower = more responsive UI and snappier cancel, slightly slower overall.')
+			.addText((text) => {
+				text.setValue(String(this.plugin.settings.yieldEvery));
+				text.setPlaceholder('25');
+				text.onChange(async (val) => {
+					const n = parseInt(val, 10);
+					this.plugin.settings.yieldEvery = Number.isFinite(n) && n > 0 ? n : 25;
+					await this.plugin.saveSettings();
+				});
+			});
 	}
 
 	private renderStringListSetting(
