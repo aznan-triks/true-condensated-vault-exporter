@@ -2,20 +2,24 @@
 
 ## État courant
 - Dépôt distant connecté : `aznan-triks/true-condensated-vault-exporter` (branche `main`).
-- v1.1.0 commitée et synchronisée sur GitHub avec le compte `aznan-triks`.
-- Scripts de synchronisation 1-clic créés : `sync.bat` (lanceur Windows double-clic) et `sync.ps1` (gestion auth `gh`, pull rebase, checks, commit, push).
-- Installée le 2026-09-29 dans le coffre World of Trois (`C:/Users/Trois/Mon Drive/Trois/World of Trois/.obsidian/plugins/vault-exporter/`).
-- Prochaine tâche prioritaire : essai réel dans ce coffre (checklist UI de `CONTEXT.md`).
-- Init recommandé : light.
+- **v2.0.0** livrée et synchronisée sur GitHub (session 2026-10-02, branche Arena `arena/01a0fc6f-true-condensated-vault-exporte` — merge à faire vers `main` si le workflow l'exige).
+- `npm run check` vert : 59 tests (2 fichiers), typecheck, build production (bundle 54 KB, external `fs`/`path`/`zlib`).
+- ZIP validé avec `python3 zipfile` (intégrité CRC, deflate, noms d'entrées) sur un coffre de démo (4 notes + canvas).
+- Prochaine tâche prioritaire : essai réel dans le coffre World of Trois (checklist UI de `CONTEXT.md`) + merge vers `main`.
 
-## Dernière session
-- 2026-10-02 — connexion au dépôt GitHub `aznan-triks/true-condensated-vault-exporter`, configuration de la branche `main`, nettoyage de l'historique distant (retrait des fichiers accidentels uploadés via l'interface web), création des scripts de synchronisation 1-clic avec bascule automatique du compte `gh auth switch`.
-- 2026-09-29 — refonte v1.1 selon `plans/PLAN_refonte_v1.1.md` : nettoyage unique partagé, formats en table, split via le gateway, annulation, réglages génériques, retrait PDF/Python. `npm run check` vert (25 tests).
+## Dernière session (2026-10-02) — refonte v2.0
+- **Nouveau** : export ZIP bundle (écriture binaire via gateway, zero-dep deflate), multi-cibles dans la sidebar, aperçu de scope en direct (notes/canvases/ko), historique des 5 derniers exports persisté, « Open folder » post-export, `scopeTag` (export par tag), expressions WHERE Dataview (`and`/`or`, `=`, `!=`, `>`, `<`, `>=`, `<=`, `in`, `like`, `contains`/`startswith`/`endswith`, `file.ctime/mtime/day`), HTML réécrit (markdown inline, thème clair/sombre, TOC 2 niveaux, callouts multi-lignes, listes de tâches, impression), canvas en ordre de lecture avec groupes en sections, résolution des liens markdown vers les vrais chemins.
+- **Corrigé** : boucle de ré-export (les sorties sont désormais exclues du périmètre via `reservedOutputPaths`), re-parsing frontmatter O(queries×notes) → index `ParsedFile` partagé par run, lectures séquentielles → batch 8 parallèles, `FROM "#tag"` non reconnu, en-têtes de groupes canvas dupliqués, ancres HTML dupliquées entre notes, écritures disque synchrones, un fichier corrompu arrêtait tout l'export.
+- **Réglages exposés** : `customCss` (textarea) et `yieldEvery` (Advanced) — définis mais injoignables avant.
+- Persistance : `saveData` passe de `{settings}` à `{settings, history}` ; lecture rétro-compatible avec l'ancien format.
+- APIs Obsidian internes typées localement : `Shell.revealInFileExplorer`, `app.setting`, `SettingTab.id` (`src/obsidian/obsidian-internal.d.ts`).
 
-## Écarts
-- Pas testé dans Obsidian (aucune capture) : panneau, bouton Annuler, réglages.
-- Split : les notes à la racine du coffre (Accueil, index…) vont désormais dans un seul `Root.txt` au lieu d'un fichier chacune.
-- `canvasParser.ts` et `dataviewEngine.ts` gardent des libellés FR en dur (« Note liée », « Fichier ») — hors périmètre.
+## Écarts / limites connues
+- Pas testé dans Obsidian (aucune capture) : sidebar, panneau, « Open folder », réglages — checklist à faire dans le coffre World of Trois.
+- Liens markdown résolus relatifs à la racine du coffre ; si le fichier consolidé est dans un sous-dossier, les liens ne remontent pas d'un niveau (documenté dans le README).
+- `scopeTag` exclut les canvases (pas de tags sur les canvas) — comportement assumé, signalé dans la sidebar.
+- Split `individual-files` : une note illisible est skipée (pas de fichier partiel) — rapportée dans le récap.
 
 ## Rappels actifs + Backlog
 - Détection automatique des valeurs en dur / doublons : pas encore de contrôle (seule l'isolation des couches est testée).
+- Idées non traitées (ordre de valeur supposé) : liens markdown relatifs à l'emplacement réel du fichier de sortie ; export « diff » (uniquement les notes modifiées depuis le dernier export, via `mtime`) ; partage de l'historique entre machines (déjà dans le data.json) ; i18n (libellés anglais en dur par choix).

@@ -1,6 +1,7 @@
 /**
  * Wikilink processing logic.
- * Transforms [[Note#Heading|Display]] into target format.
+ * Transforms [[Note#Heading|Display]] into target format, and can resolve
+ * link targets to real vault paths (for markdown/html output).
  */
 
 import { WikilinkFormat } from './types';
@@ -35,6 +36,36 @@ export function extractWikilinks(content: string): WikilinkMatch[] {
 		});
 	}
 	return matches;
+}
+
+/**
+ * Builds a resolver mapping wikilink targets to real vault file paths.
+ * Handles full paths (with or without extension) and bare basenames.
+ */
+export function buildLinkResolver(files: { path: string; name: string }[]): (target: string) => string | undefined {
+	const byPath = new Map<string, string>();
+	const byBasename = new Map<string, string>();
+
+	for (const file of files) {
+		const noExt = file.path.replace(/\.(md|canvas)$/i, '');
+		if (!byPath.has(noExt.toLowerCase())) {
+			byPath.set(noExt.toLowerCase(), file.path);
+		}
+		const base = file.name.replace(/\.(md|canvas)$/i, '');
+		if (base && !byBasename.has(base.toLowerCase())) {
+			byBasename.set(base.toLowerCase(), file.path);
+		}
+	}
+
+	return (target: string): string | undefined => {
+		const t = target.trim();
+		if (!t) return undefined;
+		const full = byPath.get(t.toLowerCase());
+		if (full) return full;
+		const base = t.split('/').pop()?.toLowerCase();
+		if (base) return byBasename.get(base);
+		return undefined;
+	};
 }
 
 export function transformWikilinks(

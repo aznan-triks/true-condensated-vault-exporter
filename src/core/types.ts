@@ -14,6 +14,23 @@ export interface VaultFile {
 	mtime?: number;
 }
 
+/**
+ * A vault file whose metadata was parsed exactly once per run.
+ * Produced by `parseVault` and shared by the cleaning pipeline and the
+ * dataview engine so frontmatter is never re-parsed per query.
+ */
+export interface ParsedFile {
+	/** Vault-relative path, normalized to forward slashes */
+	path: string;
+	/** Basename without extension */
+	name: string;
+	/** Parent folder (normalized, '' for vault root) */
+	folder: string;
+	metadata: FileMetadata;
+	/** Last modified timestamp in ms */
+	mtime?: number;
+}
+
 export type WikilinkFormat = 'clean-text' | 'keep-wikilink' | 'markdown' | 'canonical-alias';
 
 export interface ExporterSettings {
@@ -27,12 +44,16 @@ export interface ExporterSettings {
 	excludedFiles: string[];
 	/** Path prefix substrings that cause exclusion if found anywhere in folder path (e.g. '00_') */
 	excludedPrefixes: string[];
+	/** When non-empty, only notes carrying this tag are exported (canvas files excluded) */
+	scopeTag: string;
 	/** Output path for NotebookLM consolidated file (vault-relative or absolute) */
 	notebooklmOutputPath: string;
 	/** Output path for HTML consolidated file */
 	htmlOutputPath: string;
 	/** Output path for Markdown consolidated file */
 	markdownOutputPath: string;
+	/** Output path for the ZIP bundle of all formats (vault-relative or absolute) */
+	zipOutputPath: string;
 	/** Split mode: 'folder-grouped' (.txt per top folder under scope) or 'individual-files' (1-to-1 .md) */
 	splitMode: 'folder-grouped' | 'individual-files';
 	/** Folder whose direct subfolders become split groups (empty = scope root) */
@@ -61,9 +82,11 @@ export const DEFAULT_SETTINGS: ExporterSettings = {
 	excludedFolders: ['.obsidian', '.trash', '.git'],
 	excludedFiles: [],
 	excludedPrefixes: [],
+	scopeTag: '',
 	notebooklmOutputPath: 'Vault export - NotebookLM.txt',
 	htmlOutputPath: 'Vault export.html',
 	markdownOutputPath: 'Vault export.md',
+	zipOutputPath: 'Vault export.zip',
 	splitMode: 'folder-grouped',
 	splitGroupFolder: '',
 	splitOutputFolder: 'Vault export - split',
@@ -117,4 +140,10 @@ export interface ExportGateway {
 	loadVaultFiles(settings: ExporterSettings): Promise<VaultFile[]>;
 	/** Writes a text file to a vault-relative or absolute path, creating parent folders. */
 	writeFile(targetPath: string, content: string): Promise<void>;
+	/** Writes binary data (e.g. a ZIP archive) to a vault-relative or absolute path. */
+	writeBinary(targetPath: string, data: Uint8Array): Promise<void>;
+	/** Light-weight listing (path + size, no content read) for stats/preview UIs. */
+	getVaultFilesInfo?(): { path: string; size: number }[];
+	/** OS path for a vault-relative or absolute output, when revealable on this platform. */
+	revealOutput?(targetPath: string): string | null;
 }

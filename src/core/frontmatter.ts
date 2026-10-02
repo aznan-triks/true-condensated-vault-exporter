@@ -13,6 +13,16 @@ export interface FrontmatterResult {
 
 const FRONTMATTER_REGEX = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/;
 
+export function defaultFileMetadata(): FileMetadata {
+	return {
+		title: '',
+		category: '',
+		order: '',
+		tags: [],
+		custom: {},
+	};
+}
+
 function stripQuotes(str: string): string {
 	const trimmed = str.trim();
 	if (
@@ -26,30 +36,17 @@ function stripQuotes(str: string): string {
 
 export function parseFrontmatter(content: string): FrontmatterResult {
 	const match = content.match(FRONTMATTER_REGEX);
-	const defaultMetadata: FileMetadata = {
-		title: '',
-		category: '',
-		order: '',
-		tags: [],
-		custom: {},
-	};
 
 	if (!match || !match[1]) {
 		return {
-			metadata: defaultMetadata,
+			metadata: defaultFileMetadata(),
 			contentWithoutFrontmatter: content,
 		};
 	}
 
 	const rawFrontmatter = match[1];
 	const contentWithoutFrontmatter = content.slice(match[0].length);
-	const metadata: FileMetadata = {
-		title: '',
-		category: '',
-		order: '',
-		tags: [],
-		custom: {},
-	};
+	const metadata: FileMetadata = defaultFileMetadata();
 
 	const lines = rawFrontmatter.split(/\r?\n/);
 	let currentArrayKey: string | null = null;

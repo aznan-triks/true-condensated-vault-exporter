@@ -1,6 +1,7 @@
 /**
  * Vault file filtering logic.
- * Enforces dynamic blacklist rules for folders, files, and prefixes.
+ * Enforces dynamic blacklist rules for folders, files, and prefixes,
+ * plus protection against re-exporting previous export outputs.
  */
 
 export interface FilterOptions {
@@ -9,6 +10,13 @@ export interface FilterOptions {
 	excludedFiles: string[];
 	excludedPrefixes: string[];
 	includeCanvas?: boolean;
+	/**
+	 * Configured output locations (consolidated files, ZIP, split folder)
+	 * expressed as vault-relative paths. Any file equal to, or inside, one
+	 * of these paths is never exported — this prevents previous exports
+	 * from being re-ingested on the next run (feedback loop).
+	 */
+	reservedPaths?: string[];
 }
 
 /**
@@ -47,7 +55,16 @@ export function isFileIncluded(relativePath: string, options: FilterOptions): bo
 		}
 	}
 
-	// 2. Check excluded files (match against full path or just filename)
+	// 2. Reserved output paths (previous export results) are never exported again
+	for (const reserved of options.reservedPaths ?? []) {
+		const normReserved = normalizePath(reserved);
+		if (!normReserved) continue;
+		if (normPath === normReserved || normPath.startsWith(normReserved + '/')) {
+			return false;
+		}
+	}
+
+	// 3. Check excluded files (match against full path or just filename)
 	for (const excludedFile of options.excludedFiles) {
 		const normExcluded = normalizePath(excludedFile);
 		if (!normExcluded) continue;
@@ -58,18 +75,18 @@ export function isFileIncluded(relativePath: string, options: FilterOptions): bo
 		}
 	}
 
-	// 3. Check hidden folders or system directories
+	// 4. Check hidden folders or system directories
 	for (const part of parts.slice(0, -1)) {
 		if (part.startsWith('.')) {
 			return false;
 		}
 	}
 
-	// 4. Check excluded folders (exact match or path contains folder)
+	// 5. Check excluded folders (exact match or path contains folder)
 	for (const excludedFolder of options.excludedFolders) {
 		const normExcluded = normalizePath(excludedFolder);
 		if (!normExcluded) continue;
-		
+
 		// Full parent folder match
 		if (parentFolder.toLowerCase() === normExcluded.toLowerCase()) {
 			return false;
@@ -86,7 +103,7 @@ export function isFileIncluded(relativePath: string, options: FilterOptions): bo
 		}
 	}
 
-	// 5. Check excluded prefixes on any folder part
+	// 6. Check excluded prefixes on any folder part
 	for (const prefix of options.excludedPrefixes) {
 		if (!prefix) continue;
 		const lowPrefix = prefix.toLowerCase();
@@ -98,4 +115,24 @@ export function isFileIncluded(relativePath: string, options: FilterOptions): bo
 	}
 
 	return true;
+}
+
+/**
+ * Builds the list of output locations that must be protected from export,
+ * from the current settings.
+ */
+export function reservedOutputPaths(settings: {
+	notebooklmOutputPath: string;
+	htmlOutputPath: string;
+	markdownOutputPath: string;
+	zipOutputPath: string;
+	splitOutputFolder: string;
+}): string[] {
+	return [
+		settings.notebooklmOutputPath,
+		settings.htmlOutputPath,
+		settings.markdownOutputPath,
+		settings.zipOutputPath,
+		settings.splitOutputFolder,
+	].filter((p) => p && p.trim().length > 0);
 }
