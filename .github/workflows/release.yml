@@ -1,0 +1,75 @@
+name: Release
+
+# Builds the plugin and attaches the files Obsidian needs
+# (main.js, manifest.json, styles.css) to the GitHub release.
+#
+# Triggers:
+#   - automatically when a `v*` tag is pushed
+#   - manually (workflow_dispatch) with the tag of an existing release,
+#     e.g. to (re)attach assets to a release that was created without them.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to attach the assets to (e.g. v2.0.1)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve tag
+        id: tag
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "tag=${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+          elif [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=v$(node -p "require('./manifest.json').version")" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.tag.outputs.tag }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Check manifest version matches tag
+        run: |
+          TAG="${{ steps.tag.outputs.tag }}"
+          VERSION=$(node -p "require('./manifest.json').version")
+          if [ "v$VERSION" != "$TAG" ]; then
+            echo "::error::manifest.json version ($VERSION) does not match tag ($TAG)"
+            exit 1
+          fi
+
+      - name: Upload assets to release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ steps.tag.outputs.tag }}"
+          if ! gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --title "$TAG" --generate-notes
+          fi
+          gh release upload "$TAG" main.js manifest.json styles.css \
+            --repo "$GITHUB_REPOSITORY" --clobber
