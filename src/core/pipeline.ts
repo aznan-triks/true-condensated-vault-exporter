@@ -30,6 +30,8 @@ export interface CleanedNote {
 export interface ExportContext {
 	/** Every loaded file, parsed once */
 	parsed: ParsedFile[];
+	/** Fast lookup so each note reuses its parsed frontmatter and body */
+	parsedByPath: Map<string, ParsedFile>;
 	/** Resolves wikilink targets to real vault paths */
 	resolver: (target: string) => string | undefined;
 	settings: ExporterSettings;
@@ -46,24 +48,30 @@ export function parseVault(files: VaultFile[]): ParsedFile[] {
 			name: file.name.replace(/\.(md|canvas)$/i, ''),
 			folder: parts.length > 1 ? parts.slice(0, -1).join('/') : '',
 			metadata: parsed.metadata,
+			body: parsed.contentWithoutFrontmatter,
+			rawFrontmatter: parsed.rawFrontmatter ?? '',
 			mtime: file.mtime,
+			ctime: file.ctime,
 		};
 	});
 }
 
 export function createExportContext(files: VaultFile[], settings: ExporterSettings): ExportContext {
+	const parsed = parseVault(files);
 	return {
-		parsed: parseVault(files),
+		parsed,
+		parsedByPath: new Map(parsed.map((file) => [file.path, file])),
 		resolver: buildLinkResolver(files),
 		settings,
 	};
 }
 
 export function cleanNote(file: VaultFile, ctx: ExportContext): CleanedNote {
-	const { settings, parsed, resolver } = ctx;
+	const { settings, parsed, parsedByPath, resolver } = ctx;
 	const baseName = file.name.replace(/\.(md|canvas)$/i, '');
+	const isCanvas = file.path.toLowerCase().endsWith('.canvas');
 
-	if (file.path.endsWith('.canvas')) {
+	if (isCanvas) {
 		return {
 			path: file.path,
 			title: baseName,
@@ -74,8 +82,11 @@ export function cleanNote(file: VaultFile, ctx: ExportContext): CleanedNote {
 		};
 	}
 
-	const result = parseFrontmatter(file.content);
-	let body = result.contentWithoutFrontmatter;
+	const source = parsedByPath.get(normalizePath(file.path));
+	if (!source) {
+		throw new Error('The note was not included in the parsed export context: ' + file.path);
+	}
+	let body = source.body ?? '';
 	if (settings.renderDataview) {
 		body = renderDataviewBlocks(body, parsed);
 	}
@@ -85,11 +96,11 @@ export function cleanNote(file: VaultFile, ctx: ExportContext): CleanedNote {
 	body = sanitizeWhitespace(body);
 
 	return {
-		path: file.path,
-		title: result.metadata.title || baseName,
+		path: normalizePath(file.path),
+		title: source.metadata.title || baseName,
 		isCanvas: false,
-		metadata: result.metadata,
-		rawFrontmatter: result.rawFrontmatter ?? '',
+		metadata: source.metadata,
+		rawFrontmatter: source.rawFrontmatter ?? '',
 		body,
 	};
 }
@@ -103,6 +114,7 @@ export function visibleMetadata(note: CleanedNote, settings: ExporterSettings): 
 	const pairs: [string, string][] = [];
 	if (meta.category) pairs.push(['Category', meta.category]);
 	if (meta.order) pairs.push(['Order', meta.order]);
+	if (meta.status) pairs.push(['Status', meta.status]);
 	if (meta.tags.length > 0) pairs.push(['Tags', meta.tags.join(', ')]);
 	const ignored = new Set(settings.ignoredProperties.map((p) => p.toLowerCase()));
 	for (const [k, v] of Object.entries(meta.custom)) {

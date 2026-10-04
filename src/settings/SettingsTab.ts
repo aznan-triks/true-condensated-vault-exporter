@@ -51,7 +51,7 @@ export class VaultExporterSettingsTab extends PluginSettingTab {
 			.setDesc('When set, only notes carrying this tag (body or frontmatter) are exported. Canvas files are excluded while a tag is active.')
 			.addText((text) => {
 				text.setValue(this.plugin.settings.scopeTag);
-				text.setPlaceholder('e.g. #chronologie or chronologie');
+				text.setPlaceholder('e.g. #research or research');
 				text.onChange(async (val) => {
 					this.plugin.settings.scopeTag = val.trim();
 					await this.plugin.saveSettings();
@@ -99,7 +99,7 @@ export class VaultExporterSettingsTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName('NotebookLM Consolidated Output')
-			.setDesc('Relative path from vault root for the NotebookLM text file.')
+			.setDesc('Vault-relative path, or an absolute file path on desktop, for the NotebookLM text file.')
 			.addText((text) => {
 				text.setValue(this.plugin.settings.notebooklmOutputPath);
 				text.onChange(async (val) => {
@@ -111,7 +111,7 @@ export class VaultExporterSettingsTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName('HTML Consolidated Output')
-			.setDesc('Relative path from vault root for the HTML document.')
+			.setDesc('Vault-relative path, or an absolute file path on desktop, for the HTML document.')
 			.addText((text) => {
 				text.setValue(this.plugin.settings.htmlOutputPath);
 				text.onChange(async (val) => {
@@ -123,7 +123,7 @@ export class VaultExporterSettingsTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName('Markdown Consolidated Output')
-			.setDesc('Relative path from vault root for the single unified Markdown (.md) document.')
+			.setDesc('Vault-relative path, or an absolute file path on desktop, for the consolidated Markdown document.')
 			.addText((text) => {
 				text.setValue(this.plugin.settings.markdownOutputPath);
 				text.onChange(async (val) => {
@@ -147,14 +147,16 @@ export class VaultExporterSettingsTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName('Split Export Mode')
-			.setDesc('Folder-grouped: one consolidated .txt per category . Individual: 1-to-1 markdown notes.')
+			.setDesc('Choose one text file per top-level folder, or one cleaned Markdown file for each note.')
 			.addDropdown((drop) => {
 				drop.addOption('folder-grouped', 'Folder-grouped (1 .txt per category folder)');
 				drop.addOption('individual-files', 'Individual notes (1-to-1 markdown files)');
 				drop.setValue(this.plugin.settings.splitMode);
 				drop.onChange(async (val) => {
-					this.plugin.settings.splitMode = val as any;
-					await this.plugin.saveSettings();
+					if (val === 'folder-grouped' || val === 'individual-files') {
+						this.plugin.settings.splitMode = val;
+						await this.plugin.saveSettings();
+					}
 				});
 			});
 
@@ -221,16 +223,18 @@ export class VaultExporterSettingsTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName('Wikilink Handling')
-			.setDesc('Format for converting [[wikilinks]]. Canonical-alias preserves target: Lien (Alias). Markdown links resolve to real vault paths.')
+			.setDesc('Format for converting [[wikilinks]]. Canonical-alias shows the note title and alias as Title (Alias). Markdown links resolve to real vault paths.')
 			.addDropdown((drop) => {
-				drop.addOption('canonical-alias', 'Canonical & Alias: Lien (Alias) [Legacy Parity]');
+				drop.addOption('canonical-alias', 'Note title and alias: Title (Alias)');
 				drop.addOption('clean-text', 'Clean text (Display alias or note title)');
 				drop.addOption('keep-wikilink', 'Keep raw [[wikilinks]]');
 				drop.addOption('markdown', 'Standard [Markdown](links) — resolved to real paths');
 				drop.setValue(this.plugin.settings.wikilinkFormat);
 				drop.onChange(async (val) => {
-					this.plugin.settings.wikilinkFormat = val as any;
-					await this.plugin.saveSettings();
+					if (val === 'canonical-alias' || val === 'clean-text' || val === 'keep-wikilink' || val === 'markdown') {
+						this.plugin.settings.wikilinkFormat = val;
+						await this.plugin.saveSettings();
+					}
 				});
 			});
 

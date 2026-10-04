@@ -6,11 +6,21 @@
 
 import { App, FileSystemAdapter, TFile, normalizePath, Platform, Shell } from 'obsidian';
 import { ExportGateway, ExporterSettings, VaultFile } from '../core/types';
-import { isFileIncluded, reservedOutputPaths } from '../core/filter';
+import { isFileIncluded, isTagScopeMatch, reservedOutputPaths } from '../core/filter';
 import * as fs from 'fs';
 import * as path from 'path';
 
 const READ_CONCURRENCY = 8;
+
+function normalizeVaultTarget(targetPath: string): string {
+	const raw = targetPath.replace(/\\/g, '/');
+	if (raw.split('/').includes('..')) {
+		throw new Error('Vault-relative output paths cannot contain ".." segments.');
+	}
+	const normalized = normalizePath(raw);
+	if (!normalized) throw new Error('Output path cannot be empty.');
+	return normalized;
+}
 
 export class ObsidianVaultGateway implements ExportGateway {
 	constructor(private readonly app: App) {}
@@ -20,9 +30,14 @@ export class ObsidianVaultGateway implements ExportGateway {
 	 * Reads are batched for throughput; individual read failures are
 	 * skipped (and reported to the console) instead of aborting the run.
 	 */
-	async loadVaultFiles(settings: ExporterSettings): Promise<VaultFile[]> {
+	async loadVaultFiles(
+		settings: ExporterSettings,
+		signal?: AbortSignal,
+		onProgress?: (current: number, total: number, currentFile?: string) => void,
+		onSkipped?: (path: string, message: string) => void
+	): Promise<VaultFile[]> {
 		const reserved = reservedOutputPaths(settings);
-		const tag = settings.scopeTag?.replace(/^#/, '').trim().toLowerCase();
+		const tag = settings.scopeTag?.replace(/^#+/, '').trim().toLowerCase();
 
 		const candidates = this.app.vault.getFiles().filter((file) => {
 			if (!isFileIncluded(file.path, {
@@ -36,14 +51,14 @@ export class ObsidianVaultGateway implements ExportGateway {
 			})) {
 				return false;
 			}
-			if (tag && !file.path.endsWith('.canvas') && !this.fileHasTag(file, tag)) {
-				return false;
-			}
-			return true;
+			return !tag || isTagScopeMatch(file.path, this.fileTags(file), tag);
 		});
 
 		const result: VaultFile[] = [];
+		let completed = 0;
+		onProgress?.(0, candidates.length);
 		for (let i = 0; i < candidates.length; i += READ_CONCURRENCY) {
+			if (signal?.aborted) break;
 			const batch = candidates.slice(i, i + READ_CONCURRENCY);
 			const settled = await Promise.all(batch.map(async (file) => {
 				try {
@@ -51,7 +66,8 @@ export class ObsidianVaultGateway implements ExportGateway {
 					return { file, content };
 				} catch (err: unknown) {
 					const msg = err instanceof Error ? err.message : String(err);
-					console.warn('[vault-exporter] Could not read ' + file.path + ' : ' + msg);
+					console.warn('[vault-exporter] Could not read ' + file.path + ': ' + msg);
+					onSkipped?.(file.path, msg);
 					return null;
 				}
 			}));
@@ -62,8 +78,14 @@ export class ObsidianVaultGateway implements ExportGateway {
 						name: item.file.name,
 						content: item.content,
 						mtime: item.file.stat.mtime,
+						ctime: item.file.stat.ctime,
 					});
 				}
+			}
+			completed += batch.length;
+			onProgress?.(completed, candidates.length, batch[batch.length - 1]?.path);
+			if (i + READ_CONCURRENCY < candidates.length && !signal?.aborted) {
+				await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
 			}
 		}
 
@@ -72,17 +94,16 @@ export class ObsidianVaultGateway implements ExportGateway {
 		return result;
 	}
 
-	/** True when the file carries the (lowercase, tagless) tag in body or frontmatter. */
-	private fileHasTag(file: TFile, tag: string): boolean {
+	/** Returns tags from the body and frontmatter cache. */
+	private fileTags(file: TFile): string[] {
 		const cache = this.app.metadataCache.getFileCache(file);
-		if (!cache) return false;
-		const bodyTags = (cache.tags ?? []).map((t) => t.tag.toLowerCase());
+		if (!cache) return [];
+		const bodyTags = (cache.tags ?? []).map((item) => item.tag);
 		const fm = cache.frontmatter?.tags;
 		const fmTags = Array.isArray(fm)
-			? fm.map((t) => String(t).toLowerCase())
-			: typeof fm === 'string' ? [fm.toLowerCase()] : [];
-		const all = [...bodyTags, ...fmTags];
-		return all.some((t) => t === tag || t.startsWith(tag + '/'));
+			? fm.map((value) => String(value))
+			: typeof fm === 'string' ? [fm] : [];
+		return [...bodyTags, ...fmTags];
 	}
 
 	/**
@@ -135,12 +156,16 @@ export class ObsidianVaultGateway implements ExportGateway {
 			return;
 		}
 
-		await this.writeInVault(normalizePath(targetPath), async () => {
-			const existing = this.app.vault.getAbstractFileByPath(normalizePath(targetPath));
+		const norm = normalizeVaultTarget(targetPath);
+		await this.writeInVault(norm, async () => {
+			const existing = this.app.vault.getAbstractFileByPath(norm);
+			if (existing && !(existing instanceof TFile)) {
+				throw new Error('Output path is already a folder: ' + norm);
+			}
 			if (existing instanceof TFile) {
 				await this.app.vault.modify(existing, content);
 			} else {
-				await this.app.vault.create(normalizePath(targetPath), content);
+				await this.app.vault.create(norm, content);
 			}
 		});
 	}
@@ -158,9 +183,12 @@ export class ObsidianVaultGateway implements ExportGateway {
 			return;
 		}
 
-		const norm = normalizePath(targetPath);
+		const norm = normalizeVaultTarget(targetPath);
 		await this.writeInVault(norm, async () => {
 			const existing = this.app.vault.getAbstractFileByPath(norm);
+			if (existing && !(existing instanceof TFile)) {
+				throw new Error('Output path is already a folder: ' + norm);
+			}
 			if (existing instanceof TFile) {
 				await this.app.vault.modifyBinary(existing, buffer);
 			} else {
@@ -172,8 +200,10 @@ export class ObsidianVaultGateway implements ExportGateway {
 	/** Ensures the parent folder exists (vault-only paths), then runs the write. */
 	private async writeInVault(norm: string, write: () => Promise<void>): Promise<void> {
 		const parentDir = norm.split('/').slice(0, -1).join('/');
-		if (parentDir && !this.app.vault.getAbstractFileByPath(parentDir)) {
-			await this.app.vault.createFolder(parentDir);
+		if (parentDir) {
+			const parent = this.app.vault.getAbstractFileByPath(parentDir);
+			if (parent instanceof TFile) throw new Error('Output parent is a file: ' + parentDir);
+			if (!parent) await this.app.vault.createFolder(parentDir);
 		}
 		await write();
 	}

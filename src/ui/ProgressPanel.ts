@@ -43,6 +43,7 @@ export class ProgressPanel {
 		this.closeBtn = header.createEl('button', {
 			cls: 've-panel__close',
 			text: '\u00d7',
+			attr: { 'aria-label': 'Close export panel', title: 'Close' },
 		});
 		this.closeBtn.addEventListener('click', () => {
 			if (!this.finished && this.options.onCancel) {
@@ -89,9 +90,9 @@ export class ProgressPanel {
 		row.appendChild(icon);
 		row.appendChild(text);
 
-		this.logEl.prepend(row);
+		this.logEl.appendChild(row);
 		while (this.logEl.children.length > 80) {
-			this.logEl.lastElementChild?.remove();
+			this.logEl.firstElementChild?.remove();
 		}
 		this.logEl.scrollTop = this.logEl.scrollHeight;
 	}
@@ -99,10 +100,9 @@ export class ProgressPanel {
 	finish(outcome: 'success' | 'cancelled' | 'error', summary: string, info?: FinishInfo): void {
 		this.finished = true;
 		this.cancelBtn.hide();
-		const success = outcome !== 'error';
 		this.statusEl.setText(outcome === 'success' ? 'Done' : outcome === 'cancelled' ? 'Cancelled' : 'Failed');
-		this.statusEl.className = 've-panel__status ' + (success ? 've-panel__status--success' : 've-panel__status--error');
-		this.barEl.style.width = '100%';
+		this.statusEl.className = 've-panel__status ve-panel__status--' + outcome;
+		if (outcome === 'success') this.barEl.style.width = '100%';
 
 		const parts: string[] = [summary];
 		if (info?.fileCount !== undefined) {
@@ -125,7 +125,7 @@ export class ProgressPanel {
 			});
 		}
 
-		if (success && this.options.autoCloseMs && this.options.autoCloseMs > 0) {
+		if (outcome === 'success' && this.options.autoCloseMs && this.options.autoCloseMs > 0) {
 			this.timer = window.setTimeout(() => this.destroy(), this.options.autoCloseMs);
 		}
 	}

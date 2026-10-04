@@ -35,7 +35,7 @@ function nodeLine(node: CanvasNode): string | null {
 		return trimmed.length > 0 ? trimmed : null;
 	}
 	if (node.type === 'file' && node.file) {
-		return 'Linked note: ' + node.file.replace(/\.md$/, '');
+		return 'Linked note: ' + node.file.replace(/\.md$/i, '');
 	}
 	if (node.type === 'link' && node.url) {
 		return 'Link: ' + node.url;
@@ -43,16 +43,38 @@ function nodeLine(node: CanvasNode): string | null {
 	return null;
 }
 
-export function parseCanvasContent(rawJson: string): string {
-	let data: CanvasData;
-	try {
-		data = JSON.parse(rawJson) as CanvasData;
-	} catch (err: unknown) {
-		const msg = err instanceof Error ? err.message : String(err);
-		return '(Canvas parse error: ' + msg + ')';
+function isCanvasNode(value: unknown): value is CanvasNode {
+	if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+	const node = value as Record<string, unknown>;
+	if (typeof node.id !== 'string' || !['text', 'file', 'link', 'group'].includes(String(node.type))) return false;
+	if (node.type === 'text' && typeof node.text !== 'string') return false;
+	if (node.type === 'file' && typeof node.file !== 'string') return false;
+	if (node.type === 'link' && typeof node.url !== 'string') return false;
+	if (node.type === 'group' && node.label !== undefined && typeof node.label !== 'string') return false;
+	if (node.group !== undefined && typeof node.group !== 'string') return false;
+	if (node.position !== undefined) {
+		if (!node.position || typeof node.position !== 'object') return false;
+		const position = node.position as Record<string, unknown>;
+		if (typeof position.x !== 'number' || typeof position.y !== 'number') return false;
 	}
+	return true;
+}
 
-	const nodes = data.nodes ?? [];
+export function parseCanvasContent(rawJson: string): string {
+	let data: unknown;
+	try {
+		data = JSON.parse(rawJson) as unknown;
+	} catch {
+		return '(Invalid canvas JSON)';
+	}
+	if (!data || typeof data !== 'object' || Array.isArray(data)) {
+		return '(Invalid canvas: expected a JSON object)';
+	}
+	const rawNodes = (data as CanvasData).nodes;
+	if (rawNodes !== undefined && !Array.isArray(rawNodes)) {
+		return '(Invalid canvas: nodes must be an array)';
+	}
+	const nodes = (rawNodes ?? []).filter(isCanvasNode);
 	if (nodes.length === 0) {
 		return '(Empty canvas)';
 	}

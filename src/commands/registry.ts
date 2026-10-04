@@ -31,7 +31,7 @@ export interface ExporterCommand {
 }
 
 export const EXPORT_COMMANDS: ExporterCommand[] = [
-	{ id: 'export-all', name: 'Run all exports', icon: 'play', target: 'all' },
+	{ id: 'export-all', name: 'Run all non-ZIP exports', icon: 'play', target: 'all' },
 	{ id: 'export-notebooklm', name: 'Export for NotebookLM (consolidated text)', icon: 'file-text', target: 'notebooklm' },
 	{ id: 'export-markdown', name: 'Export as consolidated Markdown', icon: 'file-code', target: 'markdown' },
 	{ id: 'export-html', name: 'Export as HTML document', icon: 'globe', target: 'html' },
@@ -40,7 +40,7 @@ export const EXPORT_COMMANDS: ExporterCommand[] = [
 ];
 
 export const TARGET_LABELS: Record<ExportTarget, string> = {
-	all: 'All exports',
+	all: 'All non-ZIP exports',
 	notebooklm: 'NotebookLM',
 	html: 'HTML',
 	markdown: 'Markdown',
@@ -123,8 +123,13 @@ export async function executeTargets(ctx: UiContext, targets: ExportTarget[], op
 	} catch (err: unknown) {
 		if (err instanceof ExportCancelledError) {
 			outcome = 'cancelled';
+			result = err.partialResult ?? null;
 			panel.log('Export cancelled by user.');
-			panel.finish('cancelled', 'Export cancelled. Files already written were kept.');
+			panel.finish('cancelled', 'Export cancelled. Files already written were kept.', result ? {
+				fileCount: result.written.length,
+				bytes: result.totalBytes,
+				skipped: result.skippedFiles.length,
+			} : undefined);
 			new Notice('Export cancelled.');
 		} else {
 			const msg = err instanceof Error ? err.message : String(err);
