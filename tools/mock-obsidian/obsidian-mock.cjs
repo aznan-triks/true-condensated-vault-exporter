@@ -87,6 +87,12 @@ class ItemView extends Component {
 	getViewType() { return 'unknown'; }
 	getDisplayText() { return ''; }
 	getIcon() { return 'document'; }
+	/**
+	 * Internal Obsidian lifecycle method (not in the public typings). The
+	 * workspace calls `view.open()` when a leaf's view state is applied; a
+	 * subclass field named `open` shadows it and breaks "Failed to open view".
+	 */
+	async open(state) { this.state = state; return this.onOpen(); }
 	async onOpen() {}
 	async onClose() {}
 }
@@ -307,8 +313,13 @@ class WorkspaceLeaf {
 			const factory = this.app.pluginViews?.get(viewState.type);
 			if (!factory) throw new Error('No view registered for type: ' + viewState.type);
 			this.view = factory(this);
-			await this.view.onOpen?.();
 		}
+		// Obsidian's own open path: it calls view.open(state) and lets a
+		// missing method surface as "Failed to open view".
+		if (typeof this.view?.open !== 'function') {
+			throw new TypeError('e.open is not a function');
+		}
+		await this.view.open(viewState);
 		return this;
 	}
 	getViewState() { return this.viewState; }

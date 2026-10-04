@@ -28,7 +28,7 @@ npm run dev      # esbuild watch mode
 | `src/ui/` | Export sidebar, progress panel, path suggestions. |
 | `src/settings/SettingsTab.ts` | Obsidian settings UI. |
 | `tests/` | Core, feature, cancellation, output-safety, gateway integration, and architecture regression tests. |
-| `tools/mock-obsidian/` | Development-only mock of the Obsidian runtime (jsdom DOM helpers, API mock, filesystem-backed vault) used by `npm run smoke` to execute the real bundle. |
+| `tools/mock-obsidian/` | Development-only mock of the Obsidian runtime (jsdom DOM helpers, API mock, filesystem-backed vault) used by `npm run smoke` to execute the real bundle. `WorkspaceLeaf.setViewState` calls `view.open()` like Obsidian does, so view-lifecycle mistakes fail the smoke test. |
 
 ## Invariants
 
@@ -41,6 +41,7 @@ npm run dev      # esbuild watch mode
 - `onlyFile`, `onlyPath`, and command `settingsOverride` are temporary in-memory scope overrides; never persist them.
 - User-facing strings and project documentation are English. `parseFrontmatter` recognizes legacy property aliases for existing vaults.
 - Add or update regression tests for fixes. The `architecture` suite in `tests/core.test.ts` enforces import boundaries.
+- Never name a class *field* after an Obsidian lifecycle member (`open`, `load`, `unload`, `display`, `getState`, …) on a class that extends `Plugin`, `ItemView`/`View`, `PluginSettingTab`, or `AbstractInputSuggest`: instance fields shadow the base-class method and Obsidian fails at runtime (`Failed to open view: e.open is not a function`). `npm run smoke` and the `architecture` suite both guard this.
 - The `obsidian` devDependency is pinned to `manifest.json`'s `minAppVersion` so the type-check and the mock API only expose what the oldest supported app version provides. Bump both together.
 
 ## Important behavior and limitations

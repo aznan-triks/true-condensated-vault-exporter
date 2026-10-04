@@ -776,6 +776,37 @@ describe('architecture', () => {
 		}
 	});
 
+	// Obsidian's view/plugin lifecycle calls methods on the plugin's own
+	// instances (View.open(), View.load(), PluginSettingTab.display()…). A
+	// class *field* with the same name replaces the method on the instance and
+	// makes Obsidian fail with "Failed to open view: e.open is not a function".
+	it('never shadows Obsidian lifecycle members with instance fields', () => {
+		const lifecycleMembers = new Set([
+			'open', 'close', 'load', 'unload', 'onload', 'onunload', 'onOpen', 'onClose',
+			'getState', 'setState', 'getEphemeralState', 'setEphemeralState', 'getIcon',
+			'getViewType', 'getDisplayText', 'onResize', 'onPaneMenu', 'addAction', 'addChild',
+			'register', 'registerEvent', 'registerDomEvent', 'registerInterval',
+			'display', 'hide', 'onSelect', 'selectSuggestion', 'renderSuggestion', 'getSuggestions',
+			'setValue', 'getValue', 'setIcon', 'setName', 'setDesc', 'setHeading', 'setDisabled',
+			'then', 'addText', 'addTextArea', 'addButton', 'addToggle', 'addDropdown', 'addSlider',
+			'addExtraButton', 'addSearch', 'addRibbonIcon', 'addCommand', 'addSettingTab', 'registerView',
+			'loadData', 'saveData',
+		]);
+		const keywords = new Set(['const', 'let', 'var', 'return', 'if', 'else', 'for', 'while', 'switch', 'case', 'throw', 'new', 'await', 'type', 'interface', 'function', 'import', 'export', 'this', 'super', 'yield', 'typeof']);
+		const violations: string[] = [];
+		for (const file of [...tsFiles('src/ui'), ...tsFiles('src/settings'), path.join('src', 'main.ts')]) {
+			fs.readFileSync(file, 'utf8').split('\n').forEach((line, index) => {
+				const field = /^\s+(?:(?:private|protected|public|readonly|static|override|declare)\s+)?([A-Za-z_$][\w$]*)\s*[:=]/.exec(line);
+				const name = field?.[1];
+				if (!name || keywords.has(name)) return;
+				if (lifecycleMembers.has(name)) {
+					violations.push(`${file}:${index + 1} declares a field named "${name}"`);
+				}
+			});
+		}
+		expect(violations).toEqual([]);
+	});
+
 	it('core never imports features, ui, commands or the gateway', () => {
 		for (const file of tsFiles('src/core')) {
 			for (const imp of importsOf(file)) {
