@@ -296,20 +296,35 @@ export function noteHeadings(body: string): string[] {
 	return collectHeadings(body, '').filter((heading) => heading.level <= 2).slice(0, 40).map((heading) => heading.label);
 }
 
-function themeCss(customCss: string): string {
-	return `  :root {
-    --ve-bg: #1e1e24; --ve-panel: #26262e; --ve-border: #3a3a48; --ve-text: #e6e6e6;
-    --ve-muted: #9aa0a6; --ve-accent: #8b72d9; --ve-code-bg: #18181f; --ve-strong: #ffffff;
-  }
-  @media (prefers-color-scheme: light) {
-    :root {
+function themeCss(settings: ExporterSettings): string {
+	const accentColor = /^#[0-9a-f]{6}$/i.test(settings.htmlAccentColor) ? settings.htmlAccentColor : '#8b72d9';
+	const width = Number.isFinite(settings.htmlContentWidth)
+		? Math.round(Math.min(1400, Math.max(680, settings.htmlContentWidth)) / 20) * 20
+		: 920;
+	const fontFamily = settings.htmlFont === 'serif'
+		? "Georgia, 'Times New Roman', serif"
+		: settings.htmlFont === 'monospace'
+			? 'ui-monospace, SFMono-Regular, Consolas, monospace'
+			: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif";
+
+	const lightPalette = `color-scheme: light;
       --ve-bg: #f5f6f8; --ve-panel: #ffffff; --ve-border: #d8dbe0; --ve-text: #24292f;
-      --ve-muted: #6b7280; --ve-accent: #6d4fc2; --ve-code-bg: #eef0f3; --ve-strong: #111418;
-    }
+      --ve-muted: #6b7280; --ve-code-bg: #eef0f3; --ve-strong: #111418;`;
+
+	return `  :root {
+    color-scheme: dark;
+    --ve-bg: #1e1e24; --ve-panel: #26262e; --ve-border: #3a3a48; --ve-text: #e6e6e6;
+    --ve-muted: #9aa0a6; --ve-code-bg: #18181f; --ve-strong: #ffffff;
+    --ve-accent: ${accentColor}; --ve-font-family: ${fontFamily}; --ve-content-width: ${width}px;
+  }
+  html[data-ve-theme="light"] { ${lightPalette} }
+  @media (prefers-color-scheme: light) {
+    html[data-ve-theme="system"] { ${lightPalette} }
   }
   * { box-sizing: border-box; }
   html { scroll-behavior: smooth; }
-  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background: var(--ve-bg); color: var(--ve-text); margin: 0; padding: 24px; display: flex; gap: 32px; }
+  body { font-family: var(--ve-font-family); background: var(--ve-bg); color: var(--ve-text); margin: 0; padding: 24px; display: flex; gap: 32px; }
+  body.ve-no-toc { justify-content: center; }
   nav#toc { width: 320px; position: sticky; top: 24px; align-self: flex-start; max-height: calc(100vh - 48px); overflow-y: auto; background: var(--ve-panel); padding: 16px; border-radius: 8px; border: 1px solid var(--ve-border); flex-shrink: 0; }
   nav#toc h2 { font-size: 16px; margin-top: 0; border-bottom: 1px solid var(--ve-border); padding-bottom: 8px; color: var(--ve-strong); }
   nav#toc #ve-search { width: 100%; box-sizing: border-box; margin: 10px 0 6px; padding: 6px 9px; border: 1px solid var(--ve-border); border-radius: 6px; background: var(--ve-bg); color: var(--ve-text); font-size: 12px; }
@@ -323,7 +338,7 @@ function themeCss(customCss: string): string {
   nav#toc .toc-doc { font-weight: 600; }
   nav#toc .toc-sub { color: var(--ve-muted); }
   .path-hint { color: var(--ve-muted); font-size: 11px; }
-  main#content { flex: 1; min-width: 0; max-width: 920px; }
+  main#content { flex: 1; min-width: 0; max-width: var(--ve-content-width); margin: 0 auto; }
   article.vault-document { background: var(--ve-panel); border: 1px solid var(--ve-border); border-radius: 8px; padding: 24px 32px; margin-bottom: 32px; }
   header.doc-header { border-bottom: 1px solid var(--ve-border); padding-bottom: 12px; margin-bottom: 20px; }
   h1.doc-title { margin: 0 0 8px 0; font-size: 24px; color: var(--ve-strong); }
@@ -359,12 +374,19 @@ function themeCss(customCss: string): string {
     body { flex-direction: column; }
     nav#toc { position: static; width: 100%; max-height: none; }
   }
-  ` + (customCss || '').replace(/<\/style/gi, '<\\/style');
+  ` + (settings.customCss || '').replace(/<\/style/gi, '<\\/style');
 }
 
 export function formatForHtml(notes: CleanedNote[], settings: ExporterSettings, exportedAt: string): string {
 	const tocItems: string[] = [];
 	const contentSections: string[] = [];
+	const showToc = settings.htmlShowToc !== false;
+	const showSearch = settings.htmlShowSearch !== false;
+	const showPaths = settings.htmlShowPaths !== false;
+	const showMetadata = settings.htmlShowMetadata !== false;
+	const showFooter = settings.htmlShowFooter !== false;
+	const footerText = typeof settings.htmlFooterText === 'string' ? settings.htmlFooterText.trim().slice(0, 200) : '';
+	const selectedTheme = settings.htmlTheme === 'light' || settings.htmlTheme === 'dark' ? settings.htmlTheme : 'system';
 
 	notes.forEach((note, i) => {
 		const docId = 'doc-' + i;
@@ -374,21 +396,34 @@ export function formatForHtml(notes: CleanedNote[], settings: ExporterSettings, 
 			.slice(0, 40)
 			.map((heading) => ({ label: heading.label, id: heading.id }));
 
-		let toc = '<li class="toc-item" data-doc-id="' + docId + '"><a class="toc-doc" href="#' + docId + '">' + escapeHtml(note.title);
-		toc += ' <span class="path-hint">(' + escapeHtml(note.path) + ')</span></a>';
-		if (subs.length > 0) {
-			toc += '<ul>';
-			for (const sub of subs) {
-				toc += '<li class="toc-sub"><a class="toc-sub" href="#' + sub.id + '">' + escapeHtml(sub.label) + '</a></li>';
+		if (showToc) {
+			let toc = '<li class="toc-item" data-doc-id="' + docId + '"><a class="toc-doc" href="#' + docId + '">' + escapeHtml(note.title);
+			if (showPaths) {
+				toc += ' <span class="path-hint">(' + escapeHtml(note.path) + ')</span>';
 			}
-			toc += '</ul>';
+			toc += '</a>';
+			if (subs.length > 0) {
+				toc += '<ul>';
+				for (const sub of subs) {
+					toc += '<li class="toc-sub"><a class="toc-sub" href="#' + sub.id + '">' + escapeHtml(sub.label) + '</a></li>';
+				}
+				toc += '</ul>';
+			}
+			toc += '</li>';
+			tocItems.push(toc);
 		}
-		toc += '</li>';
-		tocItems.push(toc);
 
-		const badges = visibleMetadata(note, settings)
-			.map(([k, v]) => '<span class="badge">' + escapeHtml(k + ': ' + v) + '</span>')
-			.join('\n');
+		const metadataBadges = showMetadata
+			? visibleMetadata(note, settings)
+				.map(([k, v]) => '<span class="badge">' + escapeHtml(k + ': ' + v) + '</span>')
+				.join('\n')
+			: '';
+		const pathBadge = showPaths
+			? '<span class="badge">' + escapeHtml(note.path) + (note.isCanvas ? ' (canvas)' : '') + '</span>'
+			: '';
+		const metadataBlock = pathBadge || metadataBadges
+			? '<div class="doc-meta">' + [pathBadge, metadataBadges].filter(Boolean).join('\n') + '</div>'
+			: '';
 
 		contentSections.push([
 			'<article id="' + docId + '" class="vault-document">',
@@ -397,10 +432,7 @@ export function formatForHtml(notes: CleanedNote[], settings: ExporterSettings, 
 			'<h1 class="doc-title">' + escapeHtml(note.title) + '</h1>',
 			'<a class="back-to-top" href="#top">Back to top</a>',
 			'</div>',
-			'<div class="doc-meta">',
-			'<span class="badge">' + escapeHtml(note.path) + (note.isCanvas ? ' (canvas)' : '') + '</span>',
-			badges,
-			'</div>',
+			metadataBlock,
 			'</header>',
 			'<div class="doc-content">',
 			simpleMarkdownToHtml(note.body, docId + '-', headings.map((heading) => heading.id)),
@@ -409,20 +441,28 @@ export function formatForHtml(notes: CleanedNote[], settings: ExporterSettings, 
 		].join('\n'));
 	});
 
-	return '<!DOCTYPE html>\n<html>\n<head>\n<meta charset="UTF-8">\n' +
+	const toc = showToc
+		? '<nav id="toc">\n' +
+			'  <h2>' + escapeHtml(settings.documentTitle) + '</h2>\n' +
+			(showSearch ? '  <input id="ve-search" type="search" placeholder="Filter documents…" aria-label="Filter documents">\n' : '') +
+			'  <div id="ve-count" class="ve-count">' + notes.length + ' documents</div>\n' +
+			'  <ul>\n    ' + tocItems.join('\n    ') + '\n  </ul>\n</nav>\n'
+		: '';
+	const footer = showFooter
+		? '<footer class="ve-footer">Exported ' + escapeHtml(exportedAt) + ' · ' + notes.length + ' documents' +
+			(footerText ? ' · ' + escapeHtml(footerText) : '') + '</footer>\n'
+		: '';
+	const bodyClass = showToc ? '' : ' class="ve-no-toc"';
+
+	return '<!DOCTYPE html>\n<html data-ve-theme="' + selectedTheme + '">\n<head>\n<meta charset="UTF-8">\n' +
 		'<meta name="viewport" content="width=device-width, initial-scale=1">\n' +
 		'<title>' + escapeHtml(settings.documentTitle) + '</title>\n' +
-		'<style>\n' + themeCss(settings.customCss) +
-		'</style>\n</head>\n<body id="top">\n' +
-		'<nav id="toc">\n' +
-		'  <h2>' + escapeHtml(settings.documentTitle) + '</h2>\n' +
-		'  <input id="ve-search" type="search" placeholder="Filter documents…" aria-label="Filter documents">\n' +
-		'  <div id="ve-count" class="ve-count">' + notes.length + ' documents</div>\n' +
-		'  <ul>\n    ' + tocItems.join('\n    ') + '\n  </ul>\n</nav>\n' +
-		'<main id="content">\n' + contentSections.join('\n') + '\n' +
-		'<footer class="ve-footer">Exported ' + escapeHtml(exportedAt) + ' · ' + notes.length + ' documents · Vault Exporter</footer>\n' +
+		'<style>\n' + themeCss(settings) +
+		'</style>\n</head>\n<body id="top"' + bodyClass + '>\n' +
+		toc +
+		'<main id="content">\n' + contentSections.join('\n') + '\n' + footer +
 		'</main>\n' +
-		searchFilterScript() +
+		(showToc && showSearch ? searchFilterScript() : '') +
 		'</body>\n</html>';
 }
 

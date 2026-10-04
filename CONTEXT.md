@@ -1,6 +1,6 @@
 # Project context: Vault Exporter
 
-> Last updated: 2026-10-04 (v2.0.3). Keep this file in English.
+> Last updated: 2026-10-04 (v2.0.4). Keep this file in English.
 
 ## Product
 
@@ -50,8 +50,11 @@ npm run dev      # esbuild watch mode
 - Tag scoping excludes Canvas files. The sidebar's live count is path-based while a tag filter is active and displays a warning.
 - Markdown wikilinks point to vault-root-relative paths, not paths relative to each exported file. Consolidated outputs in a subfolder and split mirrors may need their links adjusted.
 - Individual split files that cannot be read are skipped and included in the export result.
-- HTML has light/dark, responsive, print, search, and custom-CSS support; verify changes to those features in a browser.
+- The sidebar remembers selected export targets by default, but context commands remain in-memory-only. It summarizes selected targets in an `aria-live` status region and updates controls in place so keyboard focus is preserved. Clearing recent export history never deletes output files; history reveal targets the first written file.
+- Export feedback preferences control completed-panel auto-close (`0` means keep open) and optional automatic reveal of the first output. Keep the duration choices synchronized between `PROGRESS_PANEL_AUTO_CLOSE_OPTIONS`, settings UI, and tests. The progress panel and history expose elapsed time; success feedback includes written-file count, bytes, and skipped files.
+- HTML has system/light/dark themes, configurable accent color, typography, reading width, optional navigation/search/paths/metadata/footer, responsive layout, print support, and custom CSS. Validate user colors before interpolating them into CSS; verify visual changes in a browser.
+- The progress panel and sidebar include narrow/short-window and touch-target styles in `styles.css`; these still need a visual check inside Obsidian.
 
 ## Manual UI checklist
 
-`npm run smoke` covers load, sidebar, settings, exports, cancellation, and the reveal shortcut against a mock API; it does not prove visual layout or theme integration. When an Obsidian instance is available, still verify the sidebar, target selection, progress/cancel panel, settings persistence, output files, and HTML light/dark view. The README preview assets are illustrative mock-ups, **not** evidence of a live Obsidian test.
+`npm run smoke` covers load, sidebar, settings, exports, cancellation, auto-reveal, and reveal shortcuts against a mock API; it does not prove visual layout or theme integration. When an Obsidian instance is available, still verify the sidebar, remembered target selection and live selection summary, history actions/duration, progress/cancel panel and elapsed time, auto-close/auto-reveal preferences, responsive layouts, output files, and HTML system/light/dark styles and live preview. The README preview assets are illustrative mock-ups, **not** evidence of a live Obsidian test.

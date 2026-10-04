@@ -7,6 +7,7 @@ import {
 	sanitizeHistory,
 	pushHistory,
 	formatBytes,
+	formatDuration,
 	totalBytes,
 	relativeTime,
 } from '../src/features/exportHistory';
@@ -341,6 +342,12 @@ describe('export history', () => {
 		expect(formatBytes(512)).toBe('512 B');
 		expect(formatBytes(2048)).toBe('2.0 KB');
 		expect(formatBytes(3 * 1024 * 1024)).toBe('3.00 MB');
+		expect(formatDuration(0)).toBe('0s');
+		expect(formatDuration(999)).toBe('<1s');
+		expect(formatDuration(12_000)).toBe('12s');
+		expect(formatDuration(65_000)).toBe('1m 5s');
+		expect(formatDuration(3_720_000)).toBe('1h 2m');
+		expect(formatDuration(-1000)).toBe('0s');
 		expect(totalBytes([{ bytes: 100 }, { bytes: 200 }])).toBe(300);
 		const now = Date.now();
 		expect(relativeTime(now - 5000, now)).toBe('just now');

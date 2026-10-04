@@ -189,6 +189,32 @@ const has = (rel) => fs.existsSync(path.join(VAULT, rel));
 	record('scope preview counts notes', /notes/.test(view?.containerEl.querySelector('.ve-card__value')?.textContent ?? ''), view?.containerEl.querySelector('.ve-card__value')?.textContent);
 	record('all six export targets rendered', view?.containerEl.querySelectorAll('.ve-target').length === 6, view?.containerEl.querySelectorAll('.ve-target').length);
 	record('run button rendered', view?.containerEl.querySelector('.ve-sidebar__run')?.textContent === 'Run export');
+	record('default target scope is clearly summarized', view?.containerEl.querySelector('.ve-sidebar__selection-summary')?.textContent.includes('All 4 non-ZIP targets selected') === true);
+	const selectionStatus = view?.containerEl.querySelector('.ve-sidebar__selection-summary');
+	record('target selection summary is announced accessibly', selectionStatus?.getAttribute('role') === 'status' && selectionStatus.getAttribute('aria-live') === 'polite');
+	const htmlTarget = [...view.containerEl.querySelectorAll('.ve-target')].find((row) => row.querySelector('.ve-target__label')?.textContent === 'Export as HTML document');
+	if (htmlTarget) {
+		htmlTarget.click();
+		await sleep(40);
+		record('sidebar target selection is persisted', JSON.stringify(plugin._data?.settings?.lastSelectedTargets) === '["html"]', JSON.stringify(plugin._data?.settings?.lastSelectedTargets));
+		record('sidebar explains the selected target count', view.containerEl.querySelector('.ve-sidebar__selection-summary')?.textContent === '1 target selected: HTML.');
+		record('target controls update in place', [...view.containerEl.querySelectorAll('.ve-target')].includes(htmlTarget));
+		const markdownTarget = [...view.containerEl.querySelectorAll('.ve-target')].find((row) => row.querySelector('.ve-target__label')?.textContent === 'Export as consolidated Markdown');
+		markdownTarget?.click();
+		record('sidebar reports multiple selected formats', view.containerEl.querySelector('.ve-sidebar__selection-summary')?.textContent === '2 targets selected: HTML, Markdown.');
+		markdownTarget?.click();
+		await sleep(40);
+		await view.onClose();
+		await view.onOpen();
+		const restoredHtml = [...view.containerEl.querySelectorAll('.ve-target')].find((row) => row.querySelector('.ve-target__label')?.textContent === 'Export as HTML document');
+		record('sidebar restores the last selected target', restoredHtml?.getAttribute('aria-pressed') === 'true');
+		const allTarget = [...view.containerEl.querySelectorAll('.ve-target')].find((row) => row.querySelector('.ve-target__label')?.textContent === 'All (consolidated + split)');
+		allTarget?.click();
+		await sleep(40);
+		record('sidebar selection returns to all exports', JSON.stringify(plugin._data?.settings?.lastSelectedTargets) === '["all"]', JSON.stringify(plugin._data?.settings?.lastSelectedTargets));
+	} else {
+		record('HTML sidebar target is available for persistence test', false);
+	}
 	await plugin.activateSidebarView();
 	record('re-opening reuses the existing leaf', plugin.app.workspace.getLeavesOfType('vault-exporter-sidebar').length === 1);
 
@@ -197,7 +223,11 @@ const has = (rel) => fs.existsSync(path.join(VAULT, rel));
 	view.containerEl.querySelector('.ve-sidebar__run').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
 	await sleep(20);
 	record('progress panel opens', window.document.querySelector('.ve-panel') !== null);
+	const progressStatus = window.document.querySelector('.ve-panel__status');
+	record('progress status is announced accessibly', progressStatus?.getAttribute('role') === 'status' && progressStatus.getAttribute('aria-live') === 'polite');
 	record('export completes', (await waitFinished()) === 'Done');
+	record('progress panel shows elapsed time', /^Elapsed (?:<1s|\d+(?:s|m|h))/.test(window.document.querySelector('.ve-panel__elapsed')?.textContent ?? ''));
+	record('completion summary includes elapsed duration', /in (?:<1s|\d+(?:h \d+m|m \d+s|s))/.test(window.document.querySelector('.ve-panel__current')?.textContent ?? ''));
 	record('consolidated outputs written', ['Vault export.md', 'Vault export.html', 'Vault export - NotebookLM.txt'].every(has), ['Vault export.md', 'Vault export.html', 'Vault export - NotebookLM.txt'].filter(has).join(', '));
 	record('split folder written', has('Vault export - split'), fs.existsSync(path.join(VAULT, 'Vault export - split')) ? fs.readdirSync(path.join(VAULT, 'Vault export - split')).join(', ') : '');
 	record('no console errors during export', consoleErrors.length === 0, consoleErrors.join(' | '));
@@ -228,13 +258,45 @@ const has = (rel) => fs.existsSync(path.join(VAULT, rel));
 		record('notebooklm: banner + document separators', txt.includes('VAULT EXPORT') && /DOCUMENT \[1\/\d+\]:/.test(txt));
 	}
 
+	await sleep(40);
+	record('recent exports include elapsed duration', / · (?:<1s|\d+h \d+m|\d+m \d+s|\d+s) · \d+ files · /.test(view.containerEl.querySelector('.ve-history__meta')?.textContent ?? ''));
+	const historyReveal = view.containerEl.querySelector('.ve-history__reveal');
+	const historyState = require('./obsidian-mock.cjs').__state;
+	historyState.revealCalls.length = 0;
+	if (historyReveal) {
+		historyReveal.click();
+		await sleep(30);
+		record('history can reveal the first output', historyState.revealCalls.length === 1 && path.isAbsolute(historyState.revealCalls[0]), historyState.revealCalls.join(', '));
+	} else {
+		record('history output reveal button rendered', false, 'no .ve-history__reveal');
+	}
+	const clearHistory = view.containerEl.querySelector('.ve-history__clear');
+	if (clearHistory) {
+		clearHistory.click();
+		await sleep(30);
+		record('clearing history keeps exported files', plugin.history.length === 0 && has('Vault export.md'), `history=${plugin.history.length}`);
+	} else {
+		record('history clear action rendered', false, 'no .ve-history__clear');
+	}
+
 	console.log('\n--- settings tab ---');
 	const tab = plugin._settingTabs[0];
 	consoleErrors.length = 0;
 	tab.containerEl.empty();
 	tab.display();
-	record('settings items rendered', tab.containerEl.querySelectorAll('.setting-item').length >= 15, tab.containerEl.querySelectorAll('.setting-item').length);
+	record('settings items rendered', tab.containerEl.querySelectorAll('.setting-item').length >= 25, tab.containerEl.querySelectorAll('.setting-item').length);
 	record('list rows rendered', tab.containerEl.querySelectorAll('.ve-list-item').length >= 3, tab.containerEl.querySelectorAll('.ve-list-item').length);
+	const searchInput = tab.containerEl.querySelector('.ve-settings__search input');
+	if (searchInput) {
+		searchInput.value = 'focused controls';
+		searchInput.dispatchEvent(new window.Event('input', { bubbles: true }));
+		const visibleRows = [...tab.containerEl.querySelectorAll('.ve-settings-row')].filter((row) => !row.hidden);
+		record('settings search filters matching controls and sections', visibleRows.length === 1 && visibleRows[0].textContent.includes('HTML Accent Color') && [...tab.containerEl.querySelectorAll('.ve-settings-section')].filter((section) => !section.hidden).length === 1, visibleRows.map((row) => row.textContent.trim().slice(0, 40)).join(', '));
+		searchInput.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+		record('Escape clears settings search', searchInput.value === '' && [...tab.containerEl.querySelectorAll('.ve-settings-section')].every((section) => !section.hidden));
+	} else {
+		record('settings search control rendered', false, 'no .ve-settings__search input');
+	}
 	const pill = tab.containerEl.querySelector('.ve-tag-pill');
 	if (pill) {
 		pill.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
@@ -245,12 +307,84 @@ const has = (rel) => fs.existsSync(path.join(VAULT, rel));
 	}
 	const settingByLabel = (label) => [...tab.containerEl.querySelectorAll('.setting-item')]
 		.find((el) => el.querySelector('.setting-item-name')?.textContent === label);
+	const htmlPreview = tab.containerEl.querySelector('.ve-html-preview');
+	record('HTML appearance preview is rendered', htmlPreview?.dataset.theme === 'system' && htmlPreview.style.getPropertyValue('--ve-preview-accent') === '#8b72d9');
+	const rememberTargets = settingByLabel('Remember Sidebar Targets')?.querySelector('input[type="checkbox"]');
+	if (rememberTargets) {
+		rememberTargets.checked = false;
+		rememberTargets.dispatchEvent(new window.Event('change', { bubbles: true }));
+		await sleep(30);
+		record('remember-targets preference can be disabled', plugin._data?.settings?.rememberTargetSelection === false);
+		const htmlTargetWhileDisabled = [...view.containerEl.querySelectorAll('.ve-target')].find((row) => row.querySelector('.ve-target__label')?.textContent === 'Export as HTML document');
+		htmlTargetWhileDisabled?.click();
+		await view.onClose();
+		await view.onOpen();
+		const allTargetAfterReopen = [...view.containerEl.querySelectorAll('.ve-target')].find((row) => row.querySelector('.ve-target__label')?.textContent === 'All (consolidated + split)');
+		record('disabled target memory starts a reopened sidebar with all', allTargetAfterReopen?.getAttribute('aria-pressed') === 'true' && JSON.stringify(plugin._data?.settings?.lastSelectedTargets) === '["all"]');
+		rememberTargets.checked = true;
+		rememberTargets.dispatchEvent(new window.Event('change', { bubbles: true }));
+		await sleep(30);
+		record('remember-targets preference can be restored', plugin._data?.settings?.rememberTargetSelection === true);
+	} else {
+		record('remember-targets toggle rendered', false, 'no checkbox control');
+	}
+	const autoRevealPreference = settingByLabel('Reveal Output After Success')?.querySelector('input[type="checkbox"]');
+	if (autoRevealPreference) {
+		autoRevealPreference.checked = true;
+		autoRevealPreference.dispatchEvent(new window.Event('change', { bubbles: true }));
+		await sleep(30);
+		record('automatic output reveal preference is saved', plugin._data?.settings?.autoRevealOutput === true);
+	} else {
+		record('automatic output reveal preference rendered', false, 'no checkbox control');
+	}
+	const completedPanelSelect = settingByLabel('Progress Panel Auto-Close')?.querySelector('select');
+	if (completedPanelSelect) {
+		completedPanelSelect.value = '0';
+		completedPanelSelect.dispatchEvent(new window.Event('change', { bubbles: true }));
+		await sleep(30);
+		record('completed panel can be kept open', plugin._data?.settings?.progressPanelAutoCloseSeconds === 0);
+	} else {
+		record('completed panel duration preference rendered', false, 'no select control');
+	}
 	const outputsInput = settingByLabel('NotebookLM Consolidated Output')?.querySelector('input');
 	if (outputsInput) {
 		outputsInput.value = 'Out/notebooklm.txt';
 		outputsInput.dispatchEvent(new window.Event('change', { bubbles: true }));
 		await sleep(30);
 		record('edited text setting is saved', plugin._data?.settings?.notebooklmOutputPath === 'Out/notebooklm.txt', plugin._data?.settings?.notebooklmOutputPath);
+	}
+	const themeSelect = settingByLabel('HTML Color Theme')?.querySelector('select');
+	if (themeSelect) {
+		themeSelect.value = 'dark';
+		themeSelect.dispatchEvent(new window.Event('change', { bubbles: true }));
+		await sleep(30);
+		record('HTML theme preference is saved', plugin._data?.settings?.htmlTheme === 'dark', plugin._data?.settings?.htmlTheme);
+		record('HTML appearance preview follows theme changes', htmlPreview?.dataset.theme === 'dark', htmlPreview?.dataset.theme);
+		themeSelect.value = 'system';
+		themeSelect.dispatchEvent(new window.Event('change', { bubbles: true }));
+		await sleep(30);
+	}
+	const accentPicker = settingByLabel('HTML Accent Color')?.querySelector('input[type="color"]');
+	if (accentPicker) {
+		accentPicker.value = '#c0392b';
+		accentPicker.dispatchEvent(new window.Event('change', { bubbles: true }));
+		await sleep(30);
+		record('HTML accent color preference is saved', plugin._data?.settings?.htmlAccentColor === '#c0392b', plugin._data?.settings?.htmlAccentColor);
+		record('HTML appearance preview follows accent changes', htmlPreview?.style.getPropertyValue('--ve-preview-accent') === '#c0392b');
+		accentPicker.value = '#8b72d9';
+		accentPicker.dispatchEvent(new window.Event('change', { bubbles: true }));
+		await sleep(30);
+	}
+	const widthSlider = settingByLabel('HTML Reading Width')?.querySelector('input[type="range"]');
+	if (widthSlider) {
+		widthSlider.value = '1040';
+		widthSlider.dispatchEvent(new window.Event('change', { bubbles: true }));
+		await sleep(30);
+		record('HTML reading width preference is saved', plugin._data?.settings?.htmlContentWidth === 1040, plugin._data?.settings?.htmlContentWidth);
+		record('HTML appearance preview follows width changes', htmlPreview?.style.maxWidth === '1040px', htmlPreview?.style.maxWidth);
+		widthSlider.value = '920';
+		widthSlider.dispatchEvent(new window.Event('change', { bubbles: true }));
+		await sleep(30);
 	}
 	record('no console errors in settings', consoleErrors.length === 0, consoleErrors.join(' | '));
 
@@ -261,7 +395,23 @@ const has = (rel) => fs.existsSync(path.join(VAULT, rel));
 		await cmd.callback();
 		return waitFinished();
 	};
+	const autoRevealState = require('./obsidian-mock.cjs').__state;
+	autoRevealState.revealCalls.length = 0;
 	record('export-markdown finishes', (await runCommand('export-markdown')) === 'Done');
+	record('successful export automatically reveals its first output', autoRevealState.revealCalls.length === 1 && path.isAbsolute(autoRevealState.revealCalls[0]), autoRevealState.revealCalls.join(', '));
+	record('keep-open preference leaves the completed panel visible', window.document.querySelector('.ve-panel') !== null);
+	if (completedPanelSelect) {
+		completedPanelSelect.value = '8';
+		completedPanelSelect.dispatchEvent(new window.Event('change', { bubbles: true }));
+		await sleep(30);
+	}
+	record('progress panel auto-close delay can be restored', plugin.settings.progressPanelAutoCloseSeconds === 8);
+	if (autoRevealPreference) {
+		autoRevealPreference.checked = false;
+		autoRevealPreference.dispatchEvent(new window.Event('change', { bubbles: true }));
+		await sleep(30);
+	}
+	record('automatic reveal can be switched off', plugin.settings.autoRevealOutput === false);
 	record('export-zip finishes', (await runCommand('export-zip')) === 'Done');
 	if (has('Vault export.zip')) {
 		const zip = fs.readFileSync(path.join(VAULT, 'Vault export.zip'));
