@@ -23,14 +23,18 @@ const Module = require('module');
 const ROOT = path.resolve(__dirname, '..', '..');
 const args = process.argv.slice(2);
 const vaultArgIndex = args.indexOf('--vault');
+const bundleArgIndex = args.indexOf('--bundle');
 const VAULT = vaultArgIndex >= 0 ? path.resolve(args[vaultArgIndex + 1]) : path.join(os.tmpdir(), 'vault-exporter-smoke');
 const KEEP = args.includes('--keep');
 
 const notRun = (message) => { console.error(message); process.exit(2); };
 
-const BUNDLE = path.join(ROOT, 'main.js');
+const BUNDLE = bundleArgIndex >= 0 ? path.resolve(args[bundleArgIndex + 1]) : path.join(ROOT, 'main.js');
 if (!fs.existsSync(BUNDLE)) notRun('main.js not found — run `npm run build` first.');
-const MANIFEST = JSON.parse(fs.readFileSync(path.join(ROOT, 'manifest.json'), 'utf8'));
+// A downloaded release keeps its own manifest next to the bundle.
+const bundleDir = path.dirname(BUNDLE);
+const manifestPath = fs.existsSync(path.join(bundleDir, 'manifest.json')) ? path.join(bundleDir, 'manifest.json') : path.join(ROOT, 'manifest.json');
+const MANIFEST = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
 
 // -------------------------------------------------------------- jsdom setup
 const { JSDOM } = require('jsdom');
@@ -70,7 +74,7 @@ function loadPluginClass() {
 	const source = fs.readFileSync(BUNDLE, 'utf8');
 	const mod = new Module(BUNDLE, null);
 	mod.filename = BUNDLE;
-	mod.paths = Module._nodeModulePaths(ROOT);
+	mod.paths = Module._nodeModulePaths(path.dirname(BUNDLE));
 	mod._compile(source, BUNDLE);
 	const exported = mod.exports;
 	return exported.default ?? exported;
