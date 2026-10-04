@@ -7,7 +7,7 @@ import { App, Notice } from 'obsidian';
 import { ExporterSettings } from '../core/types';
 import { ObsidianVaultGateway } from '../obsidian/vaultGateway';
 import { runExports, ExportTarget, ExportCancelledError, ExportResult } from '../features/exportOrchestrator';
-import { ExportHistoryEntry, pushHistory, formatBytes } from '../features/exportHistory';
+import { ExportHistoryEntry, pushHistory, formatBytes, formatDuration } from '../features/exportHistory';
 import { ProgressPanel } from '../ui/ProgressPanel';
 
 export interface CommandContext {
@@ -20,6 +20,8 @@ export interface CommandContext {
 export interface UiContext extends CommandContext {
 	history: ExportHistoryEntry[];
 	onHistoryChange: (history: ExportHistoryEntry[]) => void;
+	/** Persists a UI-owned preference without refreshing or rebuilding the view. */
+	persistSettings?: () => Promise<void>;
 	openSettings: () => void;
 }
 
@@ -94,7 +96,9 @@ export async function executeTargets(ctx: UiContext, targets: ExportTarget[], op
 
 	const panel = new ProgressPanel({
 		title: label,
-		autoCloseMs: 8000,
+		autoCloseMs: effectiveSettings.progressPanelAutoCloseSeconds > 0
+			? effectiveSettings.progressPanelAutoCloseSeconds * 1000
+			: undefined,
 		onCancel: () => controller.abort(),
 	});
 
@@ -113,29 +117,39 @@ export async function executeTargets(ctx: UiContext, targets: ExportTarget[], op
 			fileCount: result.written.length,
 			bytes: result.totalBytes,
 			skipped: result.skippedFiles.length,
+			durationMs: result.durationMs,
 			onReveal: result.written.length > 0
 				? () => ctx.gateway.revealInFileManager(result!.written[0]!.path)
 				: undefined,
 		});
+		let revealFailed = false;
+		if (effectiveSettings.autoRevealOutput && result.written.length > 0) {
+			const revealed = ctx.gateway.revealInFileManager(result.written[0]!.path);
+			panel.log(revealed ? 'Output folder opened automatically.' : 'Could not open the output folder automatically.', !revealed);
+			revealFailed = !revealed;
+		}
 		const summary = result.written.length + ' files · ' + formatBytes(result.totalBytes)
-			+ (result.skippedFiles.length > 0 ? ' · ' + result.skippedFiles.length + ' skipped' : '');
-		new Notice('✓ ' + label + ' finished (' + summary + ').');
+			+ (result.skippedFiles.length > 0 ? ' · ' + result.skippedFiles.length + ' skipped' : '')
+			+ ' · ' + formatDuration(result.durationMs);
+		new Notice('✓ ' + label + ' finished (' + summary + ').'
+			+ (revealFailed ? ' The output folder could not be opened automatically.' : ''));
 	} catch (err: unknown) {
 		if (err instanceof ExportCancelledError) {
 			outcome = 'cancelled';
 			result = err.partialResult ?? null;
 			panel.log('Export cancelled by user.');
-			panel.finish('cancelled', 'Export cancelled. Files already written were kept.', result ? {
-				fileCount: result.written.length,
-				bytes: result.totalBytes,
-				skipped: result.skippedFiles.length,
-			} : undefined);
+			panel.finish('cancelled', 'Export cancelled. Files already written were kept.', {
+				fileCount: result?.written.length,
+				bytes: result?.totalBytes,
+				skipped: result?.skippedFiles.length,
+				durationMs: Date.now() - startedAt,
+			});
 			new Notice('Export cancelled.');
 		} else {
 			const msg = err instanceof Error ? err.message : String(err);
 			console.error('[vault-exporter]', err);
 			panel.log(msg, true);
-			panel.finish('error', 'Export failed: ' + msg);
+			panel.finish('error', 'Export failed: ' + msg, { durationMs: Date.now() - startedAt });
 			new Notice('✕ Export failed: ' + msg, 6000);
 		}
 	} finally {

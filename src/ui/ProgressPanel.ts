@@ -1,10 +1,10 @@
 /**
- * Visual floating progress panel with live logs, cancel support and a
- * completion summary (file count, size, "Open folder" shortcut).
+ * Visual floating progress panel with live logs, elapsed time, cancel support,
+ * and a completion summary (file count, size, duration, "Open folder" shortcut).
  * Styled in matching Obsidian look & feel.
  */
 
-import { formatBytes } from '../features/exportHistory';
+import { formatBytes, formatDuration } from '../features/exportHistory';
 
 export interface PanelOptions {
 	title: string;
@@ -16,6 +16,7 @@ export interface FinishInfo {
 	fileCount?: number;
 	bytes?: number;
 	skipped?: number;
+	durationMs?: number;
 	onReveal?: () => void;
 }
 
@@ -24,11 +25,14 @@ export class ProgressPanel {
 	private readonly statusEl: HTMLElement;
 	private readonly barEl: HTMLElement;
 	private readonly progressEl: HTMLElement;
+	private readonly elapsedEl: HTMLElement;
 	private readonly logEl: HTMLElement;
 	private readonly currentEl: HTMLElement;
 	private readonly closeBtn: HTMLElement;
 	private readonly cancelBtn: HTMLElement;
 	private timer: number | null = null;
+	private elapsedTimer: number | null = null;
+	private readonly startedAt = Date.now();
 	private finished = false;
 
 	constructor(private readonly options: PanelOptions) {
@@ -38,7 +42,7 @@ export class ProgressPanel {
 
 		const header = this.root.createDiv({ cls: 've-panel__header' });
 		header.createSpan({ cls: 've-panel__title', text: options.title });
-		this.statusEl = header.createSpan({ cls: 've-panel__status', text: 'Running...' });
+		this.statusEl = header.createSpan({ cls: 've-panel__status', text: 'Running...', attr: { role: 'status', 'aria-live': 'polite' } });
 
 		this.closeBtn = header.createEl('button', {
 			cls: 've-panel__close',
@@ -63,12 +67,15 @@ export class ProgressPanel {
 		}
 
 		const progress = this.root.createDiv({ cls: 've-panel__progress' });
-		this.progressEl = progress.createSpan({ cls: 've-panel__progress-label', text: '0 / 0' });
+		const progressMeta = progress.createDiv({ cls: 've-panel__progress-meta' });
+		this.progressEl = progressMeta.createSpan({ cls: 've-panel__progress-label', text: '0 / 0' });
+		this.elapsedEl = progressMeta.createSpan({ cls: 've-panel__elapsed', text: 'Elapsed 0s', attr: { 'aria-live': 'off' } });
 		const track = progress.createDiv({ cls: 've-panel__track' });
 		this.barEl = track.createDiv({ cls: 've-panel__bar' });
 
 		this.logEl = this.root.createDiv({ cls: 've-panel__log' });
 		this.currentEl = this.root.createDiv({ cls: 've-panel__current', text: 'Initializing...' });
+		this.elapsedTimer = window.setInterval(() => this.updateElapsed(), 1000);
 	}
 
 	update(current: number, total: number, label?: string, file?: string): void {
@@ -76,6 +83,11 @@ export class ProgressPanel {
 		this.barEl.style.width = (ratio * 100) + '%';
 		this.progressEl.setText(current + ' / ' + total + (label ? ' · ' + label : ''));
 		this.currentEl.setText(file || label || 'Working...');
+		this.updateElapsed();
+	}
+
+	private updateElapsed(durationMs = Date.now() - this.startedAt): void {
+		this.elapsedEl.setText('Elapsed ' + formatDuration(durationMs));
 	}
 
 	log(message: string, isError = false): void {
@@ -100,11 +112,17 @@ export class ProgressPanel {
 	finish(outcome: 'success' | 'cancelled' | 'error', summary: string, info?: FinishInfo): void {
 		this.finished = true;
 		this.cancelBtn.hide();
+		const durationMs = info?.durationMs ?? Date.now() - this.startedAt;
+		this.updateElapsed(durationMs);
+		if (this.elapsedTimer !== null) {
+			window.clearInterval(this.elapsedTimer);
+			this.elapsedTimer = null;
+		}
 		this.statusEl.setText(outcome === 'success' ? 'Done' : outcome === 'cancelled' ? 'Cancelled' : 'Failed');
 		this.statusEl.className = 've-panel__status ve-panel__status--' + outcome;
 		if (outcome === 'success') this.barEl.style.width = '100%';
 
-		const parts: string[] = [summary];
+		const parts: string[] = [summary, 'in ' + formatDuration(durationMs)];
 		if (info?.fileCount !== undefined) {
 			parts.push(info.fileCount + ' files');
 		}
@@ -133,6 +151,11 @@ export class ProgressPanel {
 	destroy(): void {
 		if (this.timer !== null) {
 			window.clearTimeout(this.timer);
+			this.timer = null;
+		}
+		if (this.elapsedTimer !== null) {
+			window.clearInterval(this.elapsedTimer);
+			this.elapsedTimer = null;
 		}
 		this.root.remove();
 	}

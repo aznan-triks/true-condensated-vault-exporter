@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.0.4] - 2026-10-04
+
+### Added
+- Grouped and searchable settings, plus standalone HTML personalization for theme, accent color, typography, reading width, optional navigation and metadata, footer attribution, and a live appearance preview.
+- Optional memory for the sidebar’s selected targets, with history actions to reveal an output or clear history without deleting exported files.
+- Export feedback preferences: keep successful progress panels open or choose an auto-close delay, and optionally reveal the first output automatically after success. Cancelled and failed panels remain visible for review.
+- Elapsed-time feedback in the progress panel, completion summary, and export history. The sidebar reports the count and names of selected targets.
+
+### Improved
+- Sidebar target selection updates in place, retains keyboard focus, and is announced accessibly. The sidebar and progress panel adapt to narrow and short windows, with larger touch controls.
+- Expanded unit and mock-Obsidian smoke coverage for settings persistence, automatic reveal, progress timing, accessible status, and target selection.
+
 ## [2.0.3] - 2026-10-04
 
 ### Fixed

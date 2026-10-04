@@ -9,13 +9,13 @@
  *  - 'zip'   : every consolidated format + split, bundled into one .zip archive
  */
 
-import { ExportGateway, ExporterSettings, ProgressCallback, VaultFile } from '../core/types';
+import { ExportGateway, ExporterSettings, ProgressCallback, RememberedExportTarget, VaultFile } from '../core/types';
 import { CleanedNote, cleanNote, createExportContext } from '../core/pipeline';
 import { CONSOLIDATED_FORMATS, ConsolidatedFormatId } from './formats';
 import { OutputFile, buildSplitFiles } from './exportSplit';
 import { buildZip, zipEntryName, ZipEntry } from '../core/zip';
 
-export type ExportTarget = 'all' | ConsolidatedFormatId | 'split' | 'zip';
+export type ExportTarget = RememberedExportTarget;
 
 export class ExportCancelledError extends Error {
 	constructor(readonly partialResult?: ExportResult) {

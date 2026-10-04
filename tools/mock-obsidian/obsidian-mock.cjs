@@ -170,6 +170,7 @@ class SliderComponent extends ValueComponent {
 	constructor(c) {
 		super(c, 'input');
 		this.inputEl.type = 'range';
+		this.sliderEl = this.inputEl;
 		this.valueEl = c.createDiv({ cls: 'slider-value' });
 		this.inputEl.addEventListener('input', () => this.valueEl.setText(String(this.getValue())));
 	}

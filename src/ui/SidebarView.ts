@@ -5,9 +5,9 @@
  */
 
 import { ItemView, Notice, WorkspaceLeaf, setIcon } from 'obsidian';
-import { EXPORT_COMMANDS, UiContext, executeTargets, isExportRunning } from '../commands/registry';
+import { EXPORT_COMMANDS, TARGET_LABELS, UiContext, executeTargets, isExportRunning } from '../commands/registry';
 import { ExportTarget } from '../features/exportOrchestrator';
-import { ExportHistoryEntry, formatBytes, relativeTime, totalBytes } from '../features/exportHistory';
+import { ExportHistoryEntry, formatBytes, formatDuration, relativeTime, totalBytes } from '../features/exportHistory';
 import { isFileIncluded, reservedOutputPaths } from '../core/filter';
 import { openSettingsTab } from '../obsidian/appSetting';
 
@@ -22,6 +22,7 @@ interface ScopeStats {
 
 export class ExporterSidebarView extends ItemView {
 	private selected: Set<ExportTarget> = new Set(['all']);
+	private rememberedTargetPreference: boolean | null = null;
 	private stats: ScopeStats | null = null;
 	/**
 	 * Deliberately not named `open`: Obsidian's internal `View.open()` runs the
@@ -52,6 +53,7 @@ export class ExporterSidebarView extends ItemView {
 
 	override async onOpen(): Promise<void> {
 		this.isViewOpen = true;
+		this.syncTargetSelection(true);
 		await this.computeStats();
 		this.render();
 	}
@@ -63,8 +65,34 @@ export class ExporterSidebarView extends ItemView {
 	/** Re-render with fresh stats (called on settings change). */
 	async refresh(): Promise<void> {
 		if (!this.isViewOpen) return;
+		this.syncTargetSelection();
 		await this.computeStats();
 		this.render();
+	}
+
+	private syncTargetSelection(force = false): void {
+		const settings = this.getContext().settings;
+		if (!force && this.rememberedTargetPreference === settings.rememberTargetSelection) return;
+		this.rememberedTargetPreference = settings.rememberTargetSelection;
+		if (!settings.rememberTargetSelection) {
+			this.selected = new Set(['all']);
+			return;
+		}
+		const targets = Array.isArray(settings.lastSelectedTargets) ? settings.lastSelectedTargets : [];
+		const restored = targets.length > 0 ? new Set<ExportTarget>(targets) : new Set<ExportTarget>(['all']);
+		this.selected = restored.has('all') ? new Set(['all']) : restored;
+	}
+
+	private rememberTargetSelection(): void {
+		const context = this.getContext();
+		if (!context.settings.rememberTargetSelection) return;
+		context.settings.lastSelectedTargets = [...this.selected];
+		if (context.persistSettings) {
+			void context.persistSettings().catch((error: unknown) => {
+				console.error('[vault-exporter] Could not save sidebar target selection:', error);
+				new Notice('Could not save the selected export targets.');
+			});
+		}
 	}
 
 	private async computeStats(): Promise<void> {
@@ -146,6 +174,24 @@ export class ExporterSidebarView extends ItemView {
 		targetsCard.createDiv({ cls: 've-card__title', text: 'Export targets' });
 		const list = targetsCard.createDiv({ cls: 've-target-list' });
 
+		let selectionSummaryEl: HTMLElement | null = null;
+		let runBtn: HTMLButtonElement | null = null;
+		const describeSelection = (): string => this.selected.has('all')
+			? 'All 4 non-ZIP targets selected: NotebookLM, HTML, Markdown, and Split. ZIP bundle is separate.'
+			: `${this.selected.size} target${this.selected.size === 1 ? '' : 's'} selected: ${[...this.selected].map((target) => TARGET_LABELS[target]).join(', ')}.`;
+		const updateSelectionUi = (): void => {
+			for (const row of Array.from(list.querySelectorAll<HTMLButtonElement>('.ve-target'))) {
+				const target = row.getAttribute('data-target') as ExportTarget | null;
+				if (!target) continue;
+				const selected = this.selected.has(target);
+				row.classList.toggle('ve-target--active', selected);
+				row.setAttribute('aria-pressed', String(selected));
+				row.querySelector('.ve-target__box')?.setText(selected ? '✓' : '');
+			}
+			const description = describeSelection();
+			selectionSummaryEl?.setText(description);
+			runBtn?.setAttribute('aria-label', isExportRunning() ? 'Export is running' : 'Run export. ' + description);
+		};
 		const toggleTarget = (target: ExportTarget): void => {
 			if (target === 'all') {
 				this.selected = new Set(['all']);
@@ -160,7 +206,8 @@ export class ExporterSidebarView extends ItemView {
 				}
 				this.selected = next;
 			}
-			this.render();
+			this.rememberTargetSelection();
+			updateSelectionUi();
 		};
 
 		const allRow = this.renderTargetRow(list, 'all', 'All (consolidated + split)', isExportRunning());
@@ -172,12 +219,22 @@ export class ExporterSidebarView extends ItemView {
 			row.addEventListener('click', () => toggleTarget(cmd.target));
 		}
 
-		const runBtn = targetsCard.createEl('button', {
+		const selectionDescription = describeSelection();
+		selectionSummaryEl = targetsCard.createDiv({
+			cls: 've-sidebar__selection-summary',
+			text: selectionDescription,
+			attr: { role: 'status', 'aria-live': 'polite' },
+		});
+
+		const runButton = targetsCard.createEl('button', {
 			cls: 'mod-cta ve-sidebar__run',
 			text: isExportRunning() ? 'Running…' : 'Run export',
+			attr: { 'aria-label': isExportRunning() ? 'Export is running' : 'Run export. ' + selectionDescription },
 		});
+		runBtn = runButton;
+		updateSelectionUi();
 		if (!isExportRunning()) {
-			runBtn.addEventListener('click', async () => {
+			runButton.addEventListener('click', async () => {
 				const targets = [...this.selected];
 				if (targets.length === 0) {
 					new Notice('Select at least one export target.');
@@ -190,7 +247,24 @@ export class ExporterSidebarView extends ItemView {
 
 		// History card
 		const historyCard = container.createDiv({ cls: 've-card' });
-		historyCard.createDiv({ cls: 've-card__title', text: 'Recent exports' });
+		const historyHeader = historyCard.createDiv({ cls: 've-card__header' });
+		historyHeader.createDiv({ cls: 've-card__title', text: 'Recent exports' });
+		if (ctx.history.length > 0) {
+			const clearHistory = historyHeader.createEl('button', {
+				cls: 've-history__clear',
+				text: 'Clear',
+				attr: {
+					type: 'button',
+					title: 'Clear history only; exported files will be kept',
+					'aria-label': 'Clear recent export history',
+				},
+			});
+			clearHistory.addEventListener('click', (event) => {
+				event.stopPropagation();
+				ctx.onHistoryChange([]);
+				new Notice('Export history cleared. Exported files were kept.');
+			});
+		}
 		if (ctx.history.length === 0) {
 			historyCard.createDiv({ cls: 've-card__hint', text: 'No exports yet.' });
 		} else {
@@ -218,7 +292,7 @@ export class ExporterSidebarView extends ItemView {
 		const selected = this.selected.has(target);
 		const row = parent.createEl('button', {
 			cls: 've-target' + (selected ? ' ve-target--active' : '') + (disabled ? ' ve-target--disabled' : ''),
-			attr: { type: 'button', 'aria-pressed': String(selected) },
+			attr: { type: 'button', 'aria-pressed': String(selected), 'data-target': target },
 		});
 		row.disabled = disabled;
 		row.setAttribute('aria-label', label);
@@ -237,12 +311,26 @@ export class ExporterSidebarView extends ItemView {
 			title: entry.label + '\n' + new Date(entry.startedAt).toLocaleString(),
 		});
 		const icon = entry.outcome === 'success' ? '✓' : entry.outcome === 'cancelled' ? '✕' : '!';
-		row.createSpan({ cls: 've-history__icon', text: icon });
+		row.createSpan({ cls: 've-history__icon', text: icon, attr: { 'aria-hidden': 'true' } });
 		const main = row.createSpan({ cls: 've-history__main' });
 		main.createSpan({ cls: 've-history__label', text: entry.label });
 		main.createSpan({
 			cls: 've-history__meta',
-			text: relativeTime(entry.startedAt) + ' · ' + entry.files.length + ' files · ' + formatBytes(totalBytes(entry.files)),
+			text: relativeTime(entry.startedAt) + ' · ' + formatDuration(entry.durationMs) + ' · ' + entry.files.length + ' files · ' + formatBytes(totalBytes(entry.files)),
 		});
+		const firstOutput = entry.files[0];
+		if (firstOutput) {
+			const reveal = row.createEl('button', {
+				cls: 've-history__reveal',
+				attr: { type: 'button', title: firstOutput.path, 'aria-label': 'Reveal output folder for ' + entry.label },
+			});
+			setIcon(reveal, 'folder-open');
+			reveal.addEventListener('click', (event) => {
+				event.stopPropagation();
+				if (!this.getContext().gateway.revealInFileManager(firstOutput.path)) {
+					new Notice('Could not reveal the output folder on this device.');
+				}
+			});
+		}
 	}
 }
