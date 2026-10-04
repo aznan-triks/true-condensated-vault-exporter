@@ -132,9 +132,13 @@ export default class VaultExporterPlugin extends Plugin {
 		this.history = sanitizeHistory(historyRaw);
 	}
 
-	async saveSettings(): Promise<void> {
+	private async persistSettingsData(): Promise<void> {
 		const data: PluginData = { settings: this.settings, history: this.history };
 		await this.saveData(data);
+	}
+
+	async saveSettings(): Promise<void> {
+		await this.persistSettingsData();
 		// Keep the sidebar's scope preview in sync
 		for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE_EXPORTER_SIDEBAR)) {
 			const view = leaf.view as ExporterSidebarView | null;
@@ -162,6 +166,7 @@ export default class VaultExporterPlugin extends Plugin {
 			gateway: this.gateway,
 			history: this.history,
 			onHistoryChange: (h) => this.setHistory(h),
+			persistSettings: () => this.persistSettingsData(),
 			openSettings: () => openSettingsTab(this.app, this.manifest.id),
 		};
 	}
