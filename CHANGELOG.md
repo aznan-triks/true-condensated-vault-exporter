@@ -1,71 +1,61 @@
 # Changelog
 
-## [2.0.1] - 2026-10-02
+## [2.0.2] - 2026-10-04
 
-### Removed
-- Completed refactoring plan `plans/PLAN_refonte_v1.1.md` — the v1.1 rework shipped on 2026-09-29 and every "done when" condition was met, so the plan no longer served. It stays available in Git history.
-- Dead export `CONSOLIDATED_FORMAT_LABELS` (`src/features/formats.ts`) — never referenced anywhere; label strings already come from `EXPORT_COMMANDS` and `CONSOLIDATED_FORMATS`.
+### Fixed
+- Export cancellation now stays responsive during vault reads, and cancelled runs report files already written.
+- Read failures are included in the export summary instead of disappearing before the result is built.
+- Conflicting, empty, overlapping, or vault-escaping output paths are rejected before any output is written.
+- Split exports now handle a blank destination and nested grouping folders correctly.
+- Saved settings are type-checked and normalized on load; malformed values fall back to safe defaults.
+- Context commands now clear a saved tag filter while exporting the active folder or note, without changing persisted settings.
+- Tag-scoped exports exclude Canvas files and normalize body/frontmatter tags consistently.
+- Empty and BOM-prefixed frontmatter is parsed correctly. Each Markdown note's frontmatter is parsed once per run.
+- Dataview `file.ctime` and `file.day` now use creation time and ISO dates in note names. Unsupported or malformed queries remain visible instead of broadening results.
+- HTML exports now block unsafe link schemes, keep custom CSS inside the style element, and generate unique anchors for repeated or non-Latin headings.
+- ZIP paths are protected from archive traversal; unsupported ZIP32 size limits now produce a clear error.
+- Markdown links resolve explicit file extensions and encode spaces. The sidebar uses real icons and keyboard-accessible target controls, refreshes history immediately, and displays progress logs in the correct order.
 
 ### Changed
-- `.gitignore`: the two dated one-off backup entries (`_backup_wot_plugin_2026-09-29/`, `_backup_methode_2026-09-28/`) are replaced by a single `_backup_*/` pattern, so local temporary backups stay ignored without per-date maintenance.
-- README: unit-test count corrected (59 → 63, as reported by `npm run test`).
-- `NEXT_SESSION.md`: current state refreshed — v2.0.0 merged to `main` via PR #1, v2.0.1 released.
+- All plugin UI, export labels, project documentation, and helper-script messages are in English.
+- The README is shorter and includes illustrative UI previews; these are clearly identified as mock-ups, not live Obsidian captures.
+- Updated the development-only Moment dependency to a patched version.
+
+## [2.0.1] - 2026-10-02
+
+### Changed
+- Removed completed refactoring notes and unused format-label code.
+- Replaced dated local-backup ignore rules with the general `_backup_*/` pattern.
+- Corrected the documented unit-test count.
 
 ## [2.0.0] - 2026-10-02
 
 ### Added
-- **ZIP bundle export**: "Export everything as ZIP bundle" packs every consolidated format + the split files into a single, portable `.zip` (deflate-compressed, zero-dependency writer). Perfect for NotebookLM multi-source notebooks or sharing an export in one file. New setting: `zipOutputPath`.
-- **Multi-target exports**: the sidebar now lets you pick any combination of targets (NotebookLM, HTML, Markdown, Split, ZIP) and run them in one shot.
-- **Context commands**:
-  - "Export current note's folder (all targets)" — one click export of the folder containing the active note (in-memory scope override, settings untouched)
-  - "Export current note as clean Markdown" — writes `<note> (clean export).md` next to the note, using the same cleaning pipeline
-- **Client-side search in the HTML export**: filter box in the table of contents hides non-matching documents and TOC entries live, with a visible counter (zero-dependency inline script, works offline).
-- **Live scope preview**: the sidebar shows how many notes/canvases (and how many bytes) will actually be exported, refreshed on every settings change.
-- **Export history**: the last 5 export runs (targets, date, file count, size, outcome) are kept in the sidebar and persisted with the plugin data.
-- **"Open folder" shortcut**: after a successful export, a button reveals the first output file in the OS file manager (desktop).
-- **Tag scoping**: new `scopeTag` setting — export only notes carrying a given tag (body or frontmatter). Canvas files are excluded while a tag is active.
-- **Real Dataview WHERE expressions**: `and`/`or` (with correct precedence and parentheses), comparisons `=`, `!=`, `>`, `<`, `>=`, `<=`, `in (a, b, c)`, `like "wild*card"`, and `contains`/`startswith`/`endswith` as functions *or* infix. Fields: `title`, `tags`, `category`, `order`, `statut`, any custom property, `file.name`, `file.path`, `file.folder`, `file.ctime`, `file.mtime`, `file.day`.
-- **HTML export, fully reworked**:
-  - inline markdown rendering (bold, italic, strikethrough, inline code, links, images, bare autolinks) — previously shown as literal text
-  - (plus the client-side document search added in this release)
-  - dark *and* light theme (follows the viewer's `prefers-color-scheme`), with CSS custom properties so `customCss` can restyle everything
-  - two-level table of contents (documents + their headings, unique anchors), "Back to top" links, export date footer
-  - merged multi-line blockquotes with callout styling, task lists (`- [x]`), ordered lists
-  - print stylesheet (TOC hidden, one page per document) and mobile layout
-- **Canvas exports in reading order**: nodes are sorted top-to-bottom / left-to-right and canvas groups become `## section` headers. Labels are now English ("Linked note:", "Link:", "(Empty canvas)").
-- **Markdown link resolution**: the `markdown` wikilink format now resolves `[[Target]]` to the real vault path (e.g. `Notes/Target.md`) instead of a raw, extension-less target.
-- **Advanced settings surfaced**: `customCss` (textarea) and `yieldEvery` (notes per UI yield) were defined but unreachable — both are now in the Advanced section.
+- ZIP bundles containing the consolidated formats and split files.
+- Multi-target exports, live scope preview, and a five-run export history.
+- Context commands for exporting the active note's folder or creating a clean Markdown copy.
+- Client-side search, dark/light theming, a two-level table of contents, print styles, and mobile layout in HTML exports.
+- Tag scoping, in-memory Dataview rendering, Canvas extraction in visual order, and advanced settings for custom CSS and UI yielding.
 
 ### Changed
-- **Single frontmatter parse per run**: the pipeline builds a shared `ParsedFile[]` index once; the cleaner and the Dataview engine share it. Previously every Dataview block re-parsed the frontmatter of *every* note (O(queries × notes) → O(notes)).
-- **Parallel vault reads**: file loading is batched (8 at a time) instead of strictly sequential — noticeably faster on large vaults.
-- **Resilient loading**: a note that fails to read is skipped and reported in the console/summary instead of aborting the whole export.
-- **Split output**: group header now reads `Folder : <name>` (was `CATEGORY :`), and each document line includes its source path.
-- **Dataview output**: table id-column header is now `File`; empty results render `*No results found.*`.
-- Plugin data now persists `{ settings, history }`; the legacy format (bare settings object) is still read on load.
+- Shared frontmatter and link indexes reduce repeated parsing. Vault reads run in batches of eight.
+- Read failures are skipped instead of stopping the entire export.
+- Export settings and history use a backward-compatible persisted format.
 
 ### Fixed
-- **Feedback loop on re-export**: previous export outputs (consolidated files, ZIP, split folder) are now automatically excluded from the export scope, so running the export twice no longer ingests the first run's results. Same protection applies to the `* (clean export).md` artifacts produced by the "Export current note" command.
-- `FROM "#tag"` (quoted) in Dataview blocks is now recognized as a tag, not a folder path.
-- Canvas: a group header is no longer duplicated when ungrouped nodes sit between two grouped ones.
-- Dataview `SORT date` no longer compares one side by `dateCreation` and the other by `dateRevision`.
-- HTML heading anchors are now unique across documents (no more duplicated TOC targets).
-- Absolute-path writes use async `fs` (the UI no longer freezes during large disk writes).
+- Prevented exporter outputs from being re-imported on later runs.
+- Corrected quoted Dataview tag sources, Canvas group headings, duplicate HTML anchors, and synchronous absolute-path writes.
 
 ## [1.1.0] - 2026-09-29
 
-### Changed
-- Every format now cleans notes the same way, so the HTML export finally respects your link setting. — Single cleaning pipeline (`core/pipeline.ts`), notes cleaned once per run and shared by all formats; formats registered in `features/formats.ts`.
-- Default settings are now generic instead of tied to one personal vault. — `DEFAULT_SETTINGS` neutralized; obsolete saved keys dropped on load (`mergeSettings`).
-- Split files are grouped by the first folder under your scope root, and they can be written inside the vault. — No more hard-coded `WoT` folder; writes go through the gateway (vault-relative or absolute).
-
 ### Added
-- You can cancel a running export (panel button or "Cancel running export" command). — `AbortSignal` checked between notes and files; cancellation reported as info, not error.
-- You choose which folder's subfolders become split files. — `splitGroupFolder` setting.
-- Title of consolidated exports is configurable. — `documentTitle` setting.
+- Cancellable exports, configurable titles, and configurable split grouping.
+
+### Changed
+- All output formats now use the same note-cleaning pipeline. Defaults no longer depend on a personal vault, and split files can be written inside or outside the vault.
 
 ### Removed
-- The PDF export that was advertised but never existed, and the external Python mode. — `pdfOutputPath`, `executionEngine`, `pythonRunner.ts`, `exportSplitFiles` toggle removed.
+- The advertised-but-unimplemented PDF export and external Python execution mode.
 
 ### Fixed
-- A line starting with inline code no longer breaks the HTML layout. — Code fences detected on ``` only.
+- Inline code at the start of a line no longer breaks HTML layout.

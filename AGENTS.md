@@ -1,7 +1,5 @@
-# Point d'entrée — toute IA
+# Contributor entry point
 
-Au démarrage, lire dans l'ordre : `NEXT_SESSION.md` (état actuel), puis `CONTEXT.md` (règles du projet).
-Règles communes à tous les projets du coffre, si ton outil ne les charge pas déjà : `../METHODE.md`.
+Before making changes, read `NEXT_SESSION.md` for the current state, then `CONTEXT.md` for architecture and project invariants.
 
-@NEXT_SESSION.md
-@CONTEXT.md
+Keep code and user-facing text in English. Run `npm run check` before considering a code change complete. Preserve the Arena session branch; do not switch branches.

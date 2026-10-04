@@ -45,27 +45,32 @@ export function extractWikilinks(content: string): WikilinkMatch[] {
 export function buildLinkResolver(files: { path: string; name: string }[]): (target: string) => string | undefined {
 	const byPath = new Map<string, string>();
 	const byBasename = new Map<string, string>();
+	const normalizeTarget = (value: string): string =>
+		value.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '').replace(/\.(md|canvas)$/i, '').toLowerCase();
 
 	for (const file of files) {
-		const noExt = file.path.replace(/\.(md|canvas)$/i, '');
-		if (!byPath.has(noExt.toLowerCase())) {
-			byPath.set(noExt.toLowerCase(), file.path);
-		}
-		const base = file.name.replace(/\.(md|canvas)$/i, '');
-		if (base && !byBasename.has(base.toLowerCase())) {
-			byBasename.set(base.toLowerCase(), file.path);
-		}
+		const noExt = normalizeTarget(file.path);
+		if (!byPath.has(noExt)) byPath.set(noExt, file.path);
+		const base = normalizeTarget(file.name);
+		if (base && !byBasename.has(base)) byBasename.set(base, file.path);
 	}
 
 	return (target: string): string | undefined => {
-		const t = target.trim();
-		if (!t) return undefined;
-		const full = byPath.get(t.toLowerCase());
+		const normalized = normalizeTarget(target.trim());
+		if (!normalized) return undefined;
+		const full = byPath.get(normalized);
 		if (full) return full;
-		const base = t.split('/').pop()?.toLowerCase();
-		if (base) return byBasename.get(base);
-		return undefined;
+		const base = normalized.split('/').pop();
+		return base ? byBasename.get(base) : undefined;
 	};
+}
+
+function escapeMarkdownLabel(label: string): string {
+	return label.replace(/\\/g, '\\\\').replace(/\[/g, '\\[').replace(/\]/g, '\\]');
+}
+
+function encodeMarkdownPath(value: string): string {
+	return value.replace(/\\/g, '/').split('/').map((part) => encodeURIComponent(part)).join('/');
 }
 
 export function transformWikilinks(
@@ -103,13 +108,13 @@ export function transformWikilinks(
 		}
 
 		if (format === 'markdown') {
-			if (isEmbed) {
-				const resolved = resolveLink ? resolveLink(target) : target;
-				return `![${displayName}](${resolved || target})`;
-			}
 			const resolved = resolveLink ? resolveLink(target) : target;
-			const anchor = heading ? `#${heading.toLowerCase().replace(/\s+/g, '-')}` : '';
-			return `[${displayName}](${resolved || target}${anchor})`;
+			const destination = encodeMarkdownPath(resolved || target);
+			if (isEmbed) {
+				return `![${escapeMarkdownLabel(displayName)}](${destination})`;
+			}
+			const anchor = heading ? `#${encodeURIComponent(heading.toLowerCase().trim().replace(/\s+/g, '-'))}` : '';
+			return `[${escapeMarkdownLabel(displayName)}](${destination}${anchor})`;
 		}
 
 		return raw;

@@ -18,13 +18,16 @@ const SEPARATOR = '----------------------------------------';
 const ROOT_GROUP = 'Root';
 
 function joinPath(base: string, rel: string): string {
-	return base.replace(/[\\/]+$/, '') + '/' + rel;
+	const normalizedBase = base.trim().replace(/[\\/]+$/, '');
+	return normalizedBase ? normalizedBase + '/' + rel : rel;
 }
 
-function relativeToScope(notePath: string, scopeRoot: string): string {
-	const scope = normalizePath(scopeRoot);
-	const p = normalizePath(notePath);
-	return scope && p.startsWith(scope + '/') ? p.slice(scope.length + 1) : p;
+function relativeToFolder(notePath: string, folderPath: string): string | null {
+	const folder = normalizePath(folderPath);
+	const note = normalizePath(notePath);
+	if (!folder) return note;
+	if (!note.startsWith(folder + '/')) return null;
+	return note.slice(folder.length + 1);
 }
 
 export function buildSplitFiles(notes: CleanedNote[], settings: ExporterSettings): OutputFile[] {
@@ -35,22 +38,25 @@ export function buildSplitFiles(notes: CleanedNote[], settings: ExporterSettings
 			const frontmatter = !settings.stripFrontmatter && note.rawFrontmatter
 				? '---\n' + note.rawFrontmatter + '\n---\n\n'
 				: '';
-			const rel = relativeToScope(note.path, settings.scopeRoot).replace(/\.canvas$/, '.md');
+			const rel = (relativeToFolder(note.path, settings.scopeRoot) ?? note.path)
+				.replace(/\.canvas$/i, '.md');
 			return { path: joinPath(base, rel), content: frontmatter + note.body };
 		});
 	}
 
+	const groupingRoot = normalizePath(settings.splitGroupFolder) || normalizePath(settings.scopeRoot);
 	const groups = new Map<string, CleanedNote[]>();
 	for (const note of notes) {
-		const parts = relativeToScope(relativeToScope(note.path, settings.scopeRoot), settings.splitGroupFolder).split('/');
-		const group = parts.length > 1 ? parts[0]! : ROOT_GROUP;
+		const relative = relativeToFolder(note.path, groupingRoot);
+		const firstSegment = relative?.split('/')[0];
+		const group = relative && relative.includes('/') ? firstSegment ?? ROOT_GROUP : ROOT_GROUP;
 		groups.set(group, [...(groups.get(group) ?? []), note]);
 	}
 
 	return [...groups.entries()].map(([group, groupNotes]) => {
-		const lines = [RULE, 'Folder : ' + group, 'Documents : ' + groupNotes.length, RULE + '\n'];
+		const lines = [RULE, 'Folder: ' + group, 'Documents: ' + groupNotes.length, RULE, ''];
 		for (const note of groupNotes) {
-			lines.push('\n' + SEPARATOR, note.title, ' (' + note.path + ')', SEPARATOR + '\n', note.body, '\n');
+			lines.push('', SEPARATOR, note.title + ' (' + note.path + ')', SEPARATOR, '', note.body, '');
 		}
 		const safeName = group.replace(/[<>:"/\\|?*]/g, '_') + '.txt';
 		return { path: joinPath(base, safeName), content: lines.join('\n') };

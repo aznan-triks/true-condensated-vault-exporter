@@ -10,7 +10,7 @@
  *   - membership:           field in (a, b, c)
  *   - pattern:              field like "pre*fic*"   (* and ? wildcards)
  *   - functions:            contains(x, y), startswith(x, y), endswith(x, y)
- *   - fields:               title, tags, category, order, statut, any custom property,
+ *   - fields:               title, tags, category, order (legacy aliases supported), any custom property,
  *                           file.name, file.path, file.folder, file.ctime, file.mtime, file.day
  */
 
@@ -29,6 +29,13 @@ export interface ParsedDataviewQuery {
 
 export type FieldValue = string | string[] | number | undefined;
 
+class DataviewQueryError extends Error {
+	constructor(message: string) {
+		super(message);
+		this.name = 'DataviewQueryError';
+	}
+}
+
 function stripEnclosingQuotes(str: string): string {
 	const trimmed = str.trim();
 	if (
@@ -44,27 +51,20 @@ function stripEnclosingQuotes(str: string): string {
  * Parses a Dataview block.
  */
 export function parseDataviewQuery(rawBlock: string): ParsedDataviewQuery | null {
-	const lines = rawBlock.split(/\r?\n/).map(l => l.trim()).filter(l => l && !l.startsWith('//'));
+	const lines = rawBlock.split(/\r?\n/).map((line) => line.trim()).filter((line) => line && !line.startsWith('//'));
 	if (lines.length === 0) return null;
 
 	const firstLine = lines[0] ?? '';
-	let type: 'TABLE' | 'LIST' = 'TABLE';
-	let showId = true;
+	const withoutId = /\bWITHOUT\s+ID\b/i.test(firstLine);
+	const lineClean = firstLine.replace(/\bWITHOUT\s+ID\b/gi, '').trim();
+	let type: 'TABLE' | 'LIST';
 	let columns: string[] = [];
 
-	let lineClean = firstLine;
-	if (lineClean.toUpperCase().includes('WITHOUT ID')) {
-		showId = false;
-		lineClean = lineClean.replace(/WITHOUT ID/gi, '').trim();
-	}
-
-	if (lineClean.toUpperCase().startsWith('TABLE')) {
+	if (/^TABLE\b/i.test(lineClean)) {
 		type = 'TABLE';
 		const rest = lineClean.slice(5).trim();
-		if (rest) {
-			columns = rest.split(',').map(c => c.trim()).filter(Boolean);
-		}
-	} else if (lineClean.toUpperCase().startsWith('LIST')) {
+		if (rest) columns = rest.split(',').map((column) => column.trim()).filter(Boolean);
+	} else if (/^LIST\b/i.test(lineClean)) {
 		type = 'LIST';
 	} else {
 		return null;
@@ -76,32 +76,38 @@ export function parseDataviewQuery(rawBlock: string): ParsedDataviewQuery | null
 	let sortField: string | undefined;
 	let sortOrder: 'ASC' | 'DESC' = 'ASC';
 
-	for (let i = 1; i < lines.length; i++) {
-		const line = lines[i] ?? '';
-		const upper = line.toUpperCase();
-
-		if (upper.startsWith('FROM')) {
-			// FROM #tag, FROM "#tag", FROM "path" or FROM path
+	for (const line of lines.slice(1)) {
+		if (/^FROM\b/i.test(line)) {
 			const fromVal = stripEnclosingQuotes(line.slice(4).trim());
+			if (!fromVal) return null;
 			if (fromVal.startsWith('#')) {
 				fromTag = fromVal.slice(1).trim();
+				if (!fromTag) return null;
 			} else {
 				fromPath = fromVal;
 			}
-		} else if (upper.startsWith('WHERE')) {
-			whereClauses.push(line.slice(5).trim());
-		} else if (upper.startsWith('SORT')) {
-			const sortParts = line.slice(4).trim().split(/\s+/);
+		} else if (/^WHERE\b/i.test(line)) {
+			const clause = line.slice(5).trim();
+			if (!clause) return null;
+			whereClauses.push(clause);
+		} else if (/^SORT\b/i.test(line)) {
+			const sortParts = line.slice(4).trim().split(/\s+/).filter(Boolean);
+			if (
+				!sortParts[0] ||
+				sortParts.length > 2 ||
+				(sortParts[1] && !['ASC', 'DESC'].includes(sortParts[1].toUpperCase()))
+			) return null;
 			sortField = sortParts[0];
-			if (sortParts[1]?.toUpperCase() === 'DESC') {
-				sortOrder = 'DESC';
-			}
+			sortOrder = sortParts[1]?.toUpperCase() === 'DESC' ? 'DESC' : 'ASC';
+		} else {
+			// Leave unsupported Dataview commands visible instead of silently broadening results.
+			return null;
 		}
 	}
 
 	return {
 		type,
-		showId,
+		showId: !withoutId,
 		columns,
 		fromPath,
 		fromTag,
@@ -130,10 +136,14 @@ export function resolveField(field: string, item: ParsedFile): FieldValue {
 			return item.mtime ?? 0;
 		case 'file.ctime':
 		case 'ctime':
-			return item.mtime ?? 0;
+			return item.ctime ?? 0;
 		case 'file.day':
-		case 'day':
-			return item.mtime ? new Date(item.mtime).toISOString().slice(0, 10) : '';
+		case 'day': {
+			const match = item.name.match(/(?:^|[^0-9])(\d{4}-\d{2}-\d{2})(?:$|[^0-9])/);
+			if (!match?.[1]) return undefined;
+			const date = new Date(match[1] + 'T00:00:00.000Z');
+			return Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== match[1] ? undefined : match[1];
+		}
 	}
 
 	const meta = item.metadata;
@@ -149,8 +159,9 @@ export function resolveField(field: string, item: ParsedFile): FieldValue {
 		case 'order':
 		case 'ordre':
 			return meta.order;
+		case 'status':
 		case 'statut':
-			return meta.statut;
+			return meta.status;
 		case 'trello_url':
 			return meta.trelloUrl ?? '';
 		case 'date_creation':
@@ -251,21 +262,24 @@ function readTerm(p: ParserState): string {
 	skipWs(p);
 	const ch = p.src[p.pos];
 	if (ch === '"' || ch === "'") {
-		const end = p.src.indexOf(ch, p.pos + 1);
-		if (end === -1) {
-			const v = p.src.slice(p.pos + 1);
-			p.pos = p.src.length;
-			return v;
+		let escaped = false;
+		for (let end = p.pos + 1; end < p.src.length; end++) {
+			const current = p.src[end] ?? '';
+			if (current === ch && !escaped) {
+				const value = p.src.slice(p.pos + 1, end);
+				p.pos = end + 1;
+				return value.replace(/\\([\\"'])/g, '$1');
+			}
+			escaped = current === '\\' && !escaped;
+			if (current !== '\\') escaped = false;
 		}
-		const v = p.src.slice(p.pos + 1, end);
-		p.pos = end + 1;
-		return v;
+		throw new DataviewQueryError('Unclosed quoted value.');
 	}
 	// Bareword: anything up to whitespace, parens, commas, or comparison chars
 	const m = /^[^ \t\r\n(),=!<>]+/.exec(p.src.slice(p.pos));
-	const v = m?.[0] ?? '';
-	p.pos += v.length;
-	return v;
+	if (!m?.[0]) throw new DataviewQueryError('Expected a field or value.');
+	p.pos += m[0].length;
+	return m[0];
 }
 
 function callFunction(name: string, args: string[], item: ParsedFile): boolean {
@@ -276,8 +290,7 @@ function callFunction(name: string, args: string[], item: ParsedFile): boolean {
 		case 'startswith': return compareWith(lhs, rhs, 'startswith');
 		case 'endswith': return compareWith(lhs, rhs, 'endswith');
 		default:
-			// Unknown function: be permissive (do not exclude the row)
-			return true;
+			throw new DataviewQueryError('Unsupported function: ' + name);
 	}
 }
 
@@ -294,15 +307,13 @@ function parseCondition(p: ParserState, item: ParsedFile): boolean {
 			while (true) {
 				args.push(readTerm(p));
 				skipWs(p);
-				if (p.src[p.pos] === ',') {
-					p.pos++;
-					continue;
-				}
-				break;
+				if (p.src[p.pos] !== ',') break;
+				p.pos++;
 			}
 		}
-		skipWs(p);
-		if (p.src[p.pos] === ')') p.pos++;
+		if (p.src[p.pos] !== ')') throw new DataviewQueryError('Unclosed function call.');
+		p.pos++;
+		if (args.length !== 2) throw new DataviewQueryError('Expected two function arguments.');
 		return callFunction(lhs, args, item);
 	}
 
@@ -326,12 +337,12 @@ function parseCondition(p: ParserState, item: ParsedFile): boolean {
 	} else if (takeKeyword(p, 'endswith')) {
 		op = 'endswith';
 	} else {
-		return true; // Unrecognized condition: be permissive
+		throw new DataviewQueryError('Unsupported or incomplete WHERE expression.');
 	}
 
 	if (op === 'in') {
 		skipWs(p);
-		if (p.src[p.pos] !== '(') return true;
+		if (p.src[p.pos] !== '(') throw new DataviewQueryError('Expected a parenthesized list after "in".');
 		p.pos++;
 		const values: string[] = [];
 		while (true) {
@@ -344,14 +355,19 @@ function parseCondition(p: ParserState, item: ParsedFile): boolean {
 			skipWs(p);
 			if (p.src[p.pos] === ',') {
 				p.pos++;
+				continue;
 			}
+			if (p.src[p.pos] !== ')') throw new DataviewQueryError('Expected a comma or closing parenthesis in "in" list.');
+			p.pos++;
+			break;
 		}
+		if (values.length === 0) throw new DataviewQueryError('The "in" list cannot be empty.');
 		const lhsVal = resolveField(lhs, item);
-		const lhsStrs = valueToStrings(lhsVal).map((s) => s.toLowerCase());
-		return values.some((v) => lhsStrs.includes(stripEnclosingQuotes(v).toLowerCase()));
+		const lhsStrs = valueToStrings(lhsVal).map((value) => value.toLowerCase());
+		return values.some((value) => lhsStrs.includes(value.toLowerCase()));
 	}
 
-	const rhs = stripEnclosingQuotes(readTerm(p));
+	const rhs = readTerm(p);
 	if (op === 'like') {
 		return likeToRegex(rhs).test(String(resolveField(lhs, item) ?? ''));
 	}
@@ -374,7 +390,8 @@ function parseAtom(p: ParserState, item: ParsedFile): boolean {
 		p.pos++;
 		const v = parseOr(p, item);
 		skipWs(p);
-		if (p.src[p.pos] === ')') p.pos++;
+		if (p.src[p.pos] !== ')') throw new DataviewQueryError('Unclosed parenthesized expression.');
+		p.pos++;
 		return v;
 	}
 	return parseCondition(p, item);
@@ -393,11 +410,13 @@ function parseOr(p: ParserState, item: ParsedFile): boolean {
 function evaluateWhereCondition(item: ParsedFile, condition: string): boolean {
 	const trimmed = condition.trim();
 	if (!trimmed) return true;
-	try {
-		return parseOr({ src: trimmed, pos: 0 }, item);
-	} catch {
-		return true; // Unparseable condition: be permissive
+	const parser: ParserState = { src: trimmed, pos: 0 };
+	const result = parseOr(parser, item);
+	skipWs(parser);
+	if (parser.pos !== parser.src.length) {
+		throw new DataviewQueryError('Unexpected text in WHERE expression.');
 	}
+	return result;
 }
 
 /* ---------------- Query evaluation ---------------- */
@@ -411,10 +430,12 @@ function matchesFrom(query: ParsedDataviewQuery, item: ParsedFile): boolean {
 		}
 	}
 	if (query.fromTag) {
-		const lowTag = query.fromTag.toLowerCase();
-		const hasTag = item.metadata.tags.some(
-			(t) => t.toLowerCase() === lowTag || t.toLowerCase().startsWith(lowTag + '/')
-		);
+		const normalizeTag = (value: string): string => value.trim().replace(/^#/, '').toLowerCase();
+		const lowTag = normalizeTag(query.fromTag);
+		const hasTag = item.metadata.tags.some((tag) => {
+			const value = normalizeTag(tag);
+			return value === lowTag || value.startsWith(lowTag + '/');
+		});
 		if (!hasTag) return false;
 	}
 	return true;
@@ -427,15 +448,18 @@ function sortValue(field: string, item: ParsedFile): string {
 	return String(v);
 }
 
+function escapeMarkdownTableCell(value: string): string {
+	return value.replace(/\\/g, '\\\\').replace(/\|/g, '\\|').replace(/\r?\n/g, '<br>');
+}
+
 function columnValue(column: string, item: ParsedFile): string {
 	const colLow = column.toLowerCase();
 	if (colLow === 'file.link' || colLow === 'link') {
 		return '[[' + item.path + '|' + item.name + ']]';
 	}
-	const v = resolveField(column, item);
-	if (v === undefined) return '';
-	if (Array.isArray(v)) return v.join(', ');
-	return String(v);
+	const value = resolveField(column, item);
+	if (value === undefined) return '';
+	return escapeMarkdownTableCell(Array.isArray(value) ? value.join(', ') : String(value));
 }
 
 /**
@@ -476,7 +500,7 @@ export function evaluateDataviewQuery(query: ParsedDataviewQuery, files: ParsedF
 	}
 
 	const headers = query.showId ? ['File', ...query.columns] : [...query.columns];
-	const headerLine = '| ' + headers.join(' | ') + ' |';
+	const headerLine = '| ' + headers.map(escapeMarkdownTableCell).join(' | ') + ' |';
 	const separatorLine = '| ' + headers.map(() => '---').join(' | ') + ' |';
 
 	const rows = matched.map(m => {
@@ -493,9 +517,14 @@ export function evaluateDataviewQuery(query: ParsedDataviewQuery, files: ParsedF
 const DATAVIEW_BLOCK_REGEX = /^ {0,3}```dataview\r?\n([\s\S]*?)^ {0,3}```/gm;
 
 export function renderDataviewBlocks(content: string, files: ParsedFile[]): string {
-	return content.replace(DATAVIEW_BLOCK_REGEX, (_fullMatch, queryText: string) => {
+	return content.replace(DATAVIEW_BLOCK_REGEX, (fullMatch, queryText: string) => {
 		const parsed = parseDataviewQuery(queryText);
-		if (!parsed) return _fullMatch;
-		return evaluateDataviewQuery(parsed, files);
+		if (!parsed) return fullMatch;
+		try {
+			return evaluateDataviewQuery(parsed, files);
+		} catch (error: unknown) {
+			if (error instanceof DataviewQueryError) return fullMatch;
+			throw error;
+		}
 	});
 }
