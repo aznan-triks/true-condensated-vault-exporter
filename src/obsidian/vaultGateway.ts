@@ -4,7 +4,7 @@
  * This is the ONLY layer that touches the Obsidian API and node builtins.
  */
 
-import { App, FileSystemAdapter, TFile, normalizePath, Platform, Shell } from 'obsidian';
+import { App, FileSystemAdapter, TFile, normalizePath, Platform } from 'obsidian';
 import { ExportGateway, ExporterSettings, VaultFile } from '../core/types';
 import { isFileIncluded, isTagScopeMatch, reservedOutputPaths } from '../core/filter';
 import * as fs from 'fs';
@@ -20,6 +20,29 @@ function normalizeVaultTarget(targetPath: string): string {
 	const normalized = normalizePath(raw);
 	if (!normalized) throw new Error('Output path cannot be empty.');
 	return normalized;
+}
+
+interface ElectronShell {
+	showItemInFolder?: (fullPath: string) => void;
+}
+
+/**
+ * Resolves Electron's `shell` module. Obsidian's renderer exposes
+ * `window.require`; a bundler `require` is used as a fallback. Returns null
+ * when neither is available instead of throwing.
+ */
+function resolveElectronShell(): ElectronShell | null {
+	try {
+		const hostWindow = (globalThis as { window?: { require?: (id: string) => unknown } }).window;
+		const loader = typeof hostWindow?.require === 'function'
+			? hostWindow.require
+			: typeof require === 'function' ? require : null;
+		if (!loader) return null;
+		const electron = loader('electron') as { shell?: ElectronShell } | null;
+		return electron?.shell ?? null;
+	} catch {
+		return null;
+	}
 }
 
 export class ObsidianVaultGateway implements ExportGateway {
@@ -222,11 +245,29 @@ export class ObsidianVaultGateway implements ExportGateway {
 		return path.join(adapter.getBasePath(), normalizePath(targetPath));
 	}
 
-	/** Opens/reveals an output in the OS file manager (desktop only). */
+	/**
+	 * Opens/reveals an output in the OS file manager (desktop only).
+	 *
+	 * Obsidian does not export a reveal helper: the `obsidian` module has no
+	 * `Shell` (that name only ever existed as an unverified assumption), so this
+	 * uses Electron's shell, which is available in Obsidian's renderer because
+	 * the plugin is desktop-only. Missing/blocked APIs degrade to `false`
+	 * instead of throwing inside the progress panel's click handler.
+	 */
 	revealInFileManager(targetPath: string): boolean {
 		const osPath = this.revealOutput(targetPath);
 		if (!osPath) return false;
-		Shell.revealInFileExplorer(osPath);
-		return true;
+		const shell = resolveElectronShell();
+		if (typeof shell?.showItemInFolder !== 'function') {
+			console.warn('[vault-exporter] Could not reveal ' + osPath + ': no Electron shell available in this runtime.');
+			return false;
+		}
+		try {
+			shell.showItemInFolder(osPath);
+			return true;
+		} catch (error: unknown) {
+			console.warn('[vault-exporter] Could not reveal ' + osPath + ':', error);
+			return false;
+		}
 	}
 }

@@ -59,8 +59,12 @@ Markdown links point to vault-root-relative paths, not paths relative to each ex
 
 ```bash
 npm ci
-npm run check    # TypeScript, tests, and production build
+npm run check    # TypeScript, unit tests, production build, mock-Obsidian smoke test
+npm run test     # Vitest only
+npm run smoke    # load and exercise main.js against a mock Obsidian (needs a build)
 npm run dev      # esbuild watch mode
 ```
 
 The core is dependency-light TypeScript; Obsidian and Node APIs stay behind the vault gateway. The ZIP writer uses Node's built-in `zlib` and supports standard ZIP32 limits.
+
+`tools/mock-obsidian/` runs the real bundle the way Obsidian does — CommonJS load with host-provided `obsidian`/`electron`, jsdom for the DOM, and a temporary vault on disk. It catches load-time crashes and regressions in the user-facing flows without an Obsidian instance, and it types itself against the same API surface the plugin targets (see `minAppVersion` in `manifest.json`).
