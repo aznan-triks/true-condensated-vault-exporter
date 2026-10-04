@@ -3,6 +3,9 @@
  * Parses ```dataview blocks (TABLE, LIST) and evaluates them against
  * pre-parsed vault files (frontmatter parsed exactly once per run).
  *
+ * Queries may be written on a single line (`TABLE status FROM "Notes" WHERE
+ * status = "active"`) or with one clause per line; both forms are equivalent.
+ *
  * Supported WHERE expression subset:
  *   - boolean combinators:  A and B, A or B, ( ... )   ('or' binds loosest)
  *   - equality:             field = value,  field != value
@@ -12,6 +15,7 @@
  *   - functions:            contains(x, y), startswith(x, y), endswith(x, y)
  *   - fields:               title, tags, category, order (legacy aliases supported), any custom property,
  *                           file.name, file.path, file.folder, file.ctime, file.mtime, file.day
+ *   - column aliases:       TABLE file.name AS "Name", status
  */
 
 import { ParsedFile } from './types';
@@ -19,7 +23,10 @@ import { ParsedFile } from './types';
 export interface ParsedDataviewQuery {
 	type: 'TABLE' | 'LIST';
 	showId: boolean;
+	/** Field expression for each column (what is evaluated). */
 	columns: string[];
+	/** Header label for each column (alias when `AS` is used, else the field). */
+	columnLabels?: string[];
 	fromPath?: string;
 	fromTag?: string;
 	whereClauses: string[];
@@ -49,24 +56,41 @@ function stripEnclosingQuotes(str: string): string {
 
 /**
  * Parses a Dataview block.
+ *
+ * The whole block is tokenized rather than read line-by-line so that the
+ * canonical one-line form (`TABLE a, b FROM "x" WHERE … SORT …`) behaves like
+ * the multi-line form. Unsupported clauses (GROUP BY, FLATTEN, LIMIT, …) make
+ * the query unparseable, which leaves the block visible in the export instead
+ * of silently broadening the result set.
  */
 export function parseDataviewQuery(rawBlock: string): ParsedDataviewQuery | null {
-	const lines = rawBlock.split(/\r?\n/).map((line) => line.trim()).filter((line) => line && !line.startsWith('//'));
-	if (lines.length === 0) return null;
+	const text = rawBlock
+		.split(/\r?\n/)
+		.filter((line) => !line.trim().startsWith('//'))
+		.join('\n')
+		.trim();
+	if (!text) return null;
 
-	const firstLine = lines[0] ?? '';
-	const withoutId = /\bWITHOUT\s+ID\b/i.test(firstLine);
-	const lineClean = firstLine.replace(/\bWITHOUT\s+ID\b/gi, '').trim();
-	let type: 'TABLE' | 'LIST';
+	const withoutId = /\bWITHOUT\s+ID\b/i.test(text);
+	const stripped = text.replace(/\bWITHOUT\s+ID\b/gi, ' ');
+	const typeMatch = /^(TABLE|LIST)\b/i.exec(stripped);
+	if (!typeMatch) return null;
+
+	const type = typeMatch[1]?.toUpperCase() === 'LIST' ? 'LIST' : 'TABLE';
+	const { head, clauses } = splitClauses(stripped.slice(typeMatch[0].length));
+
 	let columns: string[] = [];
-
-	if (/^TABLE\b/i.test(lineClean)) {
-		type = 'TABLE';
-		const rest = lineClean.slice(5).trim();
-		if (rest) columns = rest.split(',').map((column) => column.trim()).filter(Boolean);
-	} else if (/^LIST\b/i.test(lineClean)) {
-		type = 'LIST';
-	} else {
+	let columnLabels: string[] = [];
+	if (type === 'TABLE') {
+		for (const raw of splitTopLevel(head, ',')) {
+			const column = parseColumn(raw);
+			if (column) {
+				columns.push(column.field);
+				columnLabels.push(column.label);
+			}
+		}
+	} else if (head.trim()) {
+		// `LIST <expression>` (e.g. `LIST file.mtime`) is not supported.
 		return null;
 	}
 
@@ -76,9 +100,12 @@ export function parseDataviewQuery(rawBlock: string): ParsedDataviewQuery | null
 	let sortField: string | undefined;
 	let sortOrder: 'ASC' | 'DESC' = 'ASC';
 
-	for (const line of lines.slice(1)) {
-		if (/^FROM\b/i.test(line)) {
-			const fromVal = stripEnclosingQuotes(line.slice(4).trim());
+	for (const clause of clauses) {
+		if (clause.keyword === 'group' || clause.keyword === 'flatten' || clause.keyword === 'limit') {
+			return null;
+		}
+		if (clause.keyword === 'from') {
+			const fromVal = stripEnclosingQuotes(clause.body);
 			if (!fromVal) return null;
 			if (fromVal.startsWith('#')) {
 				fromTag = fromVal.slice(1).trim();
@@ -86,12 +113,12 @@ export function parseDataviewQuery(rawBlock: string): ParsedDataviewQuery | null
 			} else {
 				fromPath = fromVal;
 			}
-		} else if (/^WHERE\b/i.test(line)) {
-			const clause = line.slice(5).trim();
-			if (!clause) return null;
-			whereClauses.push(clause);
-		} else if (/^SORT\b/i.test(line)) {
-			const sortParts = line.slice(4).trim().split(/\s+/).filter(Boolean);
+		} else if (clause.keyword === 'where') {
+			const expression = clause.body.trim();
+			if (!expression) return null;
+			whereClauses.push(expression);
+		} else if (clause.keyword === 'sort') {
+			const sortParts = clause.body.trim().split(/\s+/).filter(Boolean);
 			if (
 				!sortParts[0] ||
 				sortParts.length > 2 ||
@@ -99,9 +126,6 @@ export function parseDataviewQuery(rawBlock: string): ParsedDataviewQuery | null
 			) return null;
 			sortField = sortParts[0];
 			sortOrder = sortParts[1]?.toUpperCase() === 'DESC' ? 'DESC' : 'ASC';
-		} else {
-			// Leave unsupported Dataview commands visible instead of silently broadening results.
-			return null;
 		}
 	}
 
@@ -109,6 +133,7 @@ export function parseDataviewQuery(rawBlock: string): ParsedDataviewQuery | null
 		type,
 		showId: !withoutId,
 		columns,
+		...(columns.length > 0 ? { columnLabels } : {}),
 		fromPath,
 		fromTag,
 		whereClauses,
@@ -116,6 +141,135 @@ export function parseDataviewQuery(rawBlock: string): ParsedDataviewQuery | null
 		sortOrder,
 	};
 }
+
+/** Clauses recognised at the top level of a Dataview query. */
+const CLAUSE_KEYWORDS = new Set(['from', 'where', 'sort', 'group', 'flatten', 'limit']);
+
+interface QueryClause {
+	keyword: string;
+	body: string;
+}
+
+/**
+ * Splits the text following TABLE/LIST into the column/source head and the
+ * clause bodies. Keywords are detected at top level only (outside quotes and
+ * parentheses), so values such as `"born in FROM"` are not mistaken for
+ * clauses.
+ */
+function splitClauses(text: string): { head: string; clauses: QueryClause[] } {
+	const clauses: QueryClause[] = [];
+	let head = '';
+	let keyword = '';
+	let clauseStart = 0;
+	let quote = '';
+	let depth = 0;
+	let i = 0;
+
+	const closeClause = (end: number): void => {
+		if (keyword) {
+			clauses.push({ keyword, body: text.slice(clauseStart, end) });
+		} else {
+			head += text.slice(clauseStart, end);
+		}
+	};
+
+	while (i < text.length) {
+		const char = text[i] ?? '';
+		if (quote) {
+			if (char === '\\') {
+				i += 2;
+				continue;
+			}
+			if (char === quote) quote = '';
+			i++;
+			continue;
+		}
+		if (char === '"' || char === "'") {
+			quote = char;
+			i++;
+			continue;
+		}
+		if (char === '(') {
+			depth++;
+			i++;
+			continue;
+		}
+		if (char === ')') {
+			depth = Math.max(0, depth - 1);
+			i++;
+			continue;
+		}
+		if (depth === 0 && (i === 0 || /\s/.test(text[i - 1] ?? ''))) {
+			const match = /^[A-Za-z]+/.exec(text.slice(i));
+			if (match) {
+				const word = match[0];
+				const after = text[i + word.length] ?? '';
+				if (!/[A-Za-z0-9_]/.test(after) && CLAUSE_KEYWORDS.has(word.toLowerCase())) {
+					closeClause(i);
+					keyword = word.toLowerCase();
+					clauseStart = i + word.length;
+					i = clauseStart;
+					continue;
+				}
+			}
+		}
+		i++;
+	}
+	closeClause(text.length);
+
+	return { head: head.trim(), clauses };
+}
+
+/** Splits on top-level separators, ignoring separators inside quotes/parens. */
+function splitTopLevel(text: string, separator: string): string[] {
+	const parts: string[] = [];
+	let current = '';
+	let quote = '';
+	let depth = 0;
+	for (let i = 0; i < text.length; i++) {
+		const char = text[i] ?? '';
+		if (quote) {
+			current += char;
+			if (char === '\\') {
+				const next = text[i + 1];
+				if (next !== undefined) {
+					current += next;
+					i++;
+				}
+				continue;
+			}
+			if (char === quote) quote = '';
+			continue;
+		}
+		if (char === '"' || char === "'") {
+			quote = char;
+			current += char;
+			continue;
+		}
+		if (char === '(') depth++;
+		if (char === ')') depth = Math.max(0, depth - 1);
+		if (char === separator && depth === 0) {
+			parts.push(current);
+			current = '';
+			continue;
+		}
+		current += char;
+	}
+	parts.push(current);
+	return parts;
+}
+
+/** Parses one table column, supporting `field AS "Label"` aliases. */
+function parseColumn(raw: string): { field: string; label: string } | null {
+	const trimmed = raw.trim();
+	if (!trimmed) return null;
+	const aliasMatch = /^(.*?)\s+AS\s+(.+)$/i.exec(trimmed);
+	if (!aliasMatch?.[1]) return { field: trimmed, label: trimmed };
+	const field = aliasMatch[1].trim();
+	const label = stripEnclosingQuotes(aliasMatch[2] ?? '').trim() || field;
+	return { field, label };
+}
+
 
 /* ---------------- Field resolution ---------------- */
 
@@ -499,7 +653,8 @@ export function evaluateDataviewQuery(query: ParsedDataviewQuery, files: ParsedF
 		return matched.map(m => '- [[' + m.path + '|' + m.name + ']]').join('\n') + '\n';
 	}
 
-	const headers = query.showId ? ['File', ...query.columns] : [...query.columns];
+	const labels = query.columnLabels ?? query.columns;
+	const headers = query.showId ? ['File', ...labels] : [...labels];
 	const headerLine = '| ' + headers.map(escapeMarkdownTableCell).join(' | ') + ' |';
 	const separatorLine = '| ' + headers.map(() => '---').join(' | ') + ' |';
 

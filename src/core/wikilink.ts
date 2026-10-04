@@ -69,6 +69,25 @@ function escapeMarkdownLabel(label: string): string {
 	return label.replace(/\\/g, '\\\\').replace(/\[/g, '\\[').replace(/\]/g, '\\]');
 }
 
+/** Extensions rendered as real embeds in Markdown output. */
+const ATTACHMENT_EXTENSIONS = new Set([
+	'png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'bmp', 'avif', 'ico',
+	'pdf', 'mp3', 'wav', 'm4a', 'ogg', 'flac', 'mp4', 'webm', 'mov',
+	'xlsx', 'xls', 'docx', 'doc', 'pptx', 'ppt', 'zip',
+]);
+
+/**
+ * True when an embed points at a real attachment (image/PDF/audio…).
+ * Note and canvas embeds are links: `![Note](Note.md)` would render as a
+ * broken image, so they are emitted as plain links instead.
+ */
+function isAttachmentTarget(target: string): boolean {
+	const fileName = target.replace(/\\/g, '/').split('/').pop() ?? '';
+	const dot = fileName.lastIndexOf('.');
+	if (dot <= 0) return false;
+	return ATTACHMENT_EXTENSIONS.has(fileName.slice(dot + 1).toLowerCase());
+}
+
 function encodeMarkdownPath(value: string): string {
 	return value.replace(/\\/g, '/').split('/').map((part) => encodeURIComponent(part)).join('/');
 }
@@ -91,16 +110,12 @@ export function transformWikilinks(
 		const displayName = alias || targetBasename;
 
 		if (format === 'clean-text') {
-			if (isEmbed) {
-				return '';
-			}
+			// Embeds keep their display text: dropping them would silently
+			// delete content from the export (transclusion is not expanded).
 			return displayName;
 		}
 
 		if (format === 'canonical-alias') {
-			if (isEmbed) {
-				return '';
-			}
 			if (!alias || alias === targetBasename || alias === target) {
 				return targetBasename;
 			}
@@ -111,6 +126,9 @@ export function transformWikilinks(
 			const resolved = resolveLink ? resolveLink(target) : target;
 			const destination = encodeMarkdownPath(resolved || target);
 			if (isEmbed) {
+				if (!isAttachmentTarget(resolved || target)) {
+					return `[${escapeMarkdownLabel(displayName)}](${destination})`;
+				}
 				return `![${escapeMarkdownLabel(displayName)}](${destination})`;
 			}
 			const anchor = heading ? `#${encodeURIComponent(heading.toLowerCase().trim().replace(/\s+/g, '-'))}` : '';
