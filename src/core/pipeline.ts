@@ -11,7 +11,7 @@ import { ExporterSettings, FileMetadata, ParsedFile, VaultFile } from './types';
 import { defaultFileMetadata, parseFrontmatter } from './frontmatter';
 import { buildLinkResolver, transformWikilinks } from './wikilink';
 import { normalizePath } from './filter';
-import { removeComments, cleanCallouts, sanitizeWhitespace } from './markdownClean';
+import { applyToProse, removeComments, cleanCallouts, sanitizeWhitespace } from './markdownClean';
 import { renderDataviewBlocks } from './dataviewEngine';
 import { parseCanvasContent } from './canvasParser';
 
@@ -90,9 +90,12 @@ export function cleanNote(file: VaultFile, ctx: ExportContext): CleanedNote {
 	if (settings.renderDataview) {
 		body = renderDataviewBlocks(body, parsed);
 	}
-	body = removeComments(body);
-	body = cleanCallouts(body);
-	body = transformWikilinks(body, settings.wikilinkFormat, resolver);
+	// Cleaning is prose-only: fenced blocks and inline code spans are preserved
+	// verbatim, so code samples keep literal %% comments, [[wikilinks]] and
+	// callout markers.
+	body = applyToProse(body, removeComments);
+	body = applyToProse(body, cleanCallouts);
+	body = applyToProse(body, (text) => transformWikilinks(text, settings.wikilinkFormat, resolver));
 	body = sanitizeWhitespace(body);
 
 	return {

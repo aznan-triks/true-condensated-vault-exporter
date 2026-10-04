@@ -23,7 +23,12 @@ interface ScopeStats {
 export class ExporterSidebarView extends ItemView {
 	private selected: Set<ExportTarget> = new Set(['all']);
 	private stats: ScopeStats | null = null;
-	private open = false;
+	/**
+	 * Deliberately not named `open`: Obsidian's internal `View.open()` runs the
+	 * view lifecycle when the workspace applies a view state, and a class field
+	 * would shadow it ("Failed to open view: e.open is not a function").
+	 */
+	private isViewOpen = false;
 
 	constructor(
 		leaf: WorkspaceLeaf,
@@ -46,18 +51,18 @@ export class ExporterSidebarView extends ItemView {
 	}
 
 	override async onOpen(): Promise<void> {
-		this.open = true;
+		this.isViewOpen = true;
 		await this.computeStats();
 		this.render();
 	}
 
 	override async onClose(): Promise<void> {
-		this.open = false;
+		this.isViewOpen = false;
 	}
 
 	/** Re-render with fresh stats (called on settings change). */
 	async refresh(): Promise<void> {
-		if (!this.open) return;
+		if (!this.isViewOpen) return;
 		await this.computeStats();
 		this.render();
 	}

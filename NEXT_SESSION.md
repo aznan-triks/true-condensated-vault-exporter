@@ -2,11 +2,12 @@
 
 ## Current state
 
-- Working branch: `arena/01a105c7-true-condensated-vault-exporte`. Continue on this branch; do not switch branches.
-- Package and Obsidian manifest are version `2.0.2`. The release workflow in `.github/workflows/release.yml` builds the matching `v*` tag and attaches `main.js`, `manifest.json`, and `styles.css` to the GitHub release.
-- `npm run check` passed: TypeScript, 77 Vitest tests, and the production build. `git diff --check` is clean.
-- `npm audit` reported zero vulnerabilities after pinning the development-only `moment` override to `2.31.0`.
-- README screenshots and GIF are illustrative mock-ups, not captures from a running Obsidian instance. Manual Obsidian UI verification remains outstanding.
+- Working branch: `arena/01a10629-true-condensated-vault-exporte`. Continue on this branch; do not switch branches.
+- Package, manifest, and changelog are version `2.0.3` (unreleased). The release workflow in `.github/workflows/release.yml` builds the matching `v*` tag and attaches `main.js`, `manifest.json`, and `styles.css`.
+- `npm run check` passes: TypeScript (against the Obsidian 1.7.2 typings = declared `minAppVersion`), 93 Vitest tests, the production build, and the `npm run smoke` mock-Obsidian run (54 assertions). `npm audit` reports zero vulnerabilities.
+- The `obsidian` devDependency is pinned to the declared `minAppVersion`. Bump the two together.
+- Fixed in this session: the sidebar could not open at all on desktop Obsidian (a private field named `open` shadowed Obsidian's internal `View.open()`), the "Open folder" shortcut called a non-existent API, and embedded wikilinks were deleted from exports.
+- Still outstanding: no test on a live Obsidian instance. The smoke harness now covers the view lifecycle, but visual layout, themes, and real vault scale are unverified.
 
 ## Work completed in this session
 

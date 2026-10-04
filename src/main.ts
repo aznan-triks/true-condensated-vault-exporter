@@ -24,7 +24,9 @@ interface PluginData {
 }
 
 export default class VaultExporterPlugin extends Plugin {
-	override settings: ExporterSettings = mergeSettings(undefined);
+	// Not declared in the Obsidian typings for the minimum supported app
+	// version (1.7.2), so it must not use the `override` modifier.
+	settings: ExporterSettings = mergeSettings(undefined);
 	history: ExportHistoryEntry[] = [];
 	gateway!: ObsidianVaultGateway;
 

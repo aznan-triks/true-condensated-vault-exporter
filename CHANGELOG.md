@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.0.3] - 2026-10-04
+
+### Fixed
+- **The sidebar could not open in desktop Obsidian.** `ExporterSidebarView` declared a private field named `open`, which replaced Obsidian's internal `View.open()` lifecycle method on every instance. Opening the view therefore failed with `Failed to open view — TypeError: e.open is not a function`, making the ribbon icon, the sidebar, and the sidebar-driven exports unusable. The field is now `isViewOpen`, and the mock-Obsidian smoke test reproduces Obsidian's `view.open()` call so this class of shadowing cannot return unnoticed.
+- The **Open folder** shortcut no longer calls a non-existent Obsidian API (`Shell.revealInFileExplorer`), which threw inside the click handler on desktop. It now uses Electron's `shell.showItemInFolder` and logs a single warning when the shell is unavailable.
+- Embedded wikilinks (`![[Note]]`) keep their display text instead of being silently deleted from exports; in Markdown mode an embedded note becomes a link (`[Note](Note.md)`) while images, PDFs, and other attachments keep image syntax.
+- The project now type-checks against the declared `minAppVersion` (Obsidian 1.7.2 typings) instead of the newest published typings, so APIs newer than the minimum supported app version fail the build. This removed an `override` on `Plugin.settings` and an unchecked access to the internal `app.setting.tabs` shape.
+
+### Added
+- A source-level regression test that fails when a view, plugin, or settings-tab class declares an instance field shadowing an Obsidian lifecycle member (`open`, `load`, `display`, …).
+- `npm run smoke`: loads the production bundle against a mock Obsidian API in jsdom and a real temporary vault, then verifies plugin load, the workspace view lifecycle, sidebar rendering, the settings tab, every export target, content transformations, cancellation, ZIP integrity, and the reveal shortcut. It runs as the last step of `npm run check`.
+
 ## [2.0.2] - 2026-10-04
 
 ### Fixed
