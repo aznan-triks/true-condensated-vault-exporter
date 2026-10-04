@@ -4,7 +4,7 @@ import * as path from 'path';
 import { isFileIncluded, isTagScopeMatch, matchesTag, reservedOutputPaths } from '../src/core/filter';
 import { extractWikilinks, transformWikilinks, buildLinkResolver } from '../src/core/wikilink';
 import { parseFrontmatter } from '../src/core/frontmatter';
-import { removeComments, cleanCallouts, sanitizeWhitespace } from '../src/core/markdownClean';
+import { applyToProse, removeComments, cleanCallouts, sanitizeWhitespace, splitContentSegments } from '../src/core/markdownClean';
 import { parseDataviewQuery, evaluateDataviewQuery, renderDataviewBlocks, resolveField } from '../src/core/dataviewEngine';
 import { formatForNotebookLM } from '../src/core/notebooklmFormatter';
 import { formatForHtml, simpleMarkdownToHtml, renderInline, noteHeadings } from '../src/core/htmlFormatter';
@@ -118,7 +118,25 @@ describe('wikilink', () => {
 	it('transforms wikilinks to clean text', () => {
 		const text = 'See [[Knowledge Base/01_World/Places#Capital|The Capital]] and ![[image.png]]';
 		const clean = transformWikilinks(text, 'clean-text');
-		expect(clean).toBe('See The Capital and ');
+		expect(clean).toBe('See The Capital and image.png');
+	});
+
+	it('keeps the display text of note embeds instead of deleting them', () => {
+		expect(transformWikilinks('![[Embedded Note]]', 'clean-text')).toBe('Embedded Note');
+		expect(transformWikilinks('![[Notes/Target#Section|Alias]]', 'clean-text')).toBe('Alias');
+		expect(transformWikilinks('![[Embedded Note]]', 'canonical-alias')).toBe('Embedded Note');
+		expect(transformWikilinks('Before ![[Embedded Note]] after', 'clean-text')).toBe('Before Embedded Note after');
+	});
+
+	it('emits attachment embeds as images and note embeds as links in markdown mode', () => {
+		const files = [
+			{ path: 'Assets/pic.png', name: 'pic.png' },
+			{ path: 'Notes/Target.md', name: 'Target.md' },
+		];
+		const resolver = buildLinkResolver(files);
+		expect(transformWikilinks('![[Assets/pic.png]]', 'markdown', resolver)).toBe('![pic.png](Assets/pic.png)');
+		expect(transformWikilinks('![[Target]]', 'markdown', resolver)).toBe('[Target](Notes/Target.md)');
+		expect(transformWikilinks('![[Target|Alias]]', 'markdown', resolver)).toBe('[Alias](Notes/Target.md)');
 	});
 
 	it('transforms wikilinks to canonical-alias format', () => {
@@ -247,6 +265,45 @@ describe('markdownClean', () => {
 		expect(cleaned).toContain('Hello  world');
 		expect(cleaned).toContain('> **[NOTE: Note]**');
 		expect(cleaned).not.toContain('secret');
+	});
+
+	it('splits prose from fenced blocks and inline code', () => {
+		const segments = splitContentSegments('before `inline` after\n\n```js\nconst a = 1;\n```\nend');
+		expect(segments.map((s) => s.code)).toEqual([false, true, false, true, false]);
+		expect(segments.filter((s) => s.code).map((s) => s.text)).toEqual(['`inline`', '```js\nconst a = 1;\n```']);
+	});
+
+	it('never rewrites comments, wikilinks or callouts inside code', () => {
+		const text = [
+			'Prose %%secret%% and [[Link]].',
+			'',
+			'```python',
+			'# [[AnotherLink]] inside code',
+			'x = "%% not a comment %%"',
+			'> [!NOTE] not a callout',
+			'```',
+			'',
+			'Inline `[[NotALink]] and %%not a comment%%` end.',
+		].join('\n');
+		const cleaned = sanitizeWhitespace(
+			applyToProse(
+				applyToProse(applyToProse(text, removeComments), cleanCallouts),
+				(prose) => transformWikilinks(prose, 'markdown', () => undefined)
+			)
+		);
+		expect(cleaned).toContain('Prose  and [Link](Link).');
+		expect(cleaned).toContain('# [[AnotherLink]] inside code');
+		expect(cleaned).toContain('x = "%% not a comment %%"');
+		expect(cleaned).toContain('> [!NOTE] not a callout');
+		expect(cleaned).toContain('Inline `[[NotALink]] and %%not a comment%%` end.');
+		expect(cleaned).not.toContain('secret');
+		// Unterminated fence: everything after it is literal code.
+		const open = applyToProse('text %%gone%%\n```\nstill %%kept%%', removeComments);
+		expect(open).toBe('text \n```\nstill %%kept%%');
+	});
+
+	it('collapses blank lines in prose but keeps them inside code', () => {
+		expect(sanitizeWhitespace('a\n\n\n\n```\nx\n\n\ny\n```\n\n\n\nb')).toBe('a\n\n```\nx\n\n\ny\n```\n\nb');
 	});
 });
 
@@ -398,6 +455,46 @@ describe('dataviewEngine', () => {
 		expect(evaluateDataviewQuery(q, parsed)).toBe('*No results found.*\n');
 	});
 
+	it('parses single-line queries (canonical Dataview syntax)', () => {
+		const query = parseDataviewQuery(
+			'TABLE ordre, title FROM "Knowledge Base/80_History/Events" WHERE ordre = "01" SORT ordre ASC'
+		)!;
+		expect(query.columns).toEqual(['ordre', 'title']);
+		expect(query.fromPath).toBe('Knowledge Base/80_History/Events');
+		expect(query.whereClauses).toEqual(['ordre = "01"']);
+		expect(query.sortField).toBe('ordre');
+		const output = evaluateDataviewQuery(query, parsed);
+		expect(output).toContain('| File | ordre | title |');
+		expect(output).toContain('Event 1');
+		expect(output).not.toContain('Event 2');
+		expect(output).not.toContain('World');
+
+		const list = parseDataviewQuery('LIST FROM #lore')!;
+		expect(list.fromTag).toBe('lore');
+		const listOutput = evaluateDataviewQuery(list, parsed);
+		expect(listOutput).toContain('Event1');
+		expect(listOutput).not.toContain('World');
+	});
+
+	it('supports AS aliases and keyword-like quoted values', () => {
+		const query = parseDataviewQuery(
+			'TABLE file.name AS "Name", ordre AS Order FROM "Knowledge Base/80_History" WHERE title = "World" SORT ordre DESC'
+		)!;
+		expect(query.columns).toEqual(['file.name', 'ordre']);
+		expect(query.columnLabels).toEqual(['Name', 'Order']);
+		const output = evaluateDataviewQuery(query, parsed);
+		expect(output).toContain('| File | Name | Order |');
+		expect(output).toContain('World');
+		// The aliased column keeps the real value (aliases only relabel it).
+		expect(output).toMatch(/\| \[\[Knowledge Base\/80_History\/World\.md\|World\]\] \| World \| 99 \|/);
+		expect(output).not.toContain('Event 1');
+
+		// Quoted keywords are values, not clauses.
+		const quoted = parseDataviewQuery('TABLE title WHERE title = "from where sort"')!;
+		expect(quoted.fromPath).toBeUndefined();
+		expect(quoted.whereClauses).toEqual(['title = "from where sort"']);
+	});
+
 	it('leaves unsupported or malformed Dataview queries visible instead of broadening results', () => {
 		const unsupported = '```dataview\nTABLE title\nLIMIT 5\n```';
 		expect(renderDataviewBlocks(unsupported, parsed)).toBe(unsupported);
@@ -407,6 +504,14 @@ describe('dataviewEngine', () => {
 		expect(renderDataviewBlocks(unclosedGroup, parsed)).toBe(unclosedGroup);
 		const invalidSort = '```dataview\nTABLE title\nSORT title DESC, status\n```';
 		expect(renderDataviewBlocks(invalidSort, parsed)).toBe(invalidSort);
+
+		// Unsupported clauses must stay visible in single-line form too.
+		const groupBy = '```dataview\nTABLE title FROM "Knowledge Base/80_History" GROUP BY ordre\n```';
+		expect(renderDataviewBlocks(groupBy, parsed)).toBe(groupBy);
+		const limit = '```dataview\nTABLE title FROM "Knowledge Base/80_History" LIMIT 5\n```';
+		expect(renderDataviewBlocks(limit, parsed)).toBe(limit);
+		const listExpression = '```dataview\nLIST file.mtime FROM #lore\n```';
+		expect(renderDataviewBlocks(listExpression, parsed)).toBe(listExpression);
 	});
 });
 
@@ -605,6 +710,22 @@ describe('pipeline', () => {
 		const note = cleanNote(files[0]!, ctx);
 		expect(note.body).toBe('See [Cible](Cible.md)');
 	});
+
+	it('cleans prose without rewriting code blocks', () => {
+		const files: VaultFile[] = [
+			{
+				path: 'Code.md',
+				name: 'Code.md',
+				content: 'Prose %%hidden%% [[Cible]]\n\n```python\nx = "%% kept %%"\n# [[Cible]] kept\n```\n',
+			},
+			{ path: 'Cible.md', name: 'Cible.md', content: 'target' },
+		];
+		const ctx = createExportContext(files, { ...DEFAULT_SETTINGS, wikilinkFormat: 'markdown' });
+		const note = cleanNote(files[0]!, ctx);
+		expect(note.body).toContain('```python\nx = "%% kept %%"\n# [[Cible]] kept\n```');
+		expect(note.body).toContain('[Cible](Cible.md)');
+		expect(note.body).not.toContain('hidden');
+	});
 });
 
 describe('settings', () => {
@@ -659,6 +780,30 @@ describe('architecture', () => {
 		for (const file of tsFiles('src/core')) {
 			for (const imp of importsOf(file)) {
 				expect(imp, file).not.toMatch(/features|ui|commands|obsidian\//);
+			}
+		}
+	});
+
+	// Guards against importing APIs Obsidian does not export (e.g. a `Shell`
+	// helper that only ever existed in an internal type augmentation).
+	it('only imports symbols the obsidian package actually exports', () => {
+		const dts = fs.readFileSync(path.join('node_modules', 'obsidian', 'obsidian.d.ts'), 'utf8');
+		const exported = new Set<string>();
+		for (const match of dts.matchAll(
+			/^export\s+(?:declare\s+)?(?:abstract\s+)?(?:class|function|const|let|var|interface|type|enum|namespace)\s+([A-Za-z_$][\w$]*)/gm
+		)) {
+			exported.add(match[1]!);
+		}
+		expect(exported.size).toBeGreaterThan(100);
+		for (const file of tsFiles('src')) {
+			const source = fs.readFileSync(file, 'utf8');
+			for (const match of source.matchAll(/import\s+(?:type\s+)?\{([^}]+)\}\s*from\s*'obsidian'/g)) {
+				for (const entry of match[1]!.split(',')) {
+					const name = entry.trim().split(/\s+as\s+/)[0]?.trim();
+					if (name) {
+						expect(exported.has(name), file + ' imports `' + name + '` which obsidian does not export').toBe(true);
+					}
+				}
 			}
 		}
 	});

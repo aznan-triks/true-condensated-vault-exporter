@@ -1,5 +1,15 @@
 # Changelog
 
+## [2.0.3] - 2026-10-04
+
+### Fixed
+- The **Open folder** shortcut no longer calls a non-existent Obsidian API (`Shell.revealInFileExplorer`), which threw inside the click handler on desktop. It now uses Electron's `shell.showItemInFolder` and logs a single warning when the shell is unavailable.
+- Embedded wikilinks (`![[Note]]`) keep their display text instead of being silently deleted from exports; in Markdown mode an embedded note becomes a link (`[Note](Note.md)`) while images, PDFs, and other attachments keep image syntax.
+- The project now type-checks against the declared `minAppVersion` (Obsidian 1.7.2 typings) instead of the newest published typings, so APIs newer than the minimum supported app version fail the build. This removed an `override` on `Plugin.settings` and an unchecked access to the internal `app.setting.tabs` shape.
+
+### Added
+- `npm run smoke`: loads the production bundle against a mock Obsidian API in jsdom and a real temporary vault, then verifies plugin load, sidebar rendering, the settings tab, every export target, content transformations, cancellation, ZIP integrity, and the reveal shortcut. It runs as the last step of `npm run check`.
+
 ## [2.0.2] - 2026-10-04
 
 ### Fixed
