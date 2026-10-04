@@ -171,8 +171,14 @@ const has = (rel) => fs.existsSync(path.join(VAULT, rel));
 	record('no console errors during load', consoleErrors.length === 0, consoleErrors.join(' | '));
 
 	console.log('\n--- sidebar ---');
-	await plugin.activateSidebarView();
+	let openError = null;
+	try {
+		await plugin.activateSidebarView();
+	} catch (error) {
+		openError = error;
+	}
 	const leaf = plugin.app.workspace.getLeavesOfType('vault-exporter-sidebar')[0];
+	record('the workspace can open the sidebar view', !openError, openError ? String(openError.message ?? openError) : '');
 	const view = leaf?.view;
 	record('view created on the right leaf', Boolean(view) && leaf.side === 'right');
 	record('header rendered', view?.containerEl.textContent.includes('Vault Exporter') === true);
