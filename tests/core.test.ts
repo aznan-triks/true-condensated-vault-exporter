@@ -619,23 +619,69 @@ describe('formatters and split export', () => {
 		for (const id of ids) expect(html).toContain('href="#' + id + '"');
 	});
 
-	it('HTML ships a client-side document filter', () => {
+	it('HTML ships an optional client-side document filter', () => {
 		const html = formatForHtml(notesFor(DEFAULT_SETTINGS), DEFAULT_SETTINGS, NOW);
 		expect(html).toContain('<input id="ve-search"');
 		expect(html).toContain('data-doc-id="doc-0"');
 		expect(html).toContain('window.veFilter = apply;');
 		// every toc item is associated with its document
 		expect((html.match(/data-doc-id="doc-\d+"/g) ?? []).length).toBe(2);
+
+		const withoutSearchSettings = { ...DEFAULT_SETTINGS, htmlShowSearch: false };
+		const withoutSearch = formatForHtml(notesFor(withoutSearchSettings), withoutSearchSettings, NOW);
+		expect(withoutSearch).toContain('<nav id="toc">');
+		expect(withoutSearch).not.toContain('<input id="ve-search"');
+		expect(withoutSearch).not.toContain('window.veFilter = apply;');
 	});
 
-	it('HTML supports dark/light theming and export date', () => {
+	it('HTML supports system, light, and dark themes and export date', () => {
 		const html = formatForHtml(notesFor(DEFAULT_SETTINGS), DEFAULT_SETTINGS, NOW);
+		expect(html).toContain('<html data-ve-theme="system">');
 		expect(html).toContain('prefers-color-scheme: light');
 		expect(html).toContain('Exported ' + NOW);
+		const light = formatForHtml(notesFor({ ...DEFAULT_SETTINGS, htmlTheme: 'light' }), { ...DEFAULT_SETTINGS, htmlTheme: 'light' }, NOW);
+		expect(light).toContain('<html data-ve-theme="light">');
+		expect(light).toContain('html[data-ve-theme="light"]');
+		const dark = formatForHtml(notesFor({ ...DEFAULT_SETTINGS, htmlTheme: 'dark' }), { ...DEFAULT_SETTINGS, htmlTheme: 'dark' }, NOW);
+		expect(dark).toContain('<html data-ve-theme="dark">');
+		const unsafeAccent = { ...DEFAULT_SETTINGS, htmlAccentColor: '#123456; background: url(evil)' };
+		const safeAccentHtml = formatForHtml(notesFor(unsafeAccent), unsafeAccent, NOW);
+		expect(safeAccentHtml).toContain('--ve-accent: #8b72d9');
+		expect(safeAccentHtml).not.toContain('background: url(evil)');
+
 		const withCss = formatForHtml(notesFor({ ...DEFAULT_SETTINGS, customCss: ':root { --ve-accent: #c0392b; }' }), { ...DEFAULT_SETTINGS, customCss: ':root { --ve-accent: #c0392b; }' }, NOW);
 		expect(withCss).toContain('--ve-accent: #c0392b');
 		const injectedCss = formatForHtml(notesFor({ ...DEFAULT_SETTINGS, customCss: '</style><script>alert(1)</script>' }), { ...DEFAULT_SETTINGS, customCss: '</style><script>alert(1)</script>' }, NOW);
 		expect(injectedCss).not.toContain('</style><script>');
+	});
+
+	it('HTML personalization controls accent, typography, width, visibility, and escaped attribution', () => {
+		const settings = {
+			...DEFAULT_SETTINGS,
+			htmlTheme: 'dark' as const,
+			htmlAccentColor: '#c0392b',
+			htmlFont: 'serif' as const,
+			htmlContentWidth: 1120,
+			htmlShowToc: false,
+			htmlShowSearch: false,
+			htmlShowPaths: false,
+			htmlShowMetadata: false,
+			htmlShowFooter: true,
+			htmlFooterText: 'Acme <Research>',
+		};
+		const html = formatForHtml(notesFor(settings), settings, NOW);
+		expect(html).toContain('--ve-accent: #c0392b');
+		expect(html).toContain('--ve-font-family: Georgia, \'Times New Roman\', serif');
+		expect(html).toContain('--ve-content-width: 1120px');
+		expect(html).toContain('<body id="top" class="ve-no-toc">');
+		expect(html).not.toContain('<nav id="toc">');
+		expect(html).not.toContain('<input id="ve-search"');
+		expect(html).not.toContain('<span class="path-hint">');
+		expect(html).not.toContain('<div class="doc-meta">');
+		expect(html).toContain('Acme &lt;Research&gt;');
+
+		const noFooter = formatForHtml(notesFor({ ...settings, htmlShowFooter: false }), { ...settings, htmlShowFooter: false }, NOW);
+		expect(noFooter).not.toContain('<footer class="ve-footer">');
 	});
 
 	it('noteHeadings ignores code fences', () => {
@@ -739,25 +785,62 @@ describe('settings', () => {
 	it('has the new v2 keys with neutral defaults', () => {
 		expect(DEFAULT_SETTINGS.zipOutputPath).toBe('Vault export.zip');
 		expect(DEFAULT_SETTINGS.scopeTag).toBe('');
+		expect(DEFAULT_SETTINGS.rememberTargetSelection).toBe(true);
+		expect(DEFAULT_SETTINGS.lastSelectedTargets).toEqual(['all']);
+		expect(DEFAULT_SETTINGS.progressPanelAutoCloseSeconds).toBe(8);
+		expect(DEFAULT_SETTINGS.autoRevealOutput).toBe(false);
 		expect(DEFAULT_SETTINGS.yieldEvery).toBeGreaterThan(0);
+		expect(DEFAULT_SETTINGS.htmlTheme).toBe('system');
+		expect(DEFAULT_SETTINGS.htmlAccentColor).toMatch(/^#[0-9a-f]{6}$/i);
+		expect(DEFAULT_SETTINGS.htmlShowToc).toBe(true);
+	});
+
+	it('normalizes remembered target preferences and supports opting out', () => {
+		const settings = mergeSettings({ rememberTargetSelection: false, lastSelectedTargets: ['zip', 'html', 'zip', 'invalid'] });
+		expect(settings.rememberTargetSelection).toBe(false);
+		expect(settings.lastSelectedTargets).toEqual(['zip', 'html']);
+		expect(mergeSettings({ lastSelectedTargets: [] }).lastSelectedTargets).toEqual(['all']);
+		const behavior = mergeSettings({ progressPanelAutoCloseSeconds: 0, autoRevealOutput: true });
+		expect(behavior.progressPanelAutoCloseSeconds).toBe(0);
+		expect(behavior.autoRevealOutput).toBe(true);
 	});
 
 	it('falls back safely when saved settings have invalid types or enum values', () => {
 		const merged = mergeSettings({
 			documentTitle: 42,
+			rememberTargetSelection: 'yes',
+			lastSelectedTargets: ['html', 'invalid', 'html', 'all'],
+			progressPanelAutoCloseSeconds: 10,
+			autoRevealOutput: 'yes',
 			excludedFolders: 'not-an-array',
 			excludedFiles: [' a.md ', 4, 'a.md', ''],
 			includeCanvas: 'yes',
 			splitMode: 'invalid',
 			wikilinkFormat: 'unknown',
+			htmlTheme: 'sepia',
+			htmlAccentColor: 'red; background: url(evil)',
+			htmlFont: 'comic-sans',
+			htmlContentWidth: 20,
+			htmlShowToc: 'yes',
+			htmlFooterText: 'x'.repeat(250),
 			yieldEvery: 1e30,
 		});
 		expect(merged.documentTitle).toBe(DEFAULT_SETTINGS.documentTitle);
+		expect(merged.rememberTargetSelection).toBe(true);
+		expect(merged.lastSelectedTargets).toEqual(['all']);
+		expect(merged.progressPanelAutoCloseSeconds).toBe(DEFAULT_SETTINGS.progressPanelAutoCloseSeconds);
+		expect(merged.autoRevealOutput).toBe(DEFAULT_SETTINGS.autoRevealOutput);
 		expect(merged.excludedFolders).toEqual(DEFAULT_SETTINGS.excludedFolders);
 		expect(merged.excludedFiles).toEqual(['a.md']);
 		expect(merged.includeCanvas).toBe(DEFAULT_SETTINGS.includeCanvas);
 		expect(merged.splitMode).toBe(DEFAULT_SETTINGS.splitMode);
 		expect(merged.wikilinkFormat).toBe(DEFAULT_SETTINGS.wikilinkFormat);
+		expect(merged.htmlTheme).toBe('system');
+		expect(merged.htmlAccentColor).toBe(DEFAULT_SETTINGS.htmlAccentColor);
+		expect(merged.htmlFont).toBe('system');
+		expect(merged.htmlContentWidth).toBe(680);
+		expect(merged.htmlShowToc).toBe(true);
+		expect(merged.htmlFooterText).toHaveLength(200);
 		expect(merged.yieldEvery).toBe(1000);
 	});
 });

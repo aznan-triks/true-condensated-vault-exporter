@@ -13,7 +13,7 @@ An Obsidian desktop plugin for turning a vault, folder, or tagged subset into fi
 | Target | Output |
 |---|---|
 | **NotebookLM** | One structured `.txt` file with clear note boundaries and optional metadata. |
-| **HTML** | A styled document with a searchable table of contents, dark/light theme, and print layout. |
+| **HTML** | A styled document with a searchable table of contents, customizable system/light/dark theme, and print layout. |
 | **Markdown** | One `.md` file with an anchored table of contents. |
 | **Split** | One `.txt` per folder, or one cleaned `.md` file per note. |
 | **ZIP bundle** | A portable archive containing all three consolidated formats and split files. The ZIP is a separate target. |
@@ -23,10 +23,10 @@ An Obsidian desktop plugin for turning a vault, folder, or tagged subset into fi
 ## Use it
 
 1. Open the **Vault Exporter** sidebar from the ribbon, or use the Command Palette.
-2. Choose targets and select **Run export**. Select **All non-ZIP exports** for NotebookLM, HTML, Markdown, and split output; **ZIP bundle** is a separate target.
-3. Track progress, cancel a run, and open the output folder when it finishes.
+2. Choose targets and select **Run export**. The sidebar summarizes the selected target count and formats. Select **All non-ZIP exports** for NotebookLM, HTML, Markdown, and split output; **ZIP bundle** is a separate target.
+3. Track live progress and elapsed time, cancel a run, and review the file count, size, skipped notes, and duration when it finishes. Reveal the output manually from the panel, or enable automatic reveal on success.
 
-The sidebar also shows a scope preview and the five most recent runs. When a tag filter is active, the preview is path-based and the sidebar says so; Canvas files are not included in tag-scoped exports.
+The sidebar also shows a scope preview and the five most recent runs, including each run’s duration. It remembers your selected export targets by default; turn this off in **Settings → General** to start with all targets instead. Use a history row’s folder button to reveal its first output, or clear the history without deleting exported files. When a tag filter is active, the preview is path-based and the sidebar says so; Canvas files are not included in tag-scoped exports. The sidebar and progress panel adapt to narrower and shorter windows, with larger touch targets.
 
 ### Scope and content
 
@@ -48,10 +48,14 @@ Then reload Obsidian and enable **Vault Exporter** in **Settings → Community p
 
 ## Settings worth knowing
 
+The settings page is grouped and searchable: type a setting name or description to narrow the list.
+
 - **Scope Root / Scope Tag** and exclusion lists control what is read.
 - Each consolidated format, the ZIP, and split files have configurable output paths. Use vault-relative paths or absolute paths on desktop; a blank split destination means the vault root.
 - Split mode chooses folder-grouped text files or a one-to-one Markdown mirror.
-- Markdown-processing settings control frontmatter, Dataview, Canvas, wikilinks, and ignored properties. **Advanced** includes custom HTML CSS and UI yield frequency.
+- Markdown-processing settings control frontmatter, Dataview, Canvas, wikilinks, and ignored properties.
+- **Export Feedback & Behavior** lets you keep successful progress panels open or choose their auto-close delay. Cancelled and failed panels remain visible for review. You can also reveal the first output automatically in the desktop file manager.
+- **HTML Personalization** lets you choose system/light/dark appearance, accent color, typography, reading width, navigation/search, source paths, metadata badges, and footer attribution. A live preview reflects theme, accent, typography, and width changes. These choices only affect the standalone HTML export. **Advanced** still includes custom HTML CSS and UI yield frequency.
 
 Markdown links point to vault-root-relative paths, not paths relative to each exported file. Consolidated Markdown and HTML work best at the vault root; links may need adjustment for outputs saved elsewhere, especially split Markdown mirrors. Unreadable notes are skipped and reported. Files already written are kept if an export is cancelled.
 

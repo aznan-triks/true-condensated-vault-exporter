@@ -39,10 +39,23 @@ export interface ParsedFile {
 }
 
 export type WikilinkFormat = 'clean-text' | 'keep-wikilink' | 'markdown' | 'canonical-alias';
+export type HtmlTheme = 'system' | 'light' | 'dark';
+export type HtmlFont = 'system' | 'serif' | 'monospace';
+export type RememberedExportTarget = 'all' | 'notebooklm' | 'html' | 'markdown' | 'split' | 'zip';
+/** Supported successful-panel auto-close delays in seconds; zero keeps it open. */
+export const PROGRESS_PANEL_AUTO_CLOSE_OPTIONS = [0, 5, 8, 15, 30, 60] as const;
 
 export interface ExporterSettings {
 	/** Title written at the top of consolidated exports */
 	documentTitle: string;
+	/** Whether the sidebar restores its previous target selection between sessions */
+	rememberTargetSelection: boolean;
+	/** Persisted sidebar targets; in-memory command overrides never alter this */
+	lastSelectedTargets: RememberedExportTarget[];
+	/** Seconds before a successful progress panel auto-closes; zero disables auto-close */
+	progressPanelAutoCloseSeconds: number;
+	/** Automatically reveal the first output in the desktop file manager on success */
+	autoRevealOutput: boolean;
 	/** Folder from which relative scanning occurs, empty string means vault root */
 	scopeRoot: string;
 	/** Folders to strictly exclude (exact relative paths or prefix match) */
@@ -79,6 +92,26 @@ export interface ExporterSettings {
 	includeCanvas: boolean;
 	/** Additional custom CSS to inject into HTML export */
 	customCss: string;
+	/** Color theme for the standalone HTML export */
+	htmlTheme: HtmlTheme;
+	/** Accent color for links, callouts, and focused controls in HTML */
+	htmlAccentColor: string;
+	/** Typography preset for the standalone HTML export */
+	htmlFont: HtmlFont;
+	/** Maximum reading width in pixels for the standalone HTML export */
+	htmlContentWidth: number;
+	/** Whether the HTML export includes its table of contents */
+	htmlShowToc: boolean;
+	/** Whether the HTML table of contents includes its search field */
+	htmlShowSearch: boolean;
+	/** Whether source paths are displayed in the HTML export */
+	htmlShowPaths: boolean;
+	/** Whether frontmatter metadata badges are displayed in HTML */
+	htmlShowMetadata: boolean;
+	/** Whether the HTML export displays an export footer */
+	htmlShowFooter: boolean;
+	/** Optional attribution or organization name shown in the HTML footer */
+	htmlFooterText: string;
 	/** Number of notes processed between two UI yields (keeps Obsidian responsive, allows cancel) */
 	yieldEvery: number;
 	/**
@@ -91,6 +124,10 @@ export interface ExporterSettings {
 
 export const DEFAULT_SETTINGS: ExporterSettings = {
 	documentTitle: 'Vault export',
+	rememberTargetSelection: true,
+	lastSelectedTargets: ['all'],
+	progressPanelAutoCloseSeconds: 8,
+	autoRevealOutput: false,
 	scopeRoot: '',
 	excludedFolders: ['.obsidian', '.trash', '.git'],
 	excludedFiles: [],
@@ -109,6 +146,16 @@ export const DEFAULT_SETTINGS: ExporterSettings = {
 	ignoredProperties: ['cssclasses'],
 	includeCanvas: true,
 	customCss: '',
+	htmlTheme: 'system',
+	htmlAccentColor: '#8b72d9',
+	htmlFont: 'system',
+	htmlContentWidth: 920,
+	htmlShowToc: true,
+	htmlShowSearch: true,
+	htmlShowPaths: true,
+	htmlShowMetadata: true,
+	htmlShowFooter: true,
+	htmlFooterText: 'Vault Exporter',
 	yieldEvery: 25,
 };
 
@@ -123,9 +170,12 @@ const STRING_SETTING_KEYS = [
 	'splitGroupFolder',
 	'splitOutputFolder',
 	'customCss',
+	'htmlAccentColor',
+	'htmlFooterText',
 ] as const satisfies readonly (keyof ExporterSettings)[];
 
 const ARRAY_SETTING_KEYS = ['excludedFolders', 'excludedFiles', 'excludedPrefixes', 'ignoredProperties'] as const;
+const REMEMBERED_EXPORT_TARGETS: readonly RememberedExportTarget[] = ['all', 'notebooklm', 'html', 'markdown', 'split', 'zip'];
 
 /** Validates saved data and drops unknown or malformed settings. */
 export function mergeSettings(loaded: unknown): ExporterSettings {
@@ -153,10 +203,41 @@ export function mergeSettings(loaded: unknown): ExporterSettings {
 		}
 	}
 
-	for (const key of ['stripFrontmatter', 'renderDataview', 'includeCanvas'] as const) {
+	if (!/^#[0-9a-f]{6}$/i.test(result.htmlAccentColor)) {
+		result.htmlAccentColor = DEFAULT_SETTINGS.htmlAccentColor;
+	}
+	result.htmlFooterText = result.htmlFooterText.slice(0, 200);
+
+	for (const key of [
+		'rememberTargetSelection', 'autoRevealOutput', 'stripFrontmatter', 'renderDataview', 'includeCanvas', 'htmlShowToc', 'htmlShowSearch',
+		'htmlShowPaths', 'htmlShowMetadata', 'htmlShowFooter',
+	] as const) {
 		if (typeof source[key] === 'boolean') {
 			result[key] = source[key];
 		}
+	}
+	if (Array.isArray(source.lastSelectedTargets)) {
+		const targets = [...new Set(source.lastSelectedTargets.filter(
+			(target): target is RememberedExportTarget =>
+				typeof target === 'string' && REMEMBERED_EXPORT_TARGETS.includes(target as RememberedExportTarget)
+		))];
+		result.lastSelectedTargets = targets.includes('all') ? ['all'] : targets.length > 0 ? targets : ['all'];
+	}
+	if (
+		typeof source.progressPanelAutoCloseSeconds === 'number' &&
+		PROGRESS_PANEL_AUTO_CLOSE_OPTIONS.some((seconds) => seconds === source.progressPanelAutoCloseSeconds)
+	) {
+		result.progressPanelAutoCloseSeconds = source.progressPanelAutoCloseSeconds;
+	}
+	if (source.htmlTheme === 'system' || source.htmlTheme === 'light' || source.htmlTheme === 'dark') {
+		result.htmlTheme = source.htmlTheme;
+	}
+	if (source.htmlFont === 'system' || source.htmlFont === 'serif' || source.htmlFont === 'monospace') {
+		result.htmlFont = source.htmlFont;
+	}
+	if (typeof source.htmlContentWidth === 'number' && Number.isFinite(source.htmlContentWidth)) {
+		const width = Math.min(1400, Math.max(680, source.htmlContentWidth));
+		result.htmlContentWidth = Math.round(width / 20) * 20;
 	}
 	if (source.splitMode === 'folder-grouped' || source.splitMode === 'individual-files') {
 		result.splitMode = source.splitMode;

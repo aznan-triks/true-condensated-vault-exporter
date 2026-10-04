@@ -58,6 +58,19 @@ export function formatBytes(n: number): string {
 	return (n / (1024 * 1024)).toFixed(2) + ' MB';
 }
 
+/** Compact elapsed-time label suitable for summaries and recent-history rows. */
+export function formatDuration(durationMs: number): string {
+	const safeDurationMs = Math.max(0, Number.isFinite(durationMs) ? durationMs : 0);
+	const totalSeconds = Math.floor(safeDurationMs / 1000);
+	if (safeDurationMs > 0 && totalSeconds === 0) return '<1s';
+	const hours = Math.floor(totalSeconds / 3600);
+	const minutes = Math.floor((totalSeconds % 3600) / 60);
+	const seconds = totalSeconds % 60;
+	if (hours > 0) return hours + 'h ' + minutes + 'm';
+	if (minutes > 0) return minutes + 'm ' + seconds + 's';
+	return seconds + 's';
+}
+
 export function totalBytes(files: { bytes: number }[]): number {
 	return files.reduce((sum, f) => sum + f.bytes, 0);
 }
