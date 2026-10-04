@@ -3,7 +3,8 @@
 ## Current state
 
 - Working branch: `arena/01a10670-true-condensated-vault-exporte`. Continue on this branch; do not switch branches.
-- Package, manifest, and changelog are version `2.0.4` (unreleased). The release workflow in `.github/workflows/release.yml` builds the matching `v*` tag and attaches `main.js`, `manifest.json`, and `styles.css`.
+- Package, manifest, and changelog are version `2.0.4` (released as `v2.0.4`). The release workflow in `.github/workflows/release.yml` builds the matching `v*` tag and attaches `main.js`, `manifest.json`, and `styles.css`.
+- Release `v2.0.4` is published at https://github.com/aznan-triks/true-condensated-vault-exporter/releases/tag/v2.0.4; the workflow completed successfully and all three install assets are attached.
 - `npm run check` passes: TypeScript (against the Obsidian 1.7.2 typings = declared `minAppVersion`), 95 Vitest tests, the production build, and the `npm run smoke` mock-Obsidian run (86 assertions). Latest `npm audit`: zero vulnerabilities.
 - The settings page is grouped and searchable; standalone HTML exports have controls for theme, accent color, typography, reading width, navigation/search, paths, metadata, and footer attribution, with a live preview. The sidebar remembers target selection and offers history reveal/clear actions.
 - Export Feedback & Behavior settings let users select a successful progress panel’s auto-close delay or keep it open; failed and cancelled panels stay visible. Users can optionally reveal the first output automatically. Progress, completion notices, and history report elapsed duration; the sidebar summarizes selected formats and updates target state without losing keyboard focus. Compact-window and touch-target styles are included.
