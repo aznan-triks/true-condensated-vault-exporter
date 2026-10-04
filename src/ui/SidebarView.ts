@@ -4,7 +4,7 @@
  * quick access to settings.
  */
 
-import { ItemView, Notice, WorkspaceLeaf } from 'obsidian';
+import { ItemView, Notice, WorkspaceLeaf, setIcon } from 'obsidian';
 import { EXPORT_COMMANDS, UiContext, executeTargets, isExportRunning } from '../commands/registry';
 import { ExportTarget } from '../features/exportOrchestrator';
 import { ExportHistoryEntry, formatBytes, relativeTime, totalBytes } from '../features/exportHistory';
@@ -96,7 +96,7 @@ export class ExporterSidebarView extends ItemView {
 				noteCount,
 				canvasCount,
 				bytes,
-				tagActive: ctx.settings.scopeTag.trim().length > 0,
+				tagActive: ctx.settings.scopeTag.replace(/^#+/, '').trim().length > 0,
 			};
 		} catch {
 			this.stats = null;
@@ -209,13 +209,20 @@ export class ExporterSidebarView extends ItemView {
 		label: string,
 		disabled: boolean,
 		icon = ''
-	): HTMLElement {
-		const row = parent.createDiv({
-			cls: 've-target' + (this.selected.has(target) ? ' ve-target--active' : '') + (disabled ? ' ve-target--disabled' : ''),
+	): HTMLButtonElement {
+		const selected = this.selected.has(target);
+		const row = parent.createEl('button', {
+			cls: 've-target' + (selected ? ' ve-target--active' : '') + (disabled ? ' ve-target--disabled' : ''),
+			attr: { type: 'button', 'aria-pressed': String(selected) },
 		});
-		const box = row.createSpan({ cls: 've-target__box', text: this.selected.has(target) ? '✓' : '' });
-		box.ariaLabel = 'checkbox: ' + label;
-		row.createSpan({ cls: 've-target__label', text: (icon ? icon + '  ' : '') + label });
+		row.disabled = disabled;
+		row.setAttribute('aria-label', label);
+		row.createSpan({ cls: 've-target__box', text: selected ? '✓' : '', attr: { 'aria-hidden': 'true' } });
+		if (icon) {
+			const iconEl = row.createSpan({ cls: 've-target__icon', attr: { 'aria-hidden': 'true' } });
+			setIcon(iconEl, icon);
+		}
+		row.createSpan({ cls: 've-target__label', text: label });
 		return row;
 	}
 

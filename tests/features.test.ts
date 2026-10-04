@@ -93,7 +93,7 @@ describe('zip writer', () => {
 
 	it('keeps deflate results consistent with the stored CRC', () => {
 		const encoder = new TextEncoder();
-		const content = 'répétition répétition ' + 'z'.repeat(500);
+		const content = 'naïve archive naïve ' + 'z'.repeat(500);
 		const zip = buildZip([{ name: 'x.txt', data: encoder.encode(content) }]);
 		const read = readZip(zip);
 		const e = entryData(zip, read[0]!);
@@ -105,8 +105,10 @@ describe('zip writer', () => {
 	it('maps absolute output paths to portable entry names', () => {
 		expect(zipEntryName('Vault export.md')).toBe('Vault export.md');
 		expect(zipEntryName('out\\nested\\file.txt')).toBe('out/nested/file.txt');
-		expect(zipEntryName('C:/Users/Trois/Exports/01_Univers.txt')).toBe('Exports/01_Univers.txt');
-		expect(zipEntryName('/home/user/exports/Vault export.zip')).toBe('exports/Vault export.zip');
+		expect(zipEntryName('C:/Users/Example/Exports/01_World.txt')).toBe('Exports/01_World.txt');
+			expect(zipEntryName('/home/user/exports/Vault export.zip')).toBe('exports/Vault export.zip');
+		expect(() => zipEntryName('../outside.txt')).toThrow('escape the archive root');
+		expect(() => buildZip([{ name: '../outside.txt', data: new TextEncoder().encode('unsafe') }])).toThrow('Unsafe ZIP entry path');
 	});
 });
 
@@ -179,6 +181,87 @@ describe('orchestrator', () => {
 		}, controller.signal);
 		await expect(run).rejects.toBeInstanceOf(ExportCancelledError);
 		expect(written.size).toBe(0);
+	});
+
+	it('records readable-file failures in the result instead of hiding them', async () => {
+		const files = [{ path: 'A/good.md', name: 'good.md', content: 'readable' }];
+		const gateway: ExportGateway = {
+			loadVaultFiles: async (_settings, _signal, _onProgress, onSkipped) => {
+				onSkipped?.('A/bad.md', 'permission denied');
+				return files;
+			},
+			writeFile: async () => {},
+			writeBinary: async () => {},
+		};
+		const result = await runExports(gateway, DEFAULT_SETTINGS, ['markdown'], () => {});
+		expect(result.skippedFiles).toEqual(['A/bad.md']);
+	});
+
+	it('is cancellable while loading and carries partial results when cancelled', async () => {
+		const controller = new AbortController();
+		const gateway: ExportGateway = {
+			loadVaultFiles: async (_settings, _signal, onProgress) => {
+				onProgress?.(0, manyFiles.length);
+				controller.abort();
+				return [];
+			},
+			writeFile: async () => {},
+			writeBinary: async () => {},
+		};
+		const run = runExports(gateway, DEFAULT_SETTINGS, ['markdown'], () => {}, controller.signal);
+		await expect(run).rejects.toMatchObject({
+			partialResult: { written: [], skippedFiles: [], totalBytes: 0 },
+		});
+	});
+
+	it('retains the files already written when the user cancels mid-export', async () => {
+		const controller = new AbortController();
+		const written = new Map<string, string>();
+		const gateway: ExportGateway = {
+			loadVaultFiles: async () => manyFiles,
+			writeFile: async (filePath, content) => {
+				written.set(filePath, content);
+				controller.abort();
+			},
+			writeBinary: async () => {},
+		};
+		let thrown: unknown;
+		try {
+			await runExports(gateway, DEFAULT_SETTINGS, ['all'], () => {}, controller.signal);
+		} catch (error: unknown) {
+			thrown = error;
+		}
+		expect(thrown).toBeInstanceOf(ExportCancelledError);
+		if (thrown instanceof ExportCancelledError) {
+			expect(thrown.partialResult?.written).toHaveLength(1);
+			expect(thrown.partialResult?.totalBytes).toBeGreaterThan(0);
+		}
+		 expect(written.size).toBe(1);
+	});
+
+	it('rejects conflicting and unsafe output paths before writing anything', async () => {
+		const { gateway, written, writtenBinary } = fakeGateway(manyFiles);
+		const sharedPath = { ...DEFAULT_SETTINGS, htmlOutputPath: 'same.md', markdownOutputPath: 'same.md' };
+		await expect(runExports(gateway, sharedPath, ['html', 'markdown'], () => {})).rejects.toThrow('Output path conflict');
+		await expect(runExports(gateway, { ...DEFAULT_SETTINGS, markdownOutputPath: '../outside.md' }, ['markdown'], () => {}))
+			.rejects.toThrow('must stay inside the vault');
+		await expect(runExports(gateway, { ...DEFAULT_SETTINGS, markdownOutputPath: 'nested/../inside.md' }, ['markdown'], () => {}))
+			.rejects.toThrow('must stay inside the vault');
+		await expect(runExports(gateway, { ...DEFAULT_SETTINGS, htmlOutputPath: '' }, ['html'], () => {}))
+			.rejects.toThrow('output path cannot be empty');
+		await expect(runExports(gateway, { ...DEFAULT_SETTINGS, markdownOutputPath: '.' }, ['markdown'], () => {}))
+			.rejects.toThrow('must name a file');
+		await expect(runExports(gateway, { ...DEFAULT_SETTINGS, markdownOutputPath: 'Exports/' }, ['markdown'], () => {}))
+			.rejects.toThrow('must name a file');
+		const zipCollision = { ...DEFAULT_SETTINGS, zipOutputPath: 'Vault export.html' };
+		await expect(runExports(gateway, zipCollision, ['zip', 'html'], () => {})).rejects.toThrow('overlaps another selected output');
+		expect(written.size).toBe(0);
+		expect(writtenBinary.size).toBe(0);
+	});
+
+	it('rejects an empty target list', async () => {
+		const { gateway } = fakeGateway(manyFiles);
+		await expect(runExports(gateway, DEFAULT_SETTINGS, [], () => {})).rejects.toThrow('Select at least one');
 	});
 
 	it('fails explicitly when no file matches', async () => {

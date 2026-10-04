@@ -1,6 +1,6 @@
 /**
- * YAML frontmatter extraction and parsing.
- * Pure TypeScript implementation without external yaml parser dependency.
+ * Small, dependency-free parser for common flat YAML frontmatter fields.
+ * It intentionally supports scalar values and simple inline/block lists.
  */
 
 import { FileMetadata } from './types';
@@ -11,7 +11,7 @@ export interface FrontmatterResult {
 	rawFrontmatter?: string;
 }
 
-const FRONTMATTER_REGEX = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/;
+const FRONTMATTER_REGEX = /^---[ \t]*\r?\n([\s\S]*?)\r?\n?---[ \t]*(?:\r?\n|$)/;
 
 export function defaultFileMetadata(): FileMetadata {
 	return {
@@ -23,123 +23,152 @@ export function defaultFileMetadata(): FileMetadata {
 	};
 }
 
-function stripQuotes(str: string): string {
-	const trimmed = str.trim();
-	if (
-		(trimmed.startsWith('"') && trimmed.endsWith('"')) ||
-		(trimmed.startsWith("'") && trimmed.endsWith("'"))
-	) {
-		return trimmed.slice(1, -1);
+function stripYamlComment(value: string): string {
+	let quote = '';
+	for (let i = 0; i < value.length; i++) {
+		const char = value[i] ?? '';
+		if (quote) {
+			if (char === quote && value[i - 1] !== '\\') quote = '';
+		} else if ((char === '"' || char === "'") && (i === 0 || /[\\s,[{]/.test(value[i - 1] ?? ''))) {
+			quote = char;
+		} else if (char === '#' && (i === 0 || /\s/.test(value[i - 1] ?? ''))) {
+			return value.slice(0, i).trimEnd();
+		}
+	}
+	return value.trimEnd();
+}
+
+function parseScalar(value: string): string {
+	const trimmed = stripYamlComment(value).trim();
+	if (trimmed.length >= 2) {
+		const quote = trimmed[0];
+		if ((quote === '"' || quote === "'") && trimmed.endsWith(quote)) {
+			const inner = trimmed.slice(1, -1);
+			return quote === '"'
+				? inner.replace(/\\n/g, '\n').replace(/\\r/g, '\r').replace(/\\t/g, '\t').replace(/\\"/g, '"').replace(/\\\\/g, '\\')
+				: inner.replace(/''/g, "'");
+		}
 	}
 	return trimmed;
 }
 
-export function parseFrontmatter(content: string): FrontmatterResult {
-	const match = content.match(FRONTMATTER_REGEX);
-
-	if (!match || !match[1]) {
-		return {
-			metadata: defaultFileMetadata(),
-			contentWithoutFrontmatter: content,
-		};
+function splitInlineList(value: string): string[] {
+	const body = value.slice(1, -1);
+	const items: string[] = [];
+	let quote = '';
+	let start = 0;
+	for (let i = 0; i < body.length; i++) {
+		const char = body[i] ?? '';
+		if (quote) {
+			if (char === quote && body[i - 1] !== '\\') quote = '';
+		} else if (char === '"' || char === "'") {
+			quote = char;
+		} else if (char === ',') {
+			const item = parseScalar(body.slice(start, i));
+			if (item) items.push(item);
+			start = i + 1;
+		}
 	}
+	const last = parseScalar(body.slice(start));
+	if (last) items.push(last);
+	return items;
+}
 
-	const rawFrontmatter = match[1];
-	const contentWithoutFrontmatter = content.slice(match[0].length);
-	const metadata: FileMetadata = defaultFileMetadata();
+function setMetadataValue(metadata: FileMetadata, key: string, value: string | string[]): void {
+	const normalized = key.toLowerCase();
+	if (normalized === 'tags') {
+		metadata.tags = Array.isArray(value) ? value : value ? [value] : [];
+		return;
+	}
+	const scalar = Array.isArray(value) ? value.join(', ') : value;
+	switch (normalized) {
+		case 'title':
+			metadata.title = scalar;
+			break;
+		case 'categorie':
+		case 'category':
+			metadata.category = scalar;
+			break;
+		case 'ordre':
+		case 'order':
+			metadata.order = scalar;
+			break;
+		case 'status':
+		case 'statut':
+			metadata.status = scalar;
+			break;
+		case 'trello_url':
+			metadata.trelloUrl = scalar;
+			break;
+		case 'date_creation':
+			metadata.dateCreation = scalar;
+			break;
+		case 'date_revision':
+			metadata.dateRevision = scalar;
+			break;
+		default:
+			metadata.custom[key] = value;
+			break;
+	}
+}
 
-	const lines = rawFrontmatter.split(/\r?\n/);
-	let currentArrayKey: string | null = null;
-	let currentArray: string[] = [];
+function parseRawFrontmatter(rawFrontmatter: string): FileMetadata {
+	const metadata = defaultFileMetadata();
+	let currentListKey: string | null = null;
+	let currentList: string[] = [];
 
-	for (const line of lines) {
+	const flushList = (): void => {
+		if (currentListKey !== null) {
+			setMetadataValue(metadata, currentListKey, currentList);
+			currentListKey = null;
+			currentList = [];
+		}
+	};
+
+	for (const line of rawFrontmatter.split(/\r?\n/)) {
 		const trimmed = line.trim();
 		if (!trimmed || trimmed.startsWith('#')) continue;
 
-		if (trimmed.startsWith('- ') && currentArrayKey) {
-			const itemVal = stripQuotes(trimmed.slice(2));
-			currentArray.push(itemVal);
+		const listItem = trimmed.match(/^-[ \t]+(.*)$/);
+		if (listItem && currentListKey !== null) {
+			const item = parseScalar(listItem[1] ?? '');
+			if (item) currentList.push(item);
 			continue;
 		}
 
-		const colonIdx = line.indexOf(':');
-		if (colonIdx !== -1) {
-			if (currentArrayKey) {
-				if (currentArrayKey === 'tags') {
-					metadata.tags = currentArray;
-				} else {
-					metadata.custom[currentArrayKey] = currentArray;
-				}
-				currentArrayKey = null;
-				currentArray = [];
-			}
-
-			const key = line.slice(0, colonIdx).trim();
-			let val = line.slice(colonIdx + 1).trim();
-
-			if (!val) {
-				currentArrayKey = key;
-				currentArray = [];
-				continue;
-			}
-
-			val = stripQuotes(val);
-
-			if (val.startsWith('[') && val.endsWith(']')) {
-				const items = val.slice(1, -1).split(',').map(s => stripQuotes(s)).filter(Boolean);
-				if (key === 'tags') {
-					metadata.tags = items;
-				} else {
-					metadata.custom[key] = items;
-				}
-				continue;
-			}
-
-			switch (key.toLowerCase()) {
-				case 'title':
-					metadata.title = val;
-					break;
-				case 'categorie':
-				case 'category':
-					metadata.category = val;
-					break;
-				case 'ordre':
-				case 'order':
-					metadata.order = val;
-					break;
-				case 'tags':
-					metadata.tags = [val];
-					break;
-				case 'trello_url':
-					metadata.trelloUrl = val;
-					break;
-				case 'date_creation':
-					metadata.dateCreation = val;
-					break;
-				case 'date_revision':
-					metadata.dateRevision = val;
-					break;
-				case 'statut':
-					metadata.statut = val;
-					break;
-				default:
-					metadata.custom[key] = val;
-					break;
-			}
+		flushList();
+		const property = line.match(/^([^\s][^:]*?):[ \t]*(.*)$/);
+		if (!property) continue;
+		const key = (property[1] ?? '').trim();
+		const rawValue = stripYamlComment(property[2] ?? '').trim();
+		if (!rawValue) {
+			currentListKey = key;
+			continue;
 		}
-	}
-
-	if (currentArrayKey) {
-		if (currentArrayKey === 'tags') {
-			metadata.tags = currentArray;
+		if (rawValue.startsWith('[') && rawValue.endsWith(']')) {
+			setMetadataValue(metadata, key, splitInlineList(rawValue));
 		} else {
-			metadata.custom[currentArrayKey] = currentArray;
+			setMetadataValue(metadata, key, parseScalar(rawValue));
 		}
 	}
+	flushList();
+	return metadata;
+}
 
+export function parseFrontmatter(content: string): FrontmatterResult {
+	const source = content.startsWith('\uFEFF') ? content.slice(1) : content;
+	const match = source.match(FRONTMATTER_REGEX);
+	if (!match) {
+		return {
+			metadata: defaultFileMetadata(),
+			contentWithoutFrontmatter: source,
+		};
+	}
+
+	const rawFrontmatter = match[1] ?? '';
 	return {
-		metadata,
-		contentWithoutFrontmatter,
+		metadata: parseRawFrontmatter(rawFrontmatter),
+		contentWithoutFrontmatter: source.slice(match[0].length),
 		rawFrontmatter,
 	};
 }

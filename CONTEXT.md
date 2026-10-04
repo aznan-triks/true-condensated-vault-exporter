@@ -1,56 +1,53 @@
-# CONTEXTE PROJET : vault-exporter
+# Project context: Vault Exporter
 
-> Dernière mise à jour : 2026-10-02 (refonte v2.0). Règles communes : D:/IA/projets/METHODE.md (non recopiées ici).
+> Last updated: 2026-10-04 (v2.0.2 hardening). Keep this file in English.
 
-## Nature
+## Product
 
-Plugin Obsidian (TypeScript) qui exporte un coffre (ou un sous-dossier, ou un tag) vers plusieurs formats : texte consolidé NotebookLM, HTML, Markdown consolidé, fichiers "split", et **bundle ZIP unique**. Moteur 100 % TypeScript, zéro dépendance runtime. Desktop-only.
+Obsidian desktop plugin that exports a vault, folder, or tagged subset to NotebookLM text, HTML, consolidated Markdown, split files, or a ZIP bundle. TypeScript core; no production npm dependencies. See `README.md` for user instructions and `CHANGELOG.md` for release history.
 
-**v2.0.0 (2026-10-02)** : ZIP, multi-cibles, aperçu d'historique, tag scope, Dataview expressions, HTML réécrit, canvas en ordre de lecture, anti ré-export. Voir `CHANGELOG.md`.
+## Commands
 
-## Commandes
+```sh
+npm run check    # TypeScript, Vitest, and production build
+npm run test     # Vitest only
+npm run dev      # esbuild watch mode
+```
 
-- Tout vérifier : `npm run check` (typecheck + vitest + build production). Réécrit `main.js` (gitignoré).
-- Version : `grep version manifest.json`.
+`npm run check` writes the generated `main.js`, which is intentionally ignored by Git. `npm audit` checks the development dependency tree; the `moment` override keeps Obsidian's pinned development dependency on a patched release.
 
 ## Architecture
 
-| Dossier | Rôle |
+| Area | Responsibility |
 |---|---|
-| `src/core/` | Logique pure — aucun import `obsidian`. `types.ts` (settings + `ParsedFile` + gateway), `pipeline.ts` (`parseVault`/`cleanNote`/`createExportContext`), `filter.ts` (inclusion + chemins réservés + `onlyPath`), `wikilink.ts` (+ `buildLinkResolver`), `dataviewEngine.ts` (évaluateur d'expressions WHERE), `canvasParser.ts` (ordre visuel + groupes), `frontmatter.ts`, `markdownClean.ts`, formateurs (`htmlFormatter` avec `renderInline`/TOC 2 niveaux/recherche client, `markdownFormatter`, `notebooklmFormatter`), `zip.ts` (CRC32 + build ZIP deflate via `zlib` externe) |
-| `src/obsidian/` | Seule couche qui touche l'API Obsidian/Node : `vaultGateway.ts` (lecture parallèle batch 8, tag filter, écritures texte/binaire async, `getVaultFilesInfo`, `revealOutput`), `appSetting.ts` (cast `app.setting` interne), `obsidian-internal.d.ts` (augmentations de types : `Shell`, `SettingTab.id`) |
-| `src/features/` | `exportOrchestrator.ts` (`runExports` multi-cibles → `ExportResult`, ZIP), `formats.ts` (registre des formats consolidés), `exportSplit.ts`, `exportHistory.ts` (persistance + formatage) |
-| `src/commands/registry.ts` | `EXPORT_COMMANDS` — source unique pilotant Command Palette + sidebar ; `executeTargets`, `isExportRunning`, `UiContext` |
-| `src/ui/` | `SidebarView` (stats de scope, multi-cibles, historique), `ProgressPanel` (log, annulation, récap + Open folder), `VaultPathSuggest` |
-| `src/settings/SettingsTab.ts` | Onglet de réglages (dont Advanced : `customCss`, `yieldEvery`) |
+| `src/core/` | Pure data transforms: settings/types, filters, frontmatter, cleaning pipeline, wikilinks, Dataview, Canvas, HTML/Markdown/NotebookLM formatters, ZIP records. |
+| `src/obsidian/` | Obsidian and Node boundary: vault reads/writes, tag and file metadata, binary output, reveal-in-file-manager, local declarations for Obsidian internal APIs. |
+| `src/features/` | Export orchestration, consolidated format registry, split exports, history. |
+| `src/commands/registry.ts` | Single command registry used by the Command Palette and sidebar; owns run/cancel orchestration. |
+| `src/ui/` | Export sidebar, progress panel, path suggestions. |
+| `src/settings/SettingsTab.ts` | Obsidian settings UI. |
+| `tests/` | Core, feature, cancellation, output-safety, and architecture regression tests. |
 
-Tests : `tests/core.test.ts` + `tests/features.test.ts` (Vitest, 63 tests).
+## Invariants
 
-- Couches et droits : `core/` n'importe ni `obsidian` ni `features/` (invariant déclaré en tête de `src/core/types.ts`) ; `obsidian/vaultGateway.ts` seul lecteur du coffre ; `features/` sans import `obsidian` (constaté 2026-09-29).
-- Contrôle des couches : automatique, describe `architecture` de `tests/core.test.ts` (dans `npm run check`).
-- Points d'extension : nouveau format consolidé = un formateur dans `src/core/` + une entrée dans `CONSOLIDATED_FORMATS` + une entrée dans `EXPORT_COMMANDS` ; un réglage = un champ de `ExporterSettings` + `DEFAULT_SETTINGS` + un contrôle dans `SettingsTab.ts`.
-- Config : `ExporterSettings`/`DEFAULT_SETTINGS` dans `src/core/types.ts` (source unique), rendus dans `SettingsTab.ts`.
-- Persistance : `saveData` stocke `{ settings, history }` ; `loadSettings` accepte aussi l'ancien format (objet settings nu) — `main.ts`.
-- Carte : le tableau ci-dessus ; `grep -rn "<mot>" src/` avant de créer une fonction.
+- `core/` must not import Obsidian or `features/`. `features/` must not import Obsidian. Keep vault access in `src/obsidian/vaultGateway.ts`.
+- `ExporterSettings` and `DEFAULT_SETTINGS` in `src/core/types.ts` are the settings source of truth. Add settings in all three places: type/default, settings UI, and validation/merge tests. Renaming a saved key needs a migration.
+- Validate output paths before writing. Use `reservedOutputPaths()` through `isFileIncluded()` to prevent re-export loops. Do not duplicate output filtering in the orchestrator.
+- Check the abort signal and yield to the UI in long loops. Cancellation must preserve and report files already written.
+- ZIP output is binary: use the gateway's `writeBinary`, not a text writer. The archive is ZIP32; reject values beyond its supported limits.
+- Keep Node/Electron APIs (`fs`, `path`, `zlib`, shell integration) behind the existing platform boundary. Keep casts for undocumented Obsidian APIs in `src/obsidian/` and guard desktop-only APIs.
+- `onlyFile`, `onlyPath`, and command `settingsOverride` are temporary in-memory scope overrides; never persist them.
+- User-facing strings and project documentation are English. `parseFrontmatter` recognizes legacy property aliases for existing vaults.
+- Add or update regression tests for fixes. The `architecture` suite in `tests/core.test.ts` enforces import boundaries.
 
-## Pièges
+## Important behavior and limitations
 
-- ⚠️ Réglages obsolètes → `mergeSettings` ne garde que les clés de `DEFAULT_SETTINGS` ; renommer un réglage = perte de la valeur enregistrée, prévoir une migration.
-- ⚠️ Boucle longue sans pause → l'interface gèle et Annuler ne répond pas ; céder la main (`yieldEvery`) dans toute nouvelle boucle par note.
-- ⚠️ Sorties de l'export → toujours passer par `reservedOutputPaths(settings)` dans `isFileIncluded` pour éviter la boucle de ré-export ; ne jamais filtrer les sorties « à la main » dans l'orchestrateur.
-- ⚠️ Binaire (ZIP) → jamais `writeFile` (corruption UTF-8) ; toujours `writeBinary` (gateway), et `vault.createBinary/modifyBinary` prennent un `ArrayBuffer` (copier depuis `Uint8Array`).
-- ⚠️ APIs Obsidian internes (`Shell`, `app.setting`, `SettingTab.id`) → non typées dans le d.ts : les casts vivent dans `src/obsidian/` (`obsidian-internal.d.ts`, `appSetting.ts`) ; garder `Platform.isMobile` en garde-fou.
-- ⚠️ `zlib`/`fs`/`path` dans `core`/`obsidian` → externes au bundle (`esbuild.config.mjs`) : OK dans Electron (desktop-only) et dans les tests Node, interdit partout ailleurs.
-- ⚠️ Le d.ts d'`obsidian` installé est plus récent que `minAppVersion` — vérifier les APIs dans `node_modules/obsidian/obsidian.d.ts` avant d'utiliser une nouvelle méthode.
-- ⚠️ `onlyFile` et `settingsOverride` sont des overrides **en mémoire** (commandes contextuelles) : ne jamais les écrire dans `saveData`. `mergeSettings` ne les persiste pas (absents de `DEFAULT_SETTINGS`), mais un `settings` modifié doit être reconstitué depuis `ctx.settings` à chaque run (`executeTargets` le fait déjà).
+- Dataview support is intentionally a subset. Unsupported or malformed blocks remain in the note; do not silently interpret them as matching all files.
+- Tag scoping excludes Canvas files. The sidebar's live count is path-based while a tag filter is active and displays a warning.
+- Markdown wikilinks point to vault-root-relative paths, not paths relative to each exported file. Consolidated outputs in a subfolder and split mirrors may need their links adjusted.
+- Individual split files that cannot be read are skipped and included in the export result.
+- HTML has light/dark, responsive, print, search, and custom-CSS support; verify changes to those features in a browser.
 
-## Checklist UI (après tout changement visuel)
+## Manual UI checklist
 
-```
-□ Sidebar (ExporterSidebarView) s'ouvre/se ferme, stats à jour après réglage
-□ ProgressPanel affiche la progression, le log, le récap + Open folder pendant/après un export réel
-□ Onglet de réglages : tous les champs sauvegardent et se rechargent (dont customCss, yieldEvery, scopeTag, zipOutputPath)
-□ Thème dark/light du navigateur s'applique à l'HTML exporté
-```
-
-⚠️ Aucune coche sans preuve visuelle montrée à l'utilisateur (capture d'écran dans Obsidian), sauf dispense explicite.
+When an Obsidian instance is available, verify the sidebar, target selection, progress/cancel panel, settings persistence, output files, and HTML light/dark view. The README preview assets are illustrative mock-ups, **not** evidence of a live Obsidian test.

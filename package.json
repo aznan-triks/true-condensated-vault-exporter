@@ -1,7 +1,7 @@
 {
   "name": "vault-exporter",
-  "version": "2.0.1",
-  "description": "Modular and customizable Obsidian vault exporter for NotebookLM, HTML, Markdown and split outputs.",
+  "version": "2.0.2",
+  "description": "Obsidian desktop plugin for exporting vaults to NotebookLM text, HTML, Markdown, split files, or ZIP bundles.",
   "main": "main.js",
   "type": "module",
   "private": true,
@@ -28,5 +28,8 @@
     "obsidian": "^1.7.2",
     "typescript": "^5.7.2",
     "vitest": "^4.1.11"
+  },
+  "overrides": {
+    "moment": "2.31.0"
   }
 }

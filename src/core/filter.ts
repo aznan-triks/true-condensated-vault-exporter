@@ -25,7 +25,36 @@ export interface FilterOptions {
  * Normalizes a path to forward slashes without leading/trailing slashes.
  */
 export function normalizePath(p: string): string {
-	return p.replace(/\\/g, '/').replace(/^\/+/, '').replace(/\/+$/, '').trim();
+	const parts: string[] = [];
+	for (const part of p.trim().replace(/\\/g, '/').split('/')) {
+		if (!part || part === '.') continue;
+		if (part === '..') {
+			if (parts.length > 0 && parts[parts.length - 1] !== '..') parts.pop();
+			else parts.push(part);
+			continue;
+		}
+		parts.push(part);
+	}
+	return parts.join('/');
+}
+
+/** Matches a selected tag against Obsidian tags, including nested tags. */
+export function matchesTag(tags: readonly string[], selectedTag: string): boolean {
+	const normalizeTag = (tag: string): string =>
+		tag.trim().replace(/^#+/, '').replace(/^\/+|\/+$/g, '').toLowerCase();
+	const selected = normalizeTag(selectedTag);
+	if (!selected) return false;
+	return tags.some((tag) => {
+		const value = normalizeTag(tag);
+		return value === selected || value.startsWith(selected + '/');
+	});
+}
+
+/** Tag filters apply to Markdown notes only; Canvas files have no tag scope. */
+export function isTagScopeMatch(filePath: string, tags: readonly string[], selectedTag: string): boolean {
+	if (!selectedTag.trim()) return true;
+	if (filePath.toLowerCase().endsWith('.canvas')) return false;
+	return matchesTag(tags, selectedTag);
 }
 
 /** Suffix of the files produced by "Export current note as clean Markdown". */
@@ -47,8 +76,9 @@ export function isFileIncluded(relativePath: string, options: FilterOptions): bo
 		return false;
 	}
 
-	const isMd = normPath.endsWith('.md');
-	const isCanvas = normPath.endsWith('.canvas');
+	const lowerPath = normPath.toLowerCase();
+	const isMd = lowerPath.endsWith('.md');
+	const isCanvas = lowerPath.endsWith('.canvas');
 	if (!isMd && !(isCanvas && options.includeCanvas)) {
 		return false;
 	}
@@ -144,6 +174,10 @@ export function isFileIncluded(relativePath: string, options: FilterOptions): bo
  * Builds the list of output locations that must be protected from export,
  * from the current settings.
  */
+function isAbsoluteOutputPath(value: string): boolean {
+	return /^(?:[a-z]:[\\/]|[\\/]{1,2})/i.test(value.trim());
+}
+
 export function reservedOutputPaths(settings: {
 	notebooklmOutputPath: string;
 	htmlOutputPath: string;
@@ -157,5 +191,5 @@ export function reservedOutputPaths(settings: {
 		settings.markdownOutputPath,
 		settings.zipOutputPath,
 		settings.splitOutputFolder,
-	].filter((p) => p && p.trim().length > 0);
+	].filter((p) => p && p.trim().length > 0 && !isAbsoluteOutputPath(p));
 }

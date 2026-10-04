@@ -20,6 +20,15 @@ function escapeHtml(text: string): string {
 		.replace(/\x27/g, '&#039;');
 }
 
+function safeUrlAttribute(value: string, allowDataImage = false): string | null {
+	const normalized = value.trim().replace(/[\u0000-\u0020\u007f]/g, '');
+	const scheme = normalized.match(/^([a-z][a-z0-9+.-]*):/i)?.[1]?.toLowerCase();
+	if (!scheme) return value;
+	if (['http', 'https', 'mailto', 'tel'].includes(scheme)) return value;
+	if (allowDataImage && scheme === 'data' && /^data:image\/(?:png|gif|jpe?g|webp);base64,/i.test(normalized)) return value;
+	return null;
+}
+
 export function slugify(text: string): string {
 	return text
 		.toLowerCase()
@@ -44,12 +53,17 @@ export function renderInline(text: string): string {
 
 	// `code` spans first (contents stay verbatim)
 	out = out.replace(/`([^`\n]+)`/g, (_m, code: string) => put('<code>' + code + '</code>'));
-	// images
+	// Images and links accept only safe URL schemes; note content is untrusted input.
 	out = out.replace(/!\[([^\]]*)\]\(([^)\s]+)(?:\s+&quot;[^&]*&quot;)?\)/g,
-		(_m, alt: string, src: string) => put('<img src="' + src + '" alt="' + alt + '" loading="lazy">'));
-	// links
+		(_m, alt: string, src: string) => {
+			const safeSrc = safeUrlAttribute(src, true);
+			return safeSrc ? put('<img src="' + safeSrc + '" alt="' + alt + '" loading="lazy">') : alt;
+		});
 	out = out.replace(/\[([^\]]+)\]\(([^)\s]+)(?:\s+&quot;[^&]*&quot;)?\)/g,
-		(_m, label: string, href: string) => put('<a href="' + href + '">' + label + '</a>'));
+		(_m, label: string, href: string) => {
+			const safeHref = safeUrlAttribute(href);
+			return safeHref ? put('<a href="' + safeHref + '" rel="noopener noreferrer">' + label + '</a>') : label;
+		});
 	// bold
 	out = out.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>');
 	out = out.replace(/__([^_\n]+)__/g, '<strong>$1</strong>');
@@ -79,12 +93,29 @@ function closeBlock(out: string[], kind: 'list' | 'table' | 'quote', listTag = '
  * Block-level markdown -> HTML. `idPrefix` keeps heading anchors unique
  * across documents (e.g. 'doc-3-').
  */
-export function simpleMarkdownToHtml(md: string, idPrefix = ''): string {
+export function simpleMarkdownToHtml(md: string, idPrefix = '', headingIds?: string[]): string {
 	const lines = md.split(/\r?\n/);
 	const htmlLines: string[] = [];
 	let block: 'none' | 'code' | 'table' | 'list' | 'quote' = 'none';
 	let listTag = 'ul';
 	let quoteLines: string[] = [];
+	let headingIndex = 0;
+	const usedHeadingIds = new Set<string>();
+	const createHeadingId = (text: string): string => {
+		const supplied = headingIds?.[headingIndex];
+		headingIndex++;
+		if (supplied) {
+			usedHeadingIds.add(supplied);
+			return supplied;
+		}
+		const base = slugify(text) || 'section';
+		let candidate = base;
+		let suffix = 2;
+		while (usedHeadingIds.has(idPrefix + candidate)) candidate = base + '-' + suffix++;
+		const id = idPrefix + candidate;
+		usedHeadingIds.add(id);
+		return id;
+	};
 
 	const flushQuote = (): void => {
 		if (quoteLines.length === 0) return;
@@ -155,7 +186,7 @@ export function simpleMarkdownToHtml(md: string, idPrefix = ''): string {
 			if (block === 'table') closeBlock(htmlLines, 'table');
 			const level = headingMatch[1].length;
 			const text = headingMatch[2].trim();
-			const id = idPrefix + slugify(text);
+			const id = createHeadingId(text);
 			htmlLines.push('<h' + level + ' id="' + id + '">' + renderInline(text) + '</h' + level + '>');
 			block = 'none';
 			continue;
@@ -229,9 +260,15 @@ export function simpleMarkdownToHtml(md: string, idPrefix = ''): string {
 	return htmlLines.join('\n');
 }
 
-/** Collects headings (levels 1-2) of a note body, outside code fences. */
-export function noteHeadings(body: string): string[] {
-	const out: string[] = [];
+interface HeadingRecord {
+	label: string;
+	level: number;
+	id: string;
+}
+
+function collectHeadings(body: string, idPrefix: string): HeadingRecord[] {
+	const out: HeadingRecord[] = [];
+	const used = new Set<string>();
 	let inCode = false;
 	for (const raw of body.split(/\r?\n/)) {
 		const line = raw.trim();
@@ -240,13 +277,23 @@ export function noteHeadings(body: string): string[] {
 			continue;
 		}
 		if (inCode) continue;
-		const m = line.match(/^(#{1,2})\s+(.*)$/);
-		if (m) {
-			out.push((m[2] ?? '').trim());
-			if (out.length >= 40) break;
-		}
+		const match = line.match(/^(#{1,6})\s+(.*)$/);
+		if (!match) continue;
+		const label = (match[2] ?? '').trim();
+		const base = slugify(label) || 'section';
+		let candidate = base;
+		let suffix = 2;
+		while (used.has(idPrefix + candidate)) candidate = base + '-' + suffix++;
+		const id = idPrefix + candidate;
+		used.add(id);
+		out.push({ label, level: (match[1] ?? '').length, id });
 	}
 	return out;
+}
+
+/** Collects up to 40 level-one and level-two headings, outside code fences. */
+export function noteHeadings(body: string): string[] {
+	return collectHeadings(body, '').filter((heading) => heading.level <= 2).slice(0, 40).map((heading) => heading.label);
 }
 
 function themeCss(customCss: string): string {
@@ -312,7 +359,7 @@ function themeCss(customCss: string): string {
     body { flex-direction: column; }
     nav#toc { position: static; width: 100%; max-height: none; }
   }
-  ` + (customCss || '');
+  ` + (customCss || '').replace(/<\/style/gi, '<\\/style');
 }
 
 export function formatForHtml(notes: CleanedNote[], settings: ExporterSettings, exportedAt: string): string {
@@ -321,10 +368,11 @@ export function formatForHtml(notes: CleanedNote[], settings: ExporterSettings, 
 
 	notes.forEach((note, i) => {
 		const docId = 'doc-' + i;
-		const subs = noteHeadings(note.body).map((t) => ({
-			label: t,
-			id: docId + '-' + slugify(t),
-		}));
+		const headings = collectHeadings(note.body, docId + '-');
+		const subs = headings
+			.filter((heading) => heading.level <= 2)
+			.slice(0, 40)
+			.map((heading) => ({ label: heading.label, id: heading.id }));
 
 		let toc = '<li class="toc-item" data-doc-id="' + docId + '"><a class="toc-doc" href="#' + docId + '">' + escapeHtml(note.title);
 		toc += ' <span class="path-hint">(' + escapeHtml(note.path) + ')</span></a>';
@@ -355,7 +403,7 @@ export function formatForHtml(notes: CleanedNote[], settings: ExporterSettings, 
 			'</div>',
 			'</header>',
 			'<div class="doc-content">',
-			simpleMarkdownToHtml(note.body, docId + '-'),
+			simpleMarkdownToHtml(note.body, docId + '-', headings.map((heading) => heading.id)),
 			'</div>',
 			'</article>',
 		].join('\n'));
