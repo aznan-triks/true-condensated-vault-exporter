@@ -4,5 +4,5 @@ main.js
 .obsidian/
 .claude-memory/
 
-# Backups locaux temporaires
+# Temporary local backups
 _backup_*/

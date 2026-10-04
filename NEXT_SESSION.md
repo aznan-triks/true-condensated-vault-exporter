@@ -1,30 +1,34 @@
-# NEXT_SESSION — vault-exporter
+# Next Session — Vault Exporter
 
-## État courant
-- Dépôt distant connecté : `aznan-triks/true-condensated-vault-exporter` (branche `main`).
-- **v2.0.1** en préparation (session 2026-10-02, branche Arena `arena/01a0fd20-true-condensated-vault-exporte`) : nettoyage du dépôt (plan de refonte terminé retiré, export mort, ignores périmés) + corrections doc, sans changement fonctionnel.
-- **v2.0.0** mergée dans `main` le 2026-10-02 (PR #1, branche Arena `arena/01a0fc6f-true-condensated-vault-exporte`).
-- `npm run check` vert : 63 tests (2 fichiers), typecheck, build production (bundle ~56 KB, external `fs`/`path`/`zlib`).
-- ZIP validé avec `python3 zipfile` (intégrité CRC, deflate, noms d'entrées) sur un coffre de démo (4 notes + canvas).
-- Performance mesurée : 2000 notes + 50 blocs dataview (avec WHERE) nettoyés + rendus en ~400 ms.
-- Prochaine tâche prioritaire : essai réel dans le coffre World of Trois (checklist UI de `CONTEXT.md`).
+## Current state
 
-## Dernière session (2026-10-02) — refonte v2.0
-- **Nouveau** : export ZIP bundle (écriture binaire via gateway, zero-dep deflate), multi-cibles dans la sidebar, aperçu de scope en direct (notes/canvases/ko), historique des 5 derniers exports persisté, « Open folder » post-export, `scopeTag` (export par tag), expressions WHERE Dataview (`and`/`or`, `=`, `!=`, `>`, `<`, `>=`, `<=`, `in`, `like`, `contains`/`startswith`/`endswith`, `file.ctime/mtime/day`), HTML réécrit (markdown inline, thème clair/sombre, TOC 2 niveaux, callouts multi-lignes, listes de tâches, impression), canvas en ordre de lecture avec groupes en sections, résolution des liens markdown vers les vrais chemins.
-- **Corrigé** : boucle de ré-export (les sorties sont désormais exclues du périmètre via `reservedOutputPaths`), re-parsing frontmatter O(queries×notes) → index `ParsedFile` partagé par run, lectures séquentielles → batch 8 parallèles, `FROM "#tag"` non reconnu, en-têtes de groupes canvas dupliqués, ancres HTML dupliquées entre notes, écritures disque synchrones, un fichier corrompu arrêtait tout l'export.
-- **Réglages exposés** : `customCss` (textarea) et `yieldEvery` (Advanced) — définis mais injoignables avant.
-- Persistance : `saveData` passe de `{settings}` à `{settings, history}` ; lecture rétro-compatible avec l'ancien format.
-- APIs Obsidian internes typées localement : `Shell.revealInFileExplorer`, `app.setting`, `SettingTab.id` (`src/obsidian/obsidian-internal.d.ts`).
-- **Deuxième salve (même session)** :
-  - Commandes contextuelles : « Export current note's folder (all targets) » et « Export current note as clean Markdown » — overrides de réglages en mémoire (`settingsOverride` dans `executeTargets`), nouveaux champ `ExporterSettings.onlyFile` + `FilterOptions.onlyPath`.
-  - Recherche client-side dans l'HTML exporté : input dans le TOC, filtrage des articles + entrées TOC, compteur visible (script inline zéro dépendance, testé avec un DOM stub).
+- Working branch: `arena/01a105c7-true-condensated-vault-exporte`. Continue on this branch; do not switch branches.
+- Package and Obsidian manifest are version `2.0.2`. The release workflow in `.github/workflows/release.yml` builds the matching `v*` tag and attaches `main.js`, `manifest.json`, and `styles.css` to the GitHub release.
+- `npm run check` passed: TypeScript, 77 Vitest tests, and the production build. `git diff --check` is clean.
+- `npm audit` reported zero vulnerabilities after pinning the development-only `moment` override to `2.31.0`.
+- README screenshots and GIF are illustrative mock-ups, not captures from a running Obsidian instance. Manual Obsidian UI verification remains outstanding.
 
-## Écarts / limites connues
-- Pas testé dans Obsidian (aucune capture) : sidebar, panneau, « Open folder », réglages — checklist à faire dans le coffre World of Trois.
-- Liens markdown résolus relatifs à la racine du coffre ; si le fichier consolidé est dans un sous-dossier, les liens ne remontent pas d'un niveau (documenté dans le README).
-- `scopeTag` exclut les canvases (pas de tags sur les canvas) — comportement assumé, signalé dans la sidebar.
-- Split `individual-files` : une note illisible est skipée (pas de fichier partiel) — rapportée dans le récap.
+## Work completed in this session
 
-## Rappels actifs + Backlog
-- Détection automatique des valeurs en dur / doublons : pas encore de contrôle (seule l'isolation des couches est testée).
-- Idées non traitées (ordre de valeur supposé) : liens markdown relatifs à l'emplacement réel du fichier de sortie ; export « diff » (uniquement les notes modifiées depuis le dernier export, via `mtime`) ; partage de l'historique entre machines (déjà dans le data.json) ; i18n (libellés anglais en dur par choix).
+- Hardened frontmatter parsing for BOM-prefixed files, empty blocks, YAML comments, quoted values, and simple block/inline lists; frontmatter is indexed once per export.
+- Improved Dataview field resolution, date handling, expression validation, and fallback behavior for unsupported queries.
+- Added checks for unsafe HTML URLs and CSS injection, heading-anchor collisions, export-path conflicts/traversal, malformed settings, cancellation, skipped-file reporting, ZIP safety, and split-export behavior.
+- Hardened export cancellation and result reporting, history refresh, Markdown link handling, and several UI accessibility/progress details.
+- Rewrote README and project notes in English, updated the changelog and release metadata, and refreshed the helper scripts.
+- Added mock-up assets in `docs/assets/`: `sidebar-preview.png`, `html-preview.png`, and `export-flow.gif`.
+
+## Known limitations / verification
+
+- Run `npm run check` and `npm audit` before subsequent code changes. The generated production `main.js` is ignored by Git.
+- Test the plugin inside desktop Obsidian when available: sidebar selection, live scope preview, settings persistence, progress/cancel, output files, and HTML dark/light themes.
+- Markdown links point to vault-root-relative paths; consolidated outputs in subfolders and split mirrors may need link adjustment.
+- Tag scoping excludes Canvas files. The sidebar's live count remains path-based when a tag filter is active and warns about that limitation.
+- Dataview support is deliberately partial; unsupported or malformed blocks are retained rather than evaluated.
+
+## Release process
+
+1. Keep `package.json`, `manifest.json`, and `CHANGELOG.md` versions aligned.
+2. Run `npm run check` and `npm audit`.
+3. Merge the reviewed PR into `main`.
+4. Create a GitHub release with the matching `v<version>` tag. The release workflow builds the tagged source and attaches Obsidian's three install files; verify all assets are present.
+5. Perform a manual desktop Obsidian smoke test when an instance is available.

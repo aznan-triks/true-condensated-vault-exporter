@@ -42,7 +42,7 @@ export interface ZipEntry {
 
 function dosDateTime(date: Date): { time: number; date: number } {
 	const time = ((date.getHours() & 0x1f) << 11) | ((date.getMinutes() & 0x3f) << 5) | (Math.floor(date.getSeconds() / 2) & 0x1f);
-	const year = Math.max(1980, date.getFullYear());
+	const year = Math.min(2107, Math.max(1980, date.getFullYear()));
 	const dateVal = (((year - 1980) & 0x7f) << 9) | (((date.getMonth() + 1) & 0xf) << 5) | (date.getDate() & 0x1f);
 	return { time, date: dateVal };
 }
@@ -68,19 +68,30 @@ function concat(parts: Uint8Array[]): Uint8Array {
 }
 
 const STORE_THRESHOLD = 256;
+const MAX_ZIP32_VALUE = 0xffffffff;
 
 /** Builds a complete ZIP archive (local headers + central directory + EOCD). */
 export function buildZip(entries: ZipEntry[], modifiedAt: Date = new Date()): Uint8Array {
+	if (entries.length > 0xffff) throw new Error('This ZIP writer does not support more than 65,535 entries.');
 	const { time, date } = dosDateTime(modifiedAt);
 	const encoder = new TextEncoder();
 
-		const localParts: Uint8Array[] = [];
-		const centralParts: Uint8Array[] = [];
-		let localOffset = 0;
+	const localParts: Uint8Array[] = [];
+	const centralParts: Uint8Array[] = [];
+	const names = new Set<string>();
+	let localOffset = 0;
 
 	for (const entry of entries) {
-		const nameBytes = encoder.encode(entry.name);
+		const safeName = entry.name.replace(/\\/g, '/');
+		if (!safeName || safeName.startsWith('/') || /^[a-z]:\//i.test(safeName) || safeName.split('/').includes('..')) {
+			throw new Error('Unsafe ZIP entry path: ' + entry.name);
+		}
+		if (names.has(safeName)) throw new Error('Duplicate ZIP entry path: ' + safeName);
+		names.add(safeName);
+		const nameBytes = encoder.encode(safeName);
+		if (nameBytes.length > 0xffff) throw new Error('ZIP entry name is too long: ' + safeName);
 		const raw = entry.data;
+		if (raw.length > MAX_ZIP32_VALUE) throw new Error('ZIP entry is too large for ZIP32: ' + safeName);
 		const crc = crc32(raw);
 
 		let compressed: Uint8Array;
@@ -93,6 +104,7 @@ export function buildZip(entries: ZipEntry[], modifiedAt: Date = new Date()): Ui
 			method = 0;
 			compressed = raw;
 		}
+		if (compressed.length > MAX_ZIP32_VALUE) throw new Error('Compressed ZIP entry is too large for ZIP32: ' + safeName);
 
 		const local = concat([
 			u32(0x04034b50),
@@ -133,9 +145,11 @@ export function buildZip(entries: ZipEntry[], modifiedAt: Date = new Date()): Ui
 
 		localParts.push(local);
 		localOffset += local.length;
+		if (localOffset > MAX_ZIP32_VALUE) throw new Error('ZIP archive exceeds the ZIP32 size limit.');
 	}
 
 	const centralDir = concat(centralParts);
+	if (centralDir.length > MAX_ZIP32_VALUE) throw new Error('ZIP central directory exceeds the ZIP32 size limit.');
 	const eocd = concat([
 		u32(0x06054b50),
 		u16(0),
@@ -156,13 +170,26 @@ export function buildZip(entries: ZipEntry[], modifiedAt: Date = new Date()): Ui
  * to "<last folder>/<file>" so the bundle stays portable.
  */
 export function zipEntryName(targetPath: string): string {
-	const norm = targetPath.replace(/\\/g, '/').replace(/^\/+/, '');
-	if (/^[a-zA-Z]:\//.test(norm) || targetPath.startsWith('/')) {
-		const parts = norm.split('/').filter(Boolean);
+	const normalized = targetPath.trim().replace(/\\/g, '/');
+	const absolute = normalized.startsWith('/') || /^[a-z]:\//i.test(normalized);
+	const parts: string[] = [];
+	for (const part of normalized.split('/')) {
+		if (!part || part === '.' || /^[a-z]:$/i.test(part)) continue;
+		if (part === '..') {
+			if (parts.length === 0) {
+				if (!absolute) throw new Error('ZIP entry path cannot escape the archive root: ' + targetPath);
+			} else {
+				parts.pop();
+			}
+			continue;
+		}
+		parts.push(part);
+	}
+
+	if (absolute) {
 		const file = parts[parts.length - 1] ?? 'export.txt';
-		const dirParts = parts.slice(0, -1);
-		const root = dirParts[dirParts.length - 1] ?? 'export';
+		const root = parts.length > 1 ? parts[parts.length - 2]! : 'export';
 		return root + '/' + file;
 	}
-	return norm;
+	return parts.join('/') || 'export.txt';
 }

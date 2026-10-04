@@ -60,7 +60,7 @@ export default class VaultExporterPlugin extends Plugin {
 
 		this.addCommand({
 			id: 'export-active-folder',
-			name: 'Export current note\'s folder (all targets)',
+			name: 'Export current note\'s folder (all non-ZIP formats)',
 			icon: 'folder',
 			callback: async () => {
 				const file = this.app.workspace.getActiveFile();
@@ -70,7 +70,7 @@ export default class VaultExporterPlugin extends Plugin {
 				}
 				const folder = file.parent?.path ?? '';
 				await executeTargets(this.getUiContext(), ['all'], {
-					settingsOverride: { scopeRoot: folder },
+					settingsOverride: { scopeRoot: folder, scopeTag: '' },
 					label: 'Export folder: ' + (folder || '(root)'),
 				});
 			},
@@ -82,7 +82,7 @@ export default class VaultExporterPlugin extends Plugin {
 			icon: 'file-plus',
 			callback: async () => {
 				const file = this.app.workspace.getActiveFile();
-				if (!file || !file.path.endsWith('.md')) {
+				if (!file || !file.path.toLowerCase().endsWith('.md')) {
 					new Notice('Open a markdown note first.');
 					return;
 				}
@@ -91,6 +91,7 @@ export default class VaultExporterPlugin extends Plugin {
 				await executeTargets(this.getUiContext(), ['markdown'], {
 					settingsOverride: {
 						scopeRoot: '',
+						scopeTag: '',
 						onlyFile: file.path,
 						markdownOutputPath: outPath,
 					},
@@ -111,7 +112,9 @@ export default class VaultExporterPlugin extends Plugin {
 		});
 	}
 
-	override onunload(): void {}
+	override onunload(): void {
+		cancelRunningExport();
+	}
 
 	async loadSettings(): Promise<void> {
 		const loaded = await this.loadData();
@@ -141,7 +144,13 @@ export default class VaultExporterPlugin extends Plugin {
 
 	setHistory(history: ExportHistoryEntry[]): void {
 		this.history = history;
-		void this.saveData({ settings: this.settings, history: this.history } as PluginData);
+		void this.saveData({ settings: this.settings, history: this.history } as PluginData).catch((error: unknown) => {
+			console.error('[vault-exporter] Could not save export history:', error);
+		});
+		for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE_EXPORTER_SIDEBAR)) {
+			const view = leaf.view as ExporterSidebarView | null;
+			view?.render();
+		}
 	}
 
 	getUiContext(): UiContext {

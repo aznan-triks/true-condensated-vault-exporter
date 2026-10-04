@@ -13,17 +13,17 @@ export function formatForNotebookLM(notes: CleanedNote[], settings: ExporterSett
 	const parts: string[] = [
 		RULE,
 		settings.documentTitle.toUpperCase() + ' (NOTEBOOKLM EXPORT)',
-		'Documents : ' + notes.length,
-		'Exported  : ' + exportedAt,
+		'Documents: ' + notes.length,
+		'Exported: ' + exportedAt,
 		RULE + '\n',
 	];
 
 	notes.forEach((note, i) => {
 		parts.push('\n' + SEPARATOR);
-		parts.push('DOCUMENT [' + (i + 1) + '/' + notes.length + '] : ' + note.path + (note.isCanvas ? ' (CANVAS)' : ''));
-		parts.push('Title : ' + note.title);
+		parts.push('DOCUMENT [' + (i + 1) + '/' + notes.length + ']: ' + note.path + (note.isCanvas ? ' (CANVAS)' : ''));
+		parts.push('Title: ' + note.title);
 		for (const [k, v] of visibleMetadata(note, settings)) {
-			parts.push(k + ' : ' + v);
+			parts.push(k + ': ' + v);
 		}
 		parts.push(SEPARATOR + '\n');
 		parts.push(note.body);

@@ -1,81 +1,66 @@
 # Vault Exporter
 
-Plugin Obsidian pour exporter un coffre (ou un sous-dossier, ou un tag) en formats de consommation directe :
+An Obsidian desktop plugin for turning a vault, folder, or tagged subset into files ready to read, share, or upload.
 
-| Format | À quoi ça sert |
+> **UI preview.** The images below are illustrative mock-ups, not screenshots from a running Obsidian instance. The plugin uses your Obsidian theme and may look different.
+
+![Vault Exporter sidebar and export targets](docs/assets/sidebar-preview.png)
+
+![Export progress preview](docs/assets/export-flow.gif)
+
+## Export formats
+
+| Target | Output |
 |---|---|
-| **NotebookLM (texte consolidé)** | Source unique pour NotebookLM : notes nettoyées, métadonnées, délimiteurs de documents |
-| **HTML** | Document autonome et stylisé : table des matières à 2 niveaux, thème clair/sombre auto, callouts, tables, listes de tâches, CSS personnalisable |
-| **Markdown consolidé** | Un seul fichier unifié avec sommaire ancré |
-| **Split** | Un `.txt` par dossier (groupé) ou un `.md` par note (miroir du coffre) |
-| **ZIP bundle** | Tous les formats précédents compressés dans un seul `.zip` — un fichier à envoyer, un zip à uploader |
+| **NotebookLM** | One structured `.txt` file with clear note boundaries and optional metadata. |
+| **HTML** | A styled document with a searchable table of contents, dark/light theme, and print layout. |
+| **Markdown** | One `.md` file with an anchored table of contents. |
+| **Split** | One `.txt` per folder, or one cleaned `.md` file per note. |
+| **ZIP bundle** | A portable archive containing all three consolidated formats and split files. The ZIP is a separate target. |
 
-## Fonctionnalités clés
+![Standalone HTML export preview](docs/assets/html-preview.png)
 
-- **Multi-cibles en un clic** : cochez n'importe quelle combinaison de formats dans la sidebar, lancez l'export. Annulable à tout moment.
-- **Aperçu du périmètre en direct** : la sidebar affiche le nombre de notes/canvases (et le poids) réellement exportés, mis à jour à chaque changement de réglage.
-- **Historique des exports** : les 5 derniers runs (cibles, date, fichiers, taille, résultat).
-- **Périmètre flexible** : racine de scope, dossier exclus, fichiers exclus, préfixes exclus, **et filtre par tag** (`scopeTag`).
-- **Dataview in-mémoire** : les blocs Dataview (TABLE/LIST) sont évalués contre le coffre et rendus en markdown statique — sans le plugin Dataview à destination. `WHERE` accepte `and`/`or`, parenthèses, `=`, `!=`, `>`, `<`, `>=`, `<=`, `in (…)`, `like "wild*card"`, `contains`/`startswith`/`endswith`.
-- **Wikilinks** : 4 modes (texte propre, `[[bruts]]` conservés, `Lien (Alias)`, markdown résolu vers les vrais chemins du coffre).
-- **Canvases** : les `.canvas` sont convertis en texte lisible (ordre visuel haut→bas, groupes en sections).
-- **Anti boucle de ré-export** : les sorties précédentes (fichiers consolidés, ZIP, dossier split) sont automatiquement exclus du périmètre — exporter deux fois n'ingère pas la première sortie.
-- **Robustesse** : lectures parallèles, note illisible = skip + rapport (pas d'arrêt total), écritures asynchrones, annulation propre par `AbortSignal`.
-- **100 % TypeScript**, moteur pur testable : 63 tests unitaires, aucune dépendance runtime.
+## Use it
 
-## Installation
+1. Open the **Vault Exporter** sidebar from the ribbon, or use the Command Palette.
+2. Choose targets and select **Run export**. Select **All non-ZIP exports** for NotebookLM, HTML, Markdown, and split output; **ZIP bundle** is a separate target.
+3. Track progress, cancel a run, and open the output folder when it finishes.
 
-1. `npm install && npm run build` (produit `main.js`).
-2. Copier le dossier du plugin (ou un lien symbolique vers le dépôt) dans `<coffre>/.obsidian/plugins/vault-exporter/`.
-3. Activer « Vault Exporter » dans Réglages → Plugins communautaires.
-4. Ouvrir la sidebar (icône `file-up` dans la ruban) ou la palette de commandes.
+The sidebar also shows a scope preview and the five most recent runs. When a tag filter is active, the preview is path-based and the sidebar says so; Canvas files are not included in tag-scoped exports.
 
-## Commandes
+### Scope and content
 
-| Commande | Action |
-|---|---|
-| Run all exports | Tous les formats consolidés + split |
-| Export for NotebookLM (consolidated text) | Un seul fichier texte consolidé |
-| Export as consolidated Markdown | Un seul fichier markdown unifié |
-| Export as HTML document | Un document HTML autonome (avec recherche intégrée) |
-| Export split files | Fichiers par dossier ou par note |
-| Export everything as ZIP bundle | Un `.zip` contenant tout |
-| Export current note's folder (all targets) | Exporte le dossier de la note active (scope temporaire) |
-| Export current note as clean Markdown | Écrit `<note> (clean export).md` à côté de la note |
-| Cancel running export | Interrompt l'export en cours |
+Use **Scope Root** to limit exports to a vault folder and **Scope Tag** to include notes with a matching frontmatter or inline tag. Excluded folders, files, and folder prefixes apply to both. Previous exporter outputs are automatically excluded, so repeat runs do not ingest their own files.
 
-> Les commandes « current note » utilisent des overrides de réglages **en mémoire** (scope, chemin de sortie) : vos réglages persistés ne sont jamais modifiés.
+The cleaning pipeline can strip YAML frontmatter, remove Obsidian comments, convert wikilinks in four modes, include Canvas text in visual order, and render a supported subset of Dataview `TABLE`/`LIST` queries to static Markdown. Supported filters include `and`/`or`, comparisons, `in`, `like`, and `contains`/`startswith`/`endswith`. Unsupported Dataview blocks are left intact rather than evaluated as if they matched everything.
 
-## Réglages (extraits)
+Use the **current note** commands to export its folder or create a clean Markdown copy beside it. These commands temporarily override scope and output settings; saved settings are unchanged.
 
-- **Document Title** : titre des exports consolidés.
-- **Scope Root / Scope Tag** : restreindre l'export à un dossier *et/ou* à un tag.
-- **Excluded Folders / Files / Prefixes** : listes noires avec autocomplétion.
-- **Chemins de sortie** : chaque format a son chemin (vault-relatif ou absolu, desktop).
-- **Split** : mode groupé par dossier ou miroir 1:1 ; dossier de destination.
-- **Markdown Processing** : canvases, frontmatter, Dataview, format des wikilinks, propriétés ignorées.
-- **Advanced** : CSS custom pour l'HTML (`--ve-bg`, `--ve-accent`, …), cadence d'UI (`yieldEvery`).
+## Install
 
-## Développement
+Download `main.js`, `manifest.json`, and `styles.css` from the [latest release](https://github.com/aznan-triks/true-condensated-vault-exporter/releases). Copy them to:
 
-```bash
-npm install
-npm run dev      # esbuild en watch
-npm run check    # typecheck + vitest + build production
-npm run test     # vitest seul
+```text
+<your-vault>/.obsidian/plugins/vault-exporter/
 ```
 
-Architecture : voir `CONTEXT.md`. En bref —
+Then reload Obsidian and enable **Vault Exporter** in **Settings → Community plugins**. For a local build, run `npm ci` followed by `npm run build`, then copy the same three files.
 
-- `src/core/` : logique pure (aucun import `obsidian`), testée directement ;
-- `src/obsidian/` : seule couche qui touche l'API Obsidian et Node (`fs`, `zlib`) ;
-- `src/features/` : orchestrateur, formats, split, historique ;
-- `src/ui/`, `src/settings/`, `src/commands/` : interface.
+## Settings worth knowing
 
-Ajouter un format consolidé = 1 formateur dans `src/core/` + 1 entrée dans `CONSOLIDATED_FORMATS` (`src/features/formats.ts`) + 1 commande dans `EXPORT_COMMANDS` (`src/commands/registry.ts`, source unique de la palette et de la sidebar).
+- **Scope Root / Scope Tag** and exclusion lists control what is read.
+- Each consolidated format, the ZIP, and split files have configurable output paths. Use vault-relative paths or absolute paths on desktop; a blank split destination means the vault root.
+- Split mode chooses folder-grouped text files or a one-to-one Markdown mirror.
+- Markdown-processing settings control frontmatter, Dataview, Canvas, wikilinks, and ignored properties. **Advanced** includes custom HTML CSS and UI yield frequency.
 
-## Notes
+Markdown links point to vault-root-relative paths, not paths relative to each exported file. Consolidated Markdown and HTML work best at the vault root; links may need adjustment for outputs saved elsewhere, especially split Markdown mirrors. Unreadable notes are skipped and reported. Files already written are kept if an export is cancelled.
 
-- Plugin **desktop uniquement** (`isDesktopOnly`) : l'écriture vers des chemins absolus et le « Open folder » utilisent Electron.
-- Les liens markdown sont relatifs à la racine du coffre (utile si le fichier consolidé est à la racine).
-- Le ZIP est écrit avec le `zlib` Node (deflate) ; les très petites entrées sont stockées telles quelles.
+## Development
+
+```bash
+npm ci
+npm run check    # TypeScript, tests, and production build
+npm run dev      # esbuild watch mode
+```
+
+The core is dependency-light TypeScript; Obsidian and Node APIs stay behind the vault gateway. The ZIP writer uses Node's built-in `zlib` and supports standard ZIP32 limits.

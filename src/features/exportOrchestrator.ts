@@ -18,7 +18,7 @@ import { buildZip, zipEntryName, ZipEntry } from '../core/zip';
 export type ExportTarget = 'all' | ConsolidatedFormatId | 'split' | 'zip';
 
 export class ExportCancelledError extends Error {
-	constructor() {
+	constructor(readonly partialResult?: ExportResult) {
 		super('Export cancelled.');
 		this.name = 'ExportCancelledError';
 	}
@@ -32,9 +32,9 @@ export interface ExportResult {
 	durationMs: number;
 }
 
-function checkCancelled(signal?: AbortSignal): void {
+function checkCancelled(signal?: AbortSignal, partialResult?: ExportResult): void {
 	if (signal?.aborted) {
-		throw new ExportCancelledError();
+		throw new ExportCancelledError(partialResult);
 	}
 }
 
@@ -51,11 +51,14 @@ export function utf8ByteLength(text: string): number {
 function consolidatedOutputs(
 	notes: CleanedNote[],
 	settings: ExporterSettings,
-	exportedAt: string
+	exportedAt: string,
+	requested: Set<ConsolidatedFormatId>
 ): Map<ConsolidatedFormatId, OutputFile> {
 	const map = new Map<ConsolidatedFormatId, OutputFile>();
 	for (const [id, format] of Object.entries(CONSOLIDATED_FORMATS) as [ConsolidatedFormatId, (typeof CONSOLIDATED_FORMATS)[ConsolidatedFormatId]][]) {
-		map.set(id, { path: format.outputPath(settings), content: format.render(notes, settings, exportedAt) });
+		if (requested.has(id)) {
+			map.set(id, { path: format.outputPath(settings), content: format.render(notes, settings, exportedAt) });
+		}
 	}
 	return map;
 }
@@ -63,6 +66,48 @@ function consolidatedOutputs(
 interface LabeledOutput {
 	out: OutputFile;
 	stage: string;
+}
+
+function canonicalPath(value: string): string {
+	const path = value.trim().replace(/\\/g, '/');
+	const drive = path.match(/^([a-z]):\//i)?.[1];
+	const prefix = drive ? drive.toLowerCase() + ':/' : path.startsWith('//') ? '//' : path.startsWith('/') ? '/' : '';
+	const start = drive ? 3 : prefix === '//' ? 2 : prefix === '/' ? 1 : 0;
+	const parts: string[] = [];
+	for (const part of path.slice(start).split('/')) {
+		if (!part || part === '.') continue;
+		if (part === '..') {
+			if (parts.length > 0 && parts[parts.length - 1] !== '..') parts.pop();
+			else if (!prefix) parts.push(part);
+			continue;
+		}
+		parts.push(part);
+	}
+	const normalized = prefix + parts.join('/');
+	return drive ? normalized.toLowerCase() : normalized;
+}
+
+function validateOutputPath(value: string, label: string): string {
+	const trimmed = value.trim();
+	if (!trimmed) throw new Error(label + ' output path cannot be empty.');
+	const portable = trimmed.replace(/\\/g, '/');
+	const normalized = canonicalPath(trimmed);
+	const absolute = /^(?:[a-z]:\/|\/)/i.test(portable);
+	if (!absolute && portable.split('/').includes('..')) {
+		throw new Error(label + ' output path must stay inside the vault or use an absolute path.');
+	}
+	const isDriveRoot = /^[a-z]:\/?$/i.test(normalized);
+	const isUncRoot = normalized.startsWith('//') && normalized.slice(2).split('/').length <= 2;
+	if (!normalized || normalized === '/' || normalized === '//' || isDriveRoot || isUncRoot || portable.endsWith('/')) {
+		throw new Error(label + ' output path must name a file, not a folder.');
+	}
+	return trimmed;
+}
+
+function pathsOverlap(left: string, right: string): boolean {
+	const a = canonicalPath(left);
+	const b = canonicalPath(right);
+	return a === b || a.startsWith(b + '/') || b.startsWith(a + '/');
 }
 
 /** Selects the individual files to write for the requested targets (no zip). */
@@ -84,13 +129,26 @@ function selectOutputs(
 			selected.push({ out: consolidated.get(t)!, stage: CONSOLIDATED_FORMATS[t].label });
 		}
 	}
-	// Dedupe by path (first label wins)
-	const seen = new Set<string>();
-	return selected.filter((item) => {
-		if (seen.has(item.out.path)) return false;
-		seen.add(item.out.path);
-		return true;
-	});
+	// Repeated targets are harmless; different outputs sharing a path are not.
+	const seen = new Map<string, LabeledOutput>();
+	const deduped: LabeledOutput[] = [];
+	for (const item of selected) {
+		validateOutputPath(item.out.path, item.stage);
+		const key = canonicalPath(item.out.path);
+		const previous = seen.get(key);
+		if (previous) {
+			if (previous.out.content === item.out.content) continue;
+			throw new Error('Output path conflict: ' + previous.out.path + ' is used by more than one export.');
+		}
+		for (const [otherPath, other] of seen) {
+			if (pathsOverlap(otherPath, key)) {
+				throw new Error('Output paths overlap: ' + other.out.path + ' and ' + item.out.path + '.');
+			}
+		}
+		seen.set(key, item);
+		deduped.push(item);
+	}
+	return deduped;
 }
 
 /** Builds the zip entry list: every consolidated format + split files. */
@@ -100,12 +158,16 @@ function zipEntries(
 ): ZipEntry[] {
 	const encoder = new TextEncoder();
 	const all = [...consolidated.values(), ...split];
-	const seen = new Set<string>();
+	const seen = new Map<string, string>();
 	const entries: ZipEntry[] = [];
 	for (const out of all) {
 		const name = zipEntryName(out.path);
-		if (seen.has(name)) continue;
-		seen.add(name);
+		const previous = seen.get(name);
+		if (previous !== undefined) {
+			if (previous !== out.content) throw new Error('ZIP entry name conflict: ' + name + '.');
+			continue;
+		}
+		seen.set(name, out.content);
 		entries.push({ name, data: encoder.encode(out.content) });
 	}
 	return entries;
@@ -120,58 +182,143 @@ export async function runExports(
 	loadedFiles?: VaultFile[]
 ): Promise<ExportResult> {
 	const startedAt = Date.now();
+	const uniqueTargets = [...new Set(targets)];
+	if (uniqueTargets.length === 0) throw new Error('Select at least one export target.');
+	for (const target of uniqueTargets) {
+		if (target !== 'all' && target !== 'split' && target !== 'zip' && !Object.hasOwn(CONSOLIDATED_FORMATS, target)) {
+			throw new Error('Unknown export target: ' + target);
+		}
+	}
+
+	const written: { path: string; bytes: number }[] = [];
+	const skippedFiles: string[] = [];
+	const skippedSet = new Set<string>();
+	let firstReadFailure = '';
+	let loadProgress = { current: 0, total: 0 };
+	const addSkipped = (filePath: string, message?: string): void => {
+		if (!skippedSet.has(filePath)) {
+			skippedSet.add(filePath);
+			skippedFiles.push(filePath);
+		}
+		if (message) {
+			firstReadFailure ||= filePath + ': ' + message;
+			onProgress({
+				stage: 'Loading notes',
+				current: loadProgress.current,
+				total: loadProgress.total,
+				currentFile: filePath,
+				log: 'Could not read ' + filePath + ': ' + message,
+			});
+		}
+	};
+	const snapshot = (): ExportResult => ({
+		written: [...written],
+		skippedFiles: [...skippedFiles],
+		totalBytes: written.reduce((sum, file) => sum + file.bytes, 0),
+		durationMs: Date.now() - startedAt,
+	});
+
 	onProgress({ stage: 'Scanning vault', current: 0, total: 1, log: 'Indexing vault notes...' });
-	const files = loadedFiles ?? (await gateway.loadVaultFiles(settings));
+	const files = loadedFiles ?? (await gateway.loadVaultFiles(
+		settings,
+		signal,
+		(current, total, currentFile) => {
+			loadProgress = { current, total };
+			onProgress({
+				stage: 'Loading notes',
+				current,
+				total,
+				currentFile,
+				log: 'Loaded ' + current + ' of ' + total + ' notes',
+			});
+		},
+		(filePath, message) => addSkipped(filePath, message)
+	));
+	checkCancelled(signal, snapshot());
 	if (files.length === 0) {
+		if (skippedFiles.length > 0) {
+			throw new Error('Could not read any of the ' + skippedFiles.length + ' matching files. ' + firstReadFailure);
+		}
 		throw new Error('No files matched the inclusion criteria.');
 	}
 
 	const ctx = createExportContext(files, settings);
-
 	const notes: CleanedNote[] = [];
-	const skippedFiles: string[] = [];
-	const every = Math.max(1, settings.yieldEvery);
+	const requestedYield = Number.isFinite(settings.yieldEvery) ? Math.floor(settings.yieldEvery) : 25;
+	const every = Math.max(1, Math.min(1000, requestedYield));
 	for (const [i, file] of files.entries()) {
-		checkCancelled(signal);
+		checkCancelled(signal, snapshot());
 		try {
 			notes.push(cleanNote(file, ctx));
 		} catch (err: unknown) {
-			const msg = err instanceof Error ? err.message : String(err);
-			skippedFiles.push(file.path);
-			console.warn('[vault-exporter] Skipped ' + file.path + ' : ' + msg);
+			const message = err instanceof Error ? err.message : String(err);
+			addSkipped(file.path);
+			console.warn('[vault-exporter] Skipped ' + file.path + ': ' + message);
+			onProgress({
+				stage: 'Cleaning notes',
+				current: i + 1,
+				total: files.length,
+				currentFile: file.path,
+				log: 'Skipped ' + file.path + ': ' + message,
+			});
 		}
 		if ((i + 1) % every === 0) {
-			onProgress({ stage: 'Cleaning notes', current: i + 1, total: files.length, currentFile: file.path, log: 'Cleaned ' + (i + 1) + ' notes' });
+			onProgress({ stage: 'Cleaning notes', current: i + 1, total: files.length, currentFile: file.path, log: 'Processed ' + (i + 1) + ' of ' + files.length + ' notes' });
 			await yieldToUi();
 		}
 	}
 	if (notes.length === 0) {
-		throw new Error('No note could be read (all ' + files.length + ' files failed to load).');
+		throw new Error('No note could be processed (' + files.length + ' files were skipped).');
 	}
-	onProgress({ stage: 'Cleaning notes', current: files.length, total: files.length, log: 'Cleaned ' + notes.length + ' notes.' });
+	checkCancelled(signal, snapshot());
+	onProgress({ stage: 'Cleaning notes', current: files.length, total: files.length, log: 'Processed ' + notes.length + ' notes.' });
+
+	const zipRequested = uniqueTargets.includes('zip');
+	const requestedFormats = new Set<ConsolidatedFormatId>();
+	const formatIds = Object.keys(CONSOLIDATED_FORMATS) as ConsolidatedFormatId[];
+	for (const target of uniqueTargets) {
+		if (target === 'all' || zipRequested) {
+			for (const id of formatIds) requestedFormats.add(id);
+		} else if (target !== 'split' && target !== 'zip') {
+			requestedFormats.add(target);
+		}
+	}
 
 	const exportedAt = new Date().toISOString();
-	const consolidated = consolidatedOutputs(notes, settings, exportedAt);
-	const split = buildSplitFiles(notes, settings);
+	const consolidated = consolidatedOutputs(notes, settings, exportedAt, requestedFormats);
+	const splitRequested = zipRequested || uniqueTargets.some((target) => target === 'all' || target === 'split');
+	const split = splitRequested ? buildSplitFiles(notes, settings) : [];
+	const plainTargets = uniqueTargets.filter((target) => target !== 'zip');
+	const plainOutputs = selectOutputs(plainTargets, consolidated, split);
+	const zipPath = zipRequested ? validateOutputPath(settings.zipOutputPath, 'ZIP bundle') : '';
 
-	const written: { path: string; bytes: number }[] = [];
+	if (zipRequested) {
+		for (const item of plainOutputs) {
+			if (pathsOverlap(zipPath, item.out.path)) {
+				throw new Error('ZIP bundle path overlaps another selected output: ' + item.out.path + '.');
+			}
+		}
+	}
 
-	if (targets.includes('zip')) {
-		checkCancelled(signal);
+	checkCancelled(signal, snapshot());
+	let zipData: Uint8Array | null = null;
+	if (zipRequested) {
 		onProgress({ stage: 'ZIP bundle', current: 0, total: 1, log: 'Building archive (all formats + split)...' });
 		await yieldToUi();
-		const entries = zipEntries(consolidated, split);
-		const zipData = buildZip(entries);
-		const zipPath = settings.zipOutputPath;
+		zipData = buildZip(zipEntries(consolidated, split));
+	}
+
+	if (zipRequested && zipData) {
+		checkCancelled(signal, snapshot());
 		onProgress({ stage: 'ZIP bundle', current: 1, total: 1, currentFile: zipPath, log: 'Writing ' + zipPath });
 		await gateway.writeBinary(zipPath, zipData);
 		written.push({ path: zipPath, bytes: zipData.length });
+		await yieldToUi();
+		checkCancelled(signal, snapshot());
 	}
 
-	const plainTargets = targets.filter((t) => t !== 'zip');
-	const plainOutputs = selectOutputs(plainTargets, consolidated, split);
 	for (const [i, item] of plainOutputs.entries()) {
-		checkCancelled(signal);
+		checkCancelled(signal, snapshot());
 		onProgress({
 			stage: item.stage,
 			current: i + 1,
@@ -182,14 +329,10 @@ export async function runExports(
 		await gateway.writeFile(item.out.path, item.out.content);
 		written.push({ path: item.out.path, bytes: utf8ByteLength(item.out.content) });
 		await yieldToUi();
+		checkCancelled(signal, snapshot());
 	}
 
-	const result: ExportResult = {
-		written,
-		skippedFiles,
-		totalBytes: written.reduce((sum, w) => sum + w.bytes, 0),
-		durationMs: Date.now() - startedAt,
-	};
+	const result = snapshot();
 	onProgress({ stage: 'Completed', current: 1, total: 1, log: 'Export finished: ' + written.length + ' files.' });
 	return result;
 }

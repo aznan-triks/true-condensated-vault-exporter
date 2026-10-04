@@ -6,18 +6,19 @@
 export interface VaultFile {
 	/** Relative path from vault root, e.g. 'Notes/Topic/Doc.md' or 'index.md' */
 	path: string;
-	/** File basename without path, e.g. 'Chronologie.md' */
+	/** File basename without path, e.g. 'Timeline.md' */
 	name: string;
 	/** Raw markdown content */
 	content: string;
 	/** Last modified timestamp in ms */
 	mtime?: number;
+	/** Creation timestamp in ms */
+	ctime?: number;
 }
 
 /**
- * A vault file whose metadata was parsed exactly once per run.
- * Produced by `parseVault` and shared by the cleaning pipeline and the
- * dataview engine so frontmatter is never re-parsed per query.
+ * A vault file whose frontmatter was parsed once per export run.
+ * The parsed body and metadata are shared by the cleaner and Dataview engine.
  */
 export interface ParsedFile {
 	/** Vault-relative path, normalized to forward slashes */
@@ -27,8 +28,14 @@ export interface ParsedFile {
 	/** Parent folder (normalized, '' for vault root) */
 	folder: string;
 	metadata: FileMetadata;
+	/** Markdown body without the frontmatter block */
+	body?: string;
+	/** Raw YAML frontmatter without delimiters */
+	rawFrontmatter?: string;
 	/** Last modified timestamp in ms */
 	mtime?: number;
+	/** Creation timestamp in ms */
+	ctime?: number;
 }
 
 export type WikilinkFormat = 'clean-text' | 'keep-wikilink' | 'markdown' | 'canonical-alias';
@@ -105,17 +112,67 @@ export const DEFAULT_SETTINGS: ExporterSettings = {
 	yieldEvery: 25,
 };
 
-/** Keeps only known keys, so obsolete saved settings are dropped on load. */
+const STRING_SETTING_KEYS = [
+	'documentTitle',
+	'scopeRoot',
+	'scopeTag',
+	'notebooklmOutputPath',
+	'htmlOutputPath',
+	'markdownOutputPath',
+	'zipOutputPath',
+	'splitGroupFolder',
+	'splitOutputFolder',
+	'customCss',
+] as const satisfies readonly (keyof ExporterSettings)[];
+
+const ARRAY_SETTING_KEYS = ['excludedFolders', 'excludedFiles', 'excludedPrefixes', 'ignoredProperties'] as const;
+
+/** Validates saved data and drops unknown or malformed settings. */
 export function mergeSettings(loaded: unknown): ExporterSettings {
-	const result: ExporterSettings = { ...DEFAULT_SETTINGS };
-	if (loaded && typeof loaded === 'object') {
-		for (const key of Object.keys(DEFAULT_SETTINGS) as (keyof ExporterSettings)[]) {
-			const value = (loaded as Record<string, unknown>)[key];
-			if (value !== undefined) {
-				(result as unknown as Record<string, unknown>)[key] = value;
-			}
+	const result: ExporterSettings = {
+		...DEFAULT_SETTINGS,
+		excludedFolders: [...DEFAULT_SETTINGS.excludedFolders],
+		excludedFiles: [...DEFAULT_SETTINGS.excludedFiles],
+		excludedPrefixes: [...DEFAULT_SETTINGS.excludedPrefixes],
+		ignoredProperties: [...DEFAULT_SETTINGS.ignoredProperties],
+	};
+	if (!loaded || typeof loaded !== 'object' || Array.isArray(loaded)) {
+		return result;
+	}
+
+	const source = loaded as Record<string, unknown>;
+	for (const key of STRING_SETTING_KEYS) {
+		if (typeof source[key] === 'string') {
+			Object.assign(result, { [key]: source[key] });
 		}
 	}
+	for (const key of ARRAY_SETTING_KEYS) {
+		const value = source[key];
+		if (Array.isArray(value)) {
+			result[key] = [...new Set(value.filter((item): item is string => typeof item === 'string').map((item) => item.trim()).filter(Boolean))];
+		}
+	}
+
+	for (const key of ['stripFrontmatter', 'renderDataview', 'includeCanvas'] as const) {
+		if (typeof source[key] === 'boolean') {
+			result[key] = source[key];
+		}
+	}
+	if (source.splitMode === 'folder-grouped' || source.splitMode === 'individual-files') {
+		result.splitMode = source.splitMode;
+	}
+	if (
+		source.wikilinkFormat === 'clean-text' ||
+		source.wikilinkFormat === 'keep-wikilink' ||
+		source.wikilinkFormat === 'markdown' ||
+		source.wikilinkFormat === 'canonical-alias'
+	) {
+		result.wikilinkFormat = source.wikilinkFormat;
+	}
+	if (typeof source.yieldEvery === 'number' && Number.isFinite(source.yieldEvery)) {
+		result.yieldEvery = Math.min(1000, Math.max(1, Math.floor(source.yieldEvery)));
+	}
+
 	return result;
 }
 
@@ -127,7 +184,7 @@ export interface FileMetadata {
 	trelloUrl?: string;
 	dateCreation?: string;
 	dateRevision?: string;
-	statut?: string;
+	status?: string;
 	custom: Record<string, unknown>;
 }
 
@@ -143,7 +200,12 @@ export type ProgressCallback = (progress: ExportProgress) => void;
 
 /** What the export features need from the host (implemented by the Obsidian gateway, faked in tests). */
 export interface ExportGateway {
-	loadVaultFiles(settings: ExporterSettings): Promise<VaultFile[]>;
+	loadVaultFiles(
+		settings: ExporterSettings,
+		signal?: AbortSignal,
+		onProgress?: (current: number, total: number, currentFile?: string) => void,
+		onSkipped?: (path: string, message: string) => void
+	): Promise<VaultFile[]>;
 	/** Writes a text file to a vault-relative or absolute path, creating parent folders. */
 	writeFile(targetPath: string, content: string): Promise<void>;
 	/** Writes binary data (e.g. a ZIP archive) to a vault-relative or absolute path. */
