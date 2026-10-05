@@ -13,6 +13,9 @@ const state = {
 	notices: [],
 	shellEnabled: false,
 	revealCalls: [],
+	openPathCalls: [],
+	pickedFolder: null,
+	folderPickerCanceled: false,
 	ribbonIcons: [],
 	iconCalls: [],
 };
@@ -105,7 +108,6 @@ class PluginSettingTab {
 		this.containerEl.addClass('vertical-tab-content');
 		this.tabEl = document.createElement('div');
 		this.containerEl.appendChild(this.tabEl);
-		this.id = plugin.manifest.id;
 	}
 	display() {}
 	hide() {}

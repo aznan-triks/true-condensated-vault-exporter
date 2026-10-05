@@ -13,6 +13,16 @@ import { parseCanvasContent } from '../src/core/canvasParser';
 import { buildSplitFiles } from '../src/features/exportSplit';
 import { cleanNote, createExportContext, parseVault } from '../src/core/pipeline';
 import { DEFAULT_SETTINGS, ExporterSettings, VaultFile, mergeSettings } from '../src/core/types';
+import {
+	canonicalOutputPath,
+	externalFolderBase,
+	isAbsoluteOutputPath,
+	outputLeafName,
+	resolveOutputPath,
+	resolveOutputSettings,
+	usesExternalOutputFolder,
+	vaultRelativeOutputPath,
+} from '../src/core/outputTarget';
 
 describe('filter', () => {
 	const options = {
@@ -795,6 +805,14 @@ describe('settings', () => {
 		expect(DEFAULT_SETTINGS.htmlShowToc).toBe(true);
 	});
 
+	it('defaults to writing inside the vault and round-trips an external folder', () => {
+		expect(DEFAULT_SETTINGS.useExternalOutputFolder).toBe(false);
+		expect(DEFAULT_SETTINGS.externalOutputFolder).toBe('');
+		const merged = mergeSettings({ useExternalOutputFolder: true, externalOutputFolder: '  C:\\Exports  ' });
+		expect(merged.useExternalOutputFolder).toBe(true);
+		expect(merged.externalOutputFolder).toBe('C:\\Exports');
+	});
+
 	it('normalizes remembered target preferences and supports opting out', () => {
 		const settings = mergeSettings({ rememberTargetSelection: false, lastSelectedTargets: ['zip', 'html', 'zip', 'invalid'] });
 		expect(settings.rememberTargetSelection).toBe(false);
@@ -842,6 +860,125 @@ describe('settings', () => {
 		expect(merged.htmlShowToc).toBe(true);
 		expect(merged.htmlFooterText).toHaveLength(200);
 		expect(merged.yieldEvery).toBe(1000);
+		expect(merged.useExternalOutputFolder).toBe(false);
+		expect(merged.externalOutputFolder).toBe('');
+	});
+});
+
+describe('output target (external folder)', () => {
+	const enabled = { useExternalOutputFolder: true, externalOutputFolder: 'C:\\Exports' };
+
+	it('recognizes absolute paths including drives, UNC shares and roots', () => {
+		expect(isAbsoluteOutputPath('C:\\Exports')).toBe(true);
+		expect(isAbsoluteOutputPath('c:/Exports')).toBe(true);
+		expect(isAbsoluteOutputPath('\\\\server\\share\\out')).toBe(true);
+		expect(isAbsoluteOutputPath('/home/user/Exports')).toBe(true);
+		expect(isAbsoluteOutputPath('Out/notes.md')).toBe(false);
+		expect(isAbsoluteOutputPath('')).toBe(false);
+	});
+
+	it('is only active with an absolute, non-empty folder', () => {
+		expect(usesExternalOutputFolder({ useExternalOutputFolder: true, externalOutputFolder: 'C:\\Exports' })).toBe(true);
+		expect(usesExternalOutputFolder({ useExternalOutputFolder: false, externalOutputFolder: 'C:\\Exports' })).toBe(false);
+		expect(usesExternalOutputFolder({ useExternalOutputFolder: true, externalOutputFolder: 'Exports' })).toBe(false);
+		expect(usesExternalOutputFolder({ useExternalOutputFolder: true, externalOutputFolder: '   ' })).toBe(false);
+	});
+
+	it('re-roots relative paths and reduces absolute paths to their name', () => {
+		expect(resolveOutputPath(enabled, 'Vault export.md')).toBe('C:/Exports/Vault export.md');
+		expect(resolveOutputPath(enabled, 'Out\\nested\\notes.md')).toBe('C:/Exports/Out/nested/notes.md');
+		expect(resolveOutputPath(enabled, 'D:/work/split')).toBe('C:/Exports/split');
+		expect(resolveOutputPath(enabled, '/home/you/out.html')).toBe('C:/Exports/out.html');
+		expect(resolveOutputPath(enabled, 'Out/../notes.md')).toBe('C:/Exports/notes.md');
+	});
+
+	it('leaves paths untouched while the option is disabled or the folder is relative', () => {
+		const disabled = { useExternalOutputFolder: false, externalOutputFolder: 'C:\\Exports' };
+		expect(resolveOutputPath(disabled, 'Vault export.md')).toBe('Vault export.md');
+		const relative = { useExternalOutputFolder: true, externalOutputFolder: 'Exports' };
+		expect(resolveOutputPath(relative, 'Vault export.md')).toBe('Vault export.md');
+	});
+
+	it('resolves every configured output path in one settings copy', () => {
+		const resolved = resolveOutputSettings({
+			...DEFAULT_SETTINGS,
+			useExternalOutputFolder: true,
+			externalOutputFolder: '/home/you/Exports',
+		});
+		expect(resolved).not.toBe(DEFAULT_SETTINGS);
+		expect(resolved.notebooklmOutputPath).toBe('/home/you/Exports/Vault export - NotebookLM.txt');
+		expect(resolved.htmlOutputPath).toBe('/home/you/Exports/Vault export.html');
+		expect(resolved.markdownOutputPath).toBe('/home/you/Exports/Vault export.md');
+		expect(resolved.zipOutputPath).toBe('/home/you/Exports/Vault export.zip');
+		expect(resolved.splitOutputFolder).toBe('/home/you/Exports/Vault export - split');
+	});
+
+	it('routes a blank split destination to the external folder root', () => {
+		const resolved = resolveOutputSettings({
+			...DEFAULT_SETTINGS,
+			useExternalOutputFolder: true,
+			externalOutputFolder: 'C:\\Exports\\',
+			splitOutputFolder: '',
+		});
+		expect(resolved.splitOutputFolder).toBe('C:/Exports');
+	});
+
+	it('returns the same settings object when external output is disabled', () => {
+		expect(resolveOutputSettings(DEFAULT_SETTINGS)).toBe(DEFAULT_SETTINGS);
+	});
+
+	it('normalizes folder bases and leaf names for portable paths', () => {
+		expect(externalFolderBase('C:\\Exports\\')).toBe('C:/Exports');
+		expect(externalFolderBase('C:\\')).toBe('C:/');
+		expect(externalFolderBase('/home/you/Exports/')).toBe('/home/you/Exports');
+		expect(outputLeafName('C:\\Users\\me\\Exports\\')).toBe('Exports');
+		expect(canonicalOutputPath('C:\\Exports\\A\\..\\B.md')).toBe('c:/exports/b.md');
+		expect(canonicalOutputPath('Out/Notes.md')).toBe('Out/Notes.md');
+	});
+
+	it('maps absolute outputs inside the vault back to vault-relative paths', () => {
+		expect(vaultRelativeOutputPath('C:\\Vault\\Out\\notes.md', 'C:\\Vault')).toBe('Out/notes.md');
+		expect(vaultRelativeOutputPath('c:/vault/notes.md', 'C:/Vault/')).toBe('notes.md');
+		expect(vaultRelativeOutputPath('/home/you/vault/out.md', '/home/you/vault')).toBe('out.md');
+		expect(vaultRelativeOutputPath('C:\\Other\\notes.md', 'C:\\Vault')).toBeNull();
+		expect(vaultRelativeOutputPath('C:\\Vault', 'C:\\Vault')).toBeNull();
+		expect(vaultRelativeOutputPath('/home/you/vault/out.md', '')).toBeNull();
+	});
+
+	it('protects external outputs that are written back inside the vault', () => {
+		const inside = {
+			...DEFAULT_SETTINGS,
+			useExternalOutputFolder: true,
+			externalOutputFolder: 'C:\\Vault\\Exports',
+		};
+		expect(reservedOutputPaths(inside, { vaultBasePath: 'C:\\Vault' })).toEqual([
+			'Exports/Vault export - NotebookLM.txt',
+			'Exports/Vault export.html',
+			'Exports/Vault export.md',
+			'Exports/Vault export.zip',
+			'Exports/Vault export - split',
+		]);
+		const outside = { ...inside, externalOutputFolder: 'C:\\Elsewhere' };
+		expect(reservedOutputPaths(outside, { vaultBasePath: 'C:\\Vault' })).toEqual([]);
+		// Without a known vault base path, absolute locations cannot be mapped.
+		expect(reservedOutputPaths(inside)).toEqual([]);
+	});
+
+	it('excludes a vault-internal external folder from the next export', () => {
+		const reserved = reservedOutputPaths(
+			{ ...DEFAULT_SETTINGS, useExternalOutputFolder: true, externalOutputFolder: 'C:\\Vault\\Exports' },
+			{ vaultBasePath: 'C:\\Vault' }
+		);
+		const options = {
+			scopeRoot: '',
+			excludedFolders: [],
+			excludedFiles: [],
+			excludedPrefixes: [],
+			reservedPaths: reserved,
+		};
+		expect(isFileIncluded('Exports/Vault export.md', options)).toBe(false);
+		expect(isFileIncluded('Exports/nested/Vault export.html', options)).toBe(false);
+		expect(isFileIncluded('Notes/Real note.md', options)).toBe(true);
 	});
 });
 
