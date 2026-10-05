@@ -1,5 +1,10 @@
 # Changelog
 
+## [2.1.1] - 2026-10-05
+
+### Added
+- **Tabbed settings navigation.** Vault Exporter settings are organized into focused categories, with a global search that lists matching controls. Clicking a result switches to the right category, scrolls to the setting, focuses its control, and briefly highlights it. Category tabs also support keyboard navigation.
+
 ## [2.1.0] - 2026-10-05
 
 ### Added
