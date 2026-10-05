@@ -1,6 +1,6 @@
 /**
  * Settings Tab for Vault Exporter.
- * Searchable settings with grouped controls and HTML export personalization.
+ * Tabbed and searchable settings with HTML export personalization.
  */
 
 import { App, Notice, PluginSettingTab, Setting } from 'obsidian';
@@ -9,7 +9,27 @@ import { PROGRESS_PANEL_AUTO_CLOSE_OPTIONS } from '../core/types';
 import { isAbsoluteOutputPath } from '../core/outputTarget';
 import { VaultPathSuggest } from '../ui/VaultPathSuggest';
 
+interface SettingsSectionDefinition {
+	id: string;
+	title: string;
+}
+
+const SETTINGS_SECTIONS: SettingsSectionDefinition[] = [
+	{ id: 'general', title: 'General' },
+	{ id: 'feedback', title: 'Export Feedback & Behavior' },
+	{ id: 'scope', title: 'Scope & Exclusions' },
+	{ id: 'destination', title: 'External Output Folder' },
+	{ id: 'output', title: 'Output Paths & Split Options' },
+	{ id: 'processing', title: 'Markdown Processing' },
+	{ id: 'html', title: 'HTML Personalization' },
+	{ id: 'advanced', title: 'Advanced' },
+];
+
 export class VaultExporterSettingsTab extends PluginSettingTab {
+	private activeSectionId = SETTINGS_SECTIONS[0]?.id ?? 'general';
+	private searchQuery = '';
+	private settingRowIndex = 0;
+
 	constructor(app: App, private readonly plugin: VaultExporterPlugin) {
 		super(app, plugin);
 	}
@@ -17,6 +37,7 @@ export class VaultExporterSettingsTab extends PluginSettingTab {
 	override display(): void {
 		const { containerEl } = this;
 		containerEl.empty();
+		this.settingRowIndex = 0;
 		containerEl.addClass('ve-settings');
 
 		containerEl.createEl('h2', { text: 'Vault Exporter Settings' });
@@ -28,25 +49,44 @@ export class VaultExporterSettingsTab extends PluginSettingTab {
 		const searchWrap = containerEl.createDiv({ cls: 've-settings__search-wrap' });
 		const search = new Setting(searchWrap)
 			.setName('Find a setting')
-			.setDesc('Search by name or description. Press Escape to clear.')
+			.setDesc('Search every category by name or description. Click a result to jump to it. Press Escape to clear.')
 			.setClass('ve-settings__search');
+		const searchResults = containerEl.createDiv({ cls: 've-settings__search-results' });
+		searchResults.setAttribute('aria-live', 'polite');
+		searchResults.hidden = true;
+		const tabBar = containerEl.createDiv({
+			cls: 've-settings__tabs',
+			attr: { role: 'tablist', 'aria-label': 'Settings categories' },
+		});
 		const sections = containerEl.createDiv({ cls: 've-settings__sections' });
 		const noResults = sections.createDiv({ cls: 've-settings__empty', text: 'No settings match your search.' });
 		noResults.hidden = true;
 
 		search.addText((text) => {
+			text.setValue(this.searchQuery);
 			text.setPlaceholder('Try “accent”, “folder”, or “frontmatter”…');
 			text.inputEl.setAttribute('aria-label', 'Search Vault Exporter settings');
-			text.inputEl.addEventListener('input', () => this.filterSettings(sections, noResults, text.inputEl.value));
+			text.inputEl.setAttribute('autocomplete', 'off');
+			text.inputEl.addEventListener('input', () => {
+				this.filterSettings(sections, searchResults, noResults, text.inputEl.value);
+			});
 			text.inputEl.addEventListener('keydown', (event) => {
 				if (event.key === 'Escape') {
 					text.inputEl.value = '';
-					this.filterSettings(sections, noResults, '');
+					this.filterSettings(sections, searchResults, noResults, '');
 				}
 			});
 		});
 
-		const generalSection = this.createSection(sections, 'General');
+		const sectionElements = new Map<string, HTMLElement>();
+		for (const sectionDefinition of SETTINGS_SECTIONS) {
+			const section = this.createSection(sections, sectionDefinition.id, sectionDefinition.title);
+			sectionElements.set(sectionDefinition.id, section);
+			this.createSectionTab(tabBar, sectionDefinition);
+		}
+
+		const getSection = (id: string): HTMLElement => sectionElements.get(id)!;
+		const generalSection = getSection('general');
 		this.createSetting(generalSection, 'Document Title', 'Title written at the top of consolidated exports.')
 			.addText((text) => {
 				text.setValue(this.plugin.settings.documentTitle);
@@ -63,7 +103,7 @@ export class VaultExporterSettingsTab extends PluginSettingTab {
 		);
 
 		// SECTION: EXPORT FEEDBACK & BEHAVIOR
-		const behaviorSection = this.createSection(sections, 'Export Feedback & Behavior');
+		const behaviorSection = getSection('feedback');
 		this.renderToggleSetting(
 			behaviorSection,
 			'Reveal Output After Success',
@@ -86,7 +126,7 @@ export class VaultExporterSettingsTab extends PluginSettingTab {
 			});
 
 		// SECTION: SCOPE & EXCLUSIONS
-		const scopeSection = this.createSection(sections, 'Scope & Exclusions');
+		const scopeSection = getSection('scope');
 		this.createSetting(scopeSection, 'Scope Root', 'Vault-relative root folder to scan. Leave empty to scan the entire vault.')
 			.addText((text) => {
 				text.setValue(this.plugin.settings.scopeRoot);
@@ -145,7 +185,7 @@ export class VaultExporterSettingsTab extends PluginSettingTab {
 		);
 
 		// SECTION: EXTERNAL OUTPUT FOLDER
-		const destinationSection = this.createSection(sections, 'External Output Folder');
+		const destinationSection = getSection('destination');
 		this.createSetting(
 			destinationSection,
 			'Export to an External Folder',
@@ -205,7 +245,7 @@ export class VaultExporterSettingsTab extends PluginSettingTab {
 		this.refreshExternalFolderDescription(externalFolderSetting);
 
 		// SECTION: OUTPUT PATHS & SPLIT MODE
-		const outputSection = this.createSection(sections, 'Output Paths & Split Options');
+		const outputSection = getSection('output');
 		this.createSetting(outputSection, 'NotebookLM Consolidated Output', 'Vault-relative path, or an absolute file path on desktop, for the NotebookLM text file.')
 			.addText((text) => {
 				text.setValue(this.plugin.settings.notebooklmOutputPath);
@@ -281,7 +321,7 @@ export class VaultExporterSettingsTab extends PluginSettingTab {
 			});
 
 		// SECTION: MARKDOWN PROCESSING
-		const processingSection = this.createSection(sections, 'Markdown Processing');
+		const processingSection = getSection('processing');
 		this.createSetting(processingSection, 'Include Obsidian .canvas Files', 'Extract text nodes and note links from .canvas files into clean text (visual reading order, groups as sections).')
 			.addToggle((toggle) => {
 				toggle.setValue(this.plugin.settings.includeCanvas);
@@ -338,7 +378,7 @@ export class VaultExporterSettingsTab extends PluginSettingTab {
 		);
 
 		// SECTION: HTML PERSONALIZATION
-		const htmlSection = this.createSection(sections, 'HTML Personalization');
+		const htmlSection = getSection('html');
 		this.createSetting(htmlSection, 'HTML Color Theme', 'Choose whether the standalone HTML export follows the viewer or always uses a light or dark palette.')
 			.addDropdown((drop) => {
 				drop.addOption('system', 'Follow system preference');
@@ -413,6 +453,7 @@ export class VaultExporterSettingsTab extends PluginSettingTab {
 			});
 
 		const previewRow = htmlSection.createDiv({ cls: 've-settings-row ve-settings-row--preview' });
+		this.decorateSettingRow(previewRow, 'HTML Live Preview', 'Live preview of theme, accent, typography, and reading width.');
 		previewRow.createDiv({ cls: 've-html-preview__label', text: 'Live preview · theme, accent, typography, and width' });
 		const preview = previewRow.createDiv({ cls: 've-html-preview' });
 		preview.setAttribute('aria-label', 'Preview of the standalone HTML appearance');
@@ -428,7 +469,7 @@ export class VaultExporterSettingsTab extends PluginSettingTab {
 		this.updateHtmlPreview();
 
 		// SECTION: ADVANCED
-		const advancedSection = this.createSection(sections, 'Advanced');
+		const advancedSection = getSection('advanced');
 		this.createSetting(advancedSection, 'Custom HTML CSS', 'Extra CSS appended to the HTML export. Use to override the built-in theme (custom properties: --ve-bg, --ve-panel, --ve-text, --ve-accent…).')
 			.addTextArea((area) => {
 				area.setValue(this.plugin.settings.customCss);
@@ -451,6 +492,8 @@ export class VaultExporterSettingsTab extends PluginSettingTab {
 					await this.plugin.saveSettings();
 				});
 			});
+
+		this.filterSettings(sections, searchResults, noResults, this.searchQuery);
 	}
 
 	/** Description for the external-folder setting, including its current state. */
@@ -488,14 +531,87 @@ export class VaultExporterSettingsTab extends PluginSettingTab {
 		return picked;
 	}
 
-	private createSection(parent: HTMLElement, title: string): HTMLElement {
-		const section = parent.createDiv({ cls: 've-settings-section' });
+	private createSection(parent: HTMLElement, id: string, title: string): HTMLElement {
+		const sectionId = 've-settings-section-' + id;
+		const section = parent.createDiv({
+			cls: 've-settings-section',
+			attr: {
+				'id': sectionId,
+				'role': 'tabpanel',
+				'aria-labelledby': 've-settings-tab-' + id,
+				'data-section-id': id,
+			},
+		});
 		section.createEl('h3', { text: title });
 		return section;
 	}
 
+	private createSectionTab(tabBar: HTMLElement, definition: SettingsSectionDefinition): void {
+		const tab = tabBar.createEl('button', {
+			text: definition.title,
+			cls: 've-settings__tab',
+			attr: {
+				'id': 've-settings-tab-' + definition.id,
+				'type': 'button',
+				'role': 'tab',
+				'aria-controls': 've-settings-section-' + definition.id,
+				'aria-selected': 'false',
+				'data-section-id': definition.id,
+			},
+		});
+		tab.addEventListener('click', () => this.activateSection(definition.id));
+		tab.addEventListener('keydown', (event) => {
+			if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight' && event.key !== 'Home' && event.key !== 'End') return;
+			event.preventDefault();
+			const index = SETTINGS_SECTIONS.findIndex((section) => section.id === definition.id);
+			const nextIndex = event.key === 'Home'
+				? 0
+				: event.key === 'End'
+					? SETTINGS_SECTIONS.length - 1
+					: (index + (event.key === 'ArrowRight' ? 1 : -1) + SETTINGS_SECTIONS.length) % SETTINGS_SECTIONS.length;
+			const next = SETTINGS_SECTIONS[nextIndex];
+			if (next) {
+				this.activateSection(next.id);
+				this.containerEl.querySelector<HTMLButtonElement>('#ve-settings-tab-' + next.id)?.focus();
+			}
+		});
+	}
+
+	private activateSection(sectionId: string): void {
+		if (!SETTINGS_SECTIONS.some((section) => section.id === sectionId)) return;
+		this.activeSectionId = sectionId;
+		this.updateSectionVisibility();
+	}
+
+	private updateSectionVisibility(): void {
+		const hasSearch = this.searchQuery.length > 0;
+		for (const section of Array.from(this.containerEl.querySelectorAll<HTMLElement>('.ve-settings-section'))) {
+			const hasVisibleSetting = Boolean(section.querySelector('.ve-settings-row:not([hidden])'));
+			section.hidden = hasSearch ? !hasVisibleSetting : section.dataset.sectionId !== this.activeSectionId;
+		}
+		for (const tab of Array.from(this.containerEl.querySelectorAll<HTMLButtonElement>('.ve-settings__tab'))) {
+			const selected = tab.dataset.sectionId === this.activeSectionId;
+			tab.toggleClass('is-active', selected);
+			tab.setAttribute('aria-selected', String(selected));
+			tab.tabIndex = selected ? 0 : -1;
+		}
+	}
+
+	private decorateSettingRow(row: HTMLElement, title: string, desc: string): void {
+		const section = row.closest<HTMLElement>('.ve-settings-section');
+		const sectionId = section?.dataset.sectionId ?? '';
+		const sectionTitle = section?.querySelector('h3')?.textContent ?? '';
+		const slug = title.toLocaleLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'setting';
+		row.id = 've-setting-' + slug + '-' + (++this.settingRowIndex);
+		row.dataset.settingTitle = title;
+		row.dataset.settingDescription = desc;
+		row.dataset.sectionId = sectionId;
+		row.dataset.sectionTitle = sectionTitle;
+	}
+
 	private createSetting(containerEl: HTMLElement, title: string, desc: string): Setting {
 		const row = containerEl.createDiv({ cls: 've-settings-row' });
+		this.decorateSettingRow(row, title, desc);
 		return new Setting(row).setName(title).setDesc(desc);
 	}
 
@@ -534,18 +650,71 @@ export class VaultExporterSettingsTab extends PluginSettingTab {
 		preview.style.fontFamily = font;
 	}
 
-	private filterSettings(containerEl: HTMLElement, noResults: HTMLElement, value: string): void {
-		const query = value.trim().toLocaleLowerCase();
-		let visibleRows = 0;
-		for (const row of Array.from(containerEl.querySelectorAll<HTMLElement>('.ve-settings-row'))) {
-			const matches = !query || (row.textContent ?? '').toLocaleLowerCase().includes(query);
+	private filterSettings(sections: HTMLElement, searchResults: HTMLElement, noResults: HTMLElement, value: string): void {
+		this.searchQuery = value.trim().toLocaleLowerCase();
+		const query = this.searchQuery;
+		const matchingRows: HTMLElement[] = [];
+		for (const row of Array.from(sections.querySelectorAll<HTMLElement>('.ve-settings-row'))) {
+			const searchableText = [
+				row.dataset.settingTitle,
+				row.dataset.settingDescription,
+				row.textContent,
+			].filter(Boolean).join(' ').toLocaleLowerCase();
+			const matches = !query || searchableText.includes(query);
 			row.hidden = !matches;
-			if (matches) visibleRows++;
+			if (matches && row.dataset.settingTitle) matchingRows.push(row);
 		}
-		for (const section of Array.from(containerEl.querySelectorAll<HTMLElement>('.ve-settings-section'))) {
-			section.hidden = !section.querySelector('.ve-settings-row:not([hidden])');
+
+		this.renderSearchResults(searchResults, matchingRows, query);
+		noResults.hidden = query.length === 0 || matchingRows.length > 0;
+		this.updateSectionVisibility();
+	}
+
+	private renderSearchResults(containerEl: HTMLElement, rows: HTMLElement[], query: string): void {
+		containerEl.empty();
+		if (!query) {
+			containerEl.hidden = true;
+			return;
 		}
-		noResults.hidden = query.length === 0 || visibleRows > 0;
+		containerEl.hidden = rows.length === 0;
+		if (rows.length === 0) return;
+
+		containerEl.createDiv({
+			cls: 've-settings__search-results-heading',
+			text: rows.length === 1 ? '1 matching setting' : rows.length + ' matching settings',
+		});
+		const resultList = containerEl.createDiv({ cls: 've-settings__search-result-list' });
+		for (const row of rows) {
+			const result = resultList.createEl('button', {
+				cls: 've-settings__search-result',
+				attr: { type: 'button' },
+			});
+			result.createSpan({ cls: 've-settings__search-result-title', text: row.dataset.settingTitle ?? 'Setting' });
+			result.createSpan({ cls: 've-settings__search-result-category', text: row.dataset.sectionTitle ?? '' });
+			result.setAttribute('aria-label', 'Jump to ' + (row.dataset.settingTitle ?? 'setting'));
+			result.addEventListener('click', () => this.focusSetting(row));
+		}
+	}
+
+	private focusSetting(row: HTMLElement): void {
+		const sectionId = row.dataset.sectionId;
+		if (sectionId) this.activeSectionId = sectionId;
+		this.searchQuery = '';
+		const searchInput = this.containerEl.querySelector<HTMLInputElement>('.ve-settings__search input');
+		if (searchInput) searchInput.value = '';
+		for (const candidate of Array.from(this.containerEl.querySelectorAll<HTMLElement>('.ve-settings-row'))) {
+			candidate.hidden = false;
+		}
+		const searchResults = this.containerEl.querySelector<HTMLElement>('.ve-settings__search-results');
+		const noResults = this.containerEl.querySelector<HTMLElement>('.ve-settings__empty');
+		if (searchResults && noResults) this.filterSettings(this.containerEl.querySelector<HTMLElement>('.ve-settings__sections')!, searchResults, noResults, '');
+		this.updateSectionVisibility();
+		if (typeof row.scrollIntoView === 'function') {
+			row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+		}
+		row.addClass('ve-settings-row--targeted');
+		window.setTimeout(() => row.removeClass('ve-settings-row--targeted'), 1400);
+		row.querySelector<HTMLElement>('input, select, textarea, button')?.focus({ preventScroll: true });
 	}
 
 	private renderStringListSetting(
@@ -558,6 +727,7 @@ export class VaultExporterSettingsTab extends PluginSettingTab {
 		showQuickPills: boolean = false
 	): void {
 		const row = containerEl.createDiv({ cls: 've-settings-row ve-settings-row--list' });
+		this.decorateSettingRow(row, title, desc);
 		const setting = new Setting(row).setName(title).setDesc(desc);
 		const listDiv = row.createDiv({ cls: 've-list-setting' });
 

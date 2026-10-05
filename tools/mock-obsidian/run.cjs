@@ -327,7 +327,18 @@ const has = (rel) => fs.existsSync(path.join(VAULT, rel));
 			[...tab.containerEl.querySelectorAll('.ve-settings-row')].filter((row) => !row.hidden).length >= 2
 				&& [...tab.containerEl.querySelectorAll('.ve-settings-section')].filter((section) => !section.hidden).length === 1);
 		searchInput.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-		record('Escape clears settings search', searchInput.value === '' && [...tab.containerEl.querySelectorAll('.ve-settings-section')].every((section) => !section.hidden));
+		record('Escape clears settings search and returns to the active category',
+			searchInput.value === ''
+				&& [...tab.containerEl.querySelectorAll('.ve-settings-section')].filter((section) => !section.hidden).length === 1
+				&& tab.containerEl.querySelector('#ve-settings-section-general')?.hidden === false);
+		searchInput.value = 'accent';
+		searchInput.dispatchEvent(new window.Event('input', { bubbles: true }));
+		const searchResult = tab.containerEl.querySelector('.ve-settings__search-result');
+		searchResult?.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+		record('clicking a search result jumps to its setting',
+			searchInput.value === ''
+				&& tab.containerEl.querySelector('#ve-settings-section-html')?.hidden === false
+				&& tab.containerEl.querySelector('[data-setting-title="HTML Accent Color"]')?.classList.contains('ve-settings-row--targeted'));
 	} else {
 		record('settings search control rendered', false, 'no .ve-settings__search input');
 	}
