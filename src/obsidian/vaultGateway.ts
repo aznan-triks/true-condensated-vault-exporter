@@ -7,6 +7,7 @@
 import { App, FileSystemAdapter, TFile, normalizePath, Platform } from 'obsidian';
 import { ExportGateway, ExporterSettings, VaultFile } from '../core/types';
 import { isFileIncluded, isTagScopeMatch, reservedOutputPaths } from '../core/filter';
+import { openFolder, pickFolder, resolveElectronShell } from './electronBridge';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -20,29 +21,6 @@ function normalizeVaultTarget(targetPath: string): string {
 	const normalized = normalizePath(raw);
 	if (!normalized) throw new Error('Output path cannot be empty.');
 	return normalized;
-}
-
-interface ElectronShell {
-	showItemInFolder?: (fullPath: string) => void;
-}
-
-/**
- * Resolves Electron's `shell` module. Obsidian's renderer exposes
- * `window.require`; a bundler `require` is used as a fallback. Returns null
- * when neither is available instead of throwing.
- */
-function resolveElectronShell(): ElectronShell | null {
-	try {
-		const hostWindow = (globalThis as { window?: { require?: (id: string) => unknown } }).window;
-		const loader = typeof hostWindow?.require === 'function'
-			? hostWindow.require
-			: typeof require === 'function' ? require : null;
-		if (!loader) return null;
-		const electron = loader('electron') as { shell?: ElectronShell } | null;
-		return electron?.shell ?? null;
-	} catch {
-		return null;
-	}
 }
 
 export class ObsidianVaultGateway implements ExportGateway {
@@ -59,7 +37,7 @@ export class ObsidianVaultGateway implements ExportGateway {
 		onProgress?: (current: number, total: number, currentFile?: string) => void,
 		onSkipped?: (path: string, message: string) => void
 	): Promise<VaultFile[]> {
-		const reserved = reservedOutputPaths(settings);
+		const reserved = reservedOutputPaths(settings, { vaultBasePath: this.getVaultBasePath() });
 		const tag = settings.scopeTag?.replace(/^#+/, '').trim().toLowerCase();
 
 		const candidates = this.app.vault.getFiles().filter((file) => {
@@ -232,6 +210,16 @@ export class ObsidianVaultGateway implements ExportGateway {
 	}
 
 	/**
+	 * Absolute OS path of the vault root, when the vault is a local folder.
+	 * Null for remote/mobile adapters.
+	 */
+	getVaultBasePath(): string | null {
+		const adapter = this.app.vault.adapter;
+		if (!(adapter instanceof FileSystemAdapter)) return null;
+		return adapter.getBasePath();
+	}
+
+	/**
 	 * OS path for a vault-relative or absolute output, when this platform
 	 * can reveal it (desktop only). Returns null otherwise.
 	 */
@@ -240,9 +228,24 @@ export class ObsidianVaultGateway implements ExportGateway {
 		if (path.isAbsolute(targetPath)) {
 			return targetPath;
 		}
-		const adapter = this.app.vault.adapter;
-		if (!(adapter instanceof FileSystemAdapter)) return null;
-		return path.join(adapter.getBasePath(), normalizePath(targetPath));
+		const basePath = this.getVaultBasePath();
+		if (!basePath) return null;
+		return path.join(basePath, normalizePath(targetPath));
+	}
+
+	/**
+	 * Opens the native folder picker for the external export folder.
+	 * Returns the selected absolute path, or null on cancel/non-desktop.
+	 */
+	async pickOutputFolder(defaultPath?: string): Promise<string | null> {
+		if (Platform.isMobile) return null;
+		return pickFolder(defaultPath && defaultPath.trim() ? defaultPath : this.getVaultBasePath() ?? undefined);
+	}
+
+	/** Opens a folder in the OS file manager (desktop only); false otherwise. */
+	async openOutputFolder(targetPath: string): Promise<boolean> {
+		if (Platform.isMobile) return false;
+		return openFolder(targetPath);
 	}
 
 	/**

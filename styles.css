@@ -539,6 +539,14 @@
 	display: none !important;
 }
 
+.ve-settings__invalid .setting-item-description {
+	color: var(--text-error, #e93147);
+}
+
+.ve-settings__invalid .setting-item-control input[type="text"] {
+	border-color: var(--text-error, #e93147);
+}
+
 .ve-settings-section {
 	margin: 0 0 14px;
 	padding: 4px 16px 12px;

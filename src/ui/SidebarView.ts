@@ -9,7 +9,7 @@ import { EXPORT_COMMANDS, TARGET_LABELS, UiContext, executeTargets, isExportRunn
 import { ExportTarget } from '../features/exportOrchestrator';
 import { ExportHistoryEntry, formatBytes, formatDuration, relativeTime, totalBytes } from '../features/exportHistory';
 import { isFileIncluded, reservedOutputPaths } from '../core/filter';
-import { openSettingsTab } from '../obsidian/appSetting';
+import { usesExternalOutputFolder } from '../core/outputTarget';
 
 export const VIEW_TYPE_EXPORTER_SIDEBAR = 'vault-exporter-sidebar';
 
@@ -33,7 +33,6 @@ export class ExporterSidebarView extends ItemView {
 
 	constructor(
 		leaf: WorkspaceLeaf,
-		private readonly pluginId: string,
 		private readonly getContext: () => UiContext
 	) {
 		super(leaf);
@@ -103,7 +102,7 @@ export class ExporterSidebarView extends ItemView {
 				this.stats = null;
 				return;
 			}
-			const reserved = reservedOutputPaths(ctx.settings);
+			const reserved = reservedOutputPaths(ctx.settings, { vaultBasePath: ctx.gateway.getVaultBasePath() });
 			let noteCount = 0;
 			let canvasCount = 0;
 			let bytes = 0;
@@ -162,6 +161,10 @@ export class ExporterSidebarView extends ItemView {
 			statsCard.createDiv({ cls: 've-card__value', text: line });
 			if (s.tagActive) {
 				statsCard.createDiv({ cls: 've-card__hint', text: '⚠ Tag filter active — the count above is path-based only.' });
+			} else if (usesExternalOutputFolder(ctx.settings)) {
+				const folder = ctx.settings.externalOutputFolder.trim();
+				const shortFolder = folder.length > 48 ? '…' + folder.slice(-47) : folder;
+				statsCard.createDiv({ cls: 've-card__hint', text: '📁 Outputs are written to ' + shortFolder + ' (outside the vault).' });
 			} else {
 				statsCard.createDiv({ cls: 've-card__hint', text: 'Previous export outputs are protected from re-export.' });
 			}
@@ -278,7 +281,7 @@ export class ExporterSidebarView extends ItemView {
 		const footer = container.createDiv({ cls: 've-sidebar__footer' });
 		const settingsBtn = footer.createEl('button', { cls: 've-sidebar__settings', text: '⚙ Settings' });
 		settingsBtn.addEventListener('click', () => {
-			openSettingsTab(this.app, this.pluginId);
+			this.getContext().openSettings();
 		});
 	}
 

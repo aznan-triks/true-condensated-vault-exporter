@@ -1,5 +1,17 @@
 # Changelog
 
+## [2.1.0] - 2026-10-05
+
+### Added
+- **Export to an external folder.** A new *External Output Folder* settings section can redirect every output (all consolidated formats, the ZIP bundle, and split files) into an absolute folder outside the vault, keeping the configured names and subfolders. Vault-relative paths keep their structure; absolute paths keep only their file or folder name, so nothing is ever written outside the selected folder. The native system folder picker chooses the destination, an extra button opens it in the file manager, and the sidebar reports where outputs go. While the option is on without a usable absolute folder, the setting explains that exports still go into the vault.
+- **Open Vault Exporter settings** command, so the settings page can be reached from the Command Palette (and assigned a hotkey).
+- A blank split destination now means “the output root”: the vault root normally, the external folder while external output is enabled.
+
+### Fixed
+- **The sidebar’s Settings button no longer opens Obsidian’s settings on the wrong tab.** The shortcut only called `app.setting.openTabById()` when `app.setting.tabs` happened to list a tab whose `id` matched, and it fired that internal call before an asynchronous `open()` had rendered the modal — several app versions ignore the call in that window. It now assigns the plugin id to its own settings tab, waits for `open()` when it returns a promise, retries briefly while the plugin tab is demonstrably inactive, and opens the modal even when tab selection is unavailable.
+- Outputs written back inside the vault are protected from re-export again, even when they come from an absolute path or an external folder that lives under the vault root. Previously only vault-relative output paths were reserved.
+- ZIP archives created with an external output folder store entry names relative to that folder instead of embedding its path.
+
 ## [2.0.4] - 2026-10-04
 
 ### Added

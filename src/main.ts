@@ -13,7 +13,7 @@ import {
 	UiContext,
 } from './commands/registry';
 import { ExportHistoryEntry, sanitizeHistory } from './features/exportHistory';
-import { openSettingsTab } from './obsidian/appSetting';
+import { openSettingsTab, withSettingsTabId } from './obsidian/appSetting';
 import { ExporterSidebarView, VIEW_TYPE_EXPORTER_SIDEBAR } from './ui/SidebarView';
 import { VaultExporterSettingsTab } from './settings/SettingsTab';
 
@@ -29,18 +29,21 @@ export default class VaultExporterPlugin extends Plugin {
 	settings: ExporterSettings = mergeSettings(undefined);
 	history: ExportHistoryEntry[] = [];
 	gateway!: ObsidianVaultGateway;
+	/** Registered settings tab; passed to the settings shortcut as a visibility probe. */
+	settingsTab!: VaultExporterSettingsTab;
 
 	override async onload(): Promise<void> {
 		await this.loadSettings();
 		this.gateway = new ObsidianVaultGateway(this.app);
 
 		// Settings Tab
-		this.addSettingTab(new VaultExporterSettingsTab(this.app, this));
+		this.settingsTab = new VaultExporterSettingsTab(this.app, this);
+		this.addSettingTab(withSettingsTabId(this.settingsTab, this.manifest.id));
 
 		// Sidebar View
 		this.registerView(
 			VIEW_TYPE_EXPORTER_SIDEBAR,
-			(leaf: WorkspaceLeaf) => new ExporterSidebarView(leaf, this.manifest.id, () => this.getUiContext())
+			(leaf: WorkspaceLeaf) => new ExporterSidebarView(leaf, () => this.getUiContext())
 		);
 
 		// Ribbon Icon
@@ -99,6 +102,15 @@ export default class VaultExporterPlugin extends Plugin {
 					},
 					label: 'Clean export: ' + file.name,
 				});
+			},
+		});
+
+		this.addCommand({
+			id: 'open-settings',
+			name: 'Open Vault Exporter settings',
+			icon: 'settings',
+			callback: () => {
+				openSettingsTab(this.app, this.manifest.id, this.settingsTab);
 			},
 		});
 
@@ -167,7 +179,7 @@ export default class VaultExporterPlugin extends Plugin {
 			history: this.history,
 			onHistoryChange: (h) => this.setHistory(h),
 			persistSettings: () => this.persistSettingsData(),
-			openSettings: () => openSettingsTab(this.app, this.manifest.id),
+			openSettings: () => openSettingsTab(this.app, this.manifest.id, this.settingsTab),
 		};
 	}
 
