@@ -1,6 +1,6 @@
 # Project context: Vault Exporter
 
-> Last updated: 2026-10-04 (v2.0.4). Keep this file in English.
+> Last updated: 2026-10-05 (v2.1.0). Keep this file in English.
 
 ## Product
 
@@ -21,8 +21,8 @@ npm run dev      # esbuild watch mode
 
 | Area | Responsibility |
 |---|---|
-| `src/core/` | Pure data transforms: settings/types, filters, frontmatter, cleaning pipeline, wikilinks, Dataview, Canvas, HTML/Markdown/NotebookLM formatters, ZIP records. |
-| `src/obsidian/` | Obsidian and Node boundary: vault reads/writes, tag and file metadata, binary output, reveal-in-file-manager, local declarations for Obsidian internal APIs. |
+| `src/core/` | Pure data transforms: settings/types, output destinations (`outputTarget.ts`), filters, frontmatter, cleaning pipeline, wikilinks, Dataview, Canvas, HTML/Markdown/NotebookLM formatters, ZIP records. |
+| `src/obsidian/` | Obsidian and Node boundary: vault reads/writes, tag and file metadata, binary output, reveal-in-file-manager and OS folder picker (`electronBridge.ts`), local declarations for Obsidian internal APIs (`appSetting.ts`). |
 | `src/features/` | Export orchestration, consolidated format registry, split exports, history. |
 | `src/commands/registry.ts` | Single command registry used by the Command Palette and sidebar; owns run/cancel orchestration. |
 | `src/ui/` | Export sidebar, progress panel, path suggestions. |
@@ -35,6 +35,7 @@ npm run dev      # esbuild watch mode
 - `core/` must not import Obsidian or `features/`. `features/` must not import Obsidian. Keep vault access in `src/obsidian/vaultGateway.ts`.
 - `ExporterSettings` and `DEFAULT_SETTINGS` in `src/core/types.ts` are the settings source of truth. Add settings in all three places: type/default, settings UI, and validation/merge tests. Renaming a saved key needs a migration.
 - Validate output paths before writing. Use `reservedOutputPaths()` through `isFileIncluded()` to prevent re-export loops. Do not duplicate output filtering in the orchestrator.
+- External output is resolved once per run by `resolveOutputSettings()` (in `runExports`, before validation, ZIP naming and writes). Never resolve paths at write time in the gateway. Pass `vaultBasePath` to `reservedOutputPaths()` so absolute outputs that live inside the vault stay protected; the gateway and sidebar both do this.
 - Check the abort signal and yield to the UI in long loops. Cancellation must preserve and report files already written.
 - ZIP output is binary: use the gateway's `writeBinary`, not a text writer. The archive is ZIP32; reject values beyond its supported limits.
 - Keep Node/Electron APIs (`fs`, `path`, `zlib`, shell integration) behind the existing platform boundary. Keep casts for undocumented Obsidian APIs in `src/obsidian/` and guard desktop-only APIs.
@@ -51,10 +52,11 @@ npm run dev      # esbuild watch mode
 - Markdown wikilinks point to vault-root-relative paths, not paths relative to each exported file. Consolidated outputs in a subfolder and split mirrors may need their links adjusted.
 - Individual split files that cannot be read are skipped and included in the export result.
 - The sidebar remembers selected export targets by default, but context commands remain in-memory-only. It summarizes selected targets in an `aria-live` status region and updates controls in place so keyboard focus is preserved. Clearing recent export history never deletes output files; history reveal targets the first written file.
+- The sidebar settings button and the `open-settings` command use `openSettingsTab()` in `src/obsidian/appSetting.ts`. It must keep working without `app.setting.tabs` carrying our tab id and while `app.setting.open()` is asynchronous (retry, never throw). The plugin sets its own settings tab's `id` via `withSettingsTabId()`.
 - Export feedback preferences control completed-panel auto-close (`0` means keep open) and optional automatic reveal of the first output. Keep the duration choices synchronized between `PROGRESS_PANEL_AUTO_CLOSE_OPTIONS`, settings UI, and tests. The progress panel and history expose elapsed time; success feedback includes written-file count, bytes, and skipped files.
 - HTML has system/light/dark themes, configurable accent color, typography, reading width, optional navigation/search/paths/metadata/footer, responsive layout, print support, and custom CSS. Validate user colors before interpolating them into CSS; verify visual changes in a browser.
 - The progress panel and sidebar include narrow/short-window and touch-target styles in `styles.css`; these still need a visual check inside Obsidian.
 
 ## Manual UI checklist
 
-`npm run smoke` covers load, sidebar, settings, exports, cancellation, auto-reveal, and reveal shortcuts against a mock API; it does not prove visual layout or theme integration. When an Obsidian instance is available, still verify the sidebar, remembered target selection and live selection summary, history actions/duration, progress/cancel panel and elapsed time, auto-close/auto-reveal preferences, responsive layouts, output files, and HTML system/light/dark styles and live preview. The README preview assets are illustrative mock-ups, **not** evidence of a live Obsidian test.
+`npm run smoke` covers load, sidebar, settings, exports, cancellation, auto-reveal, reveal shortcuts, the settings shortcut landing on the plugin tab, and an external-folder export against a mock API; it does not prove visual layout or theme integration. When an Obsidian instance is available, still verify the sidebar, the Settings button (and `open-settings` command) landing on the plugin's settings tab, the native folder picker plus external-folder exports, remembered target selection and live selection summary, history actions/duration, progress/cancel panel and elapsed time, auto-close/auto-reveal preferences, responsive layouts, output files, and HTML system/light/dark styles and live preview. The README preview assets are illustrative mock-ups, **not** evidence of a live Obsidian test.

@@ -14,6 +14,7 @@ import { CleanedNote, cleanNote, createExportContext } from '../core/pipeline';
 import { CONSOLIDATED_FORMATS, ConsolidatedFormatId } from './formats';
 import { OutputFile, buildSplitFiles } from './exportSplit';
 import { buildZip, zipEntryName, ZipEntry } from '../core/zip';
+import { canonicalOutputPath, externalFolderBase, resolveOutputSettings, usesExternalOutputFolder } from '../core/outputTarget';
 
 export type ExportTarget = RememberedExportTarget;
 
@@ -68,30 +69,11 @@ interface LabeledOutput {
 	stage: string;
 }
 
-function canonicalPath(value: string): string {
-	const path = value.trim().replace(/\\/g, '/');
-	const drive = path.match(/^([a-z]):\//i)?.[1];
-	const prefix = drive ? drive.toLowerCase() + ':/' : path.startsWith('//') ? '//' : path.startsWith('/') ? '/' : '';
-	const start = drive ? 3 : prefix === '//' ? 2 : prefix === '/' ? 1 : 0;
-	const parts: string[] = [];
-	for (const part of path.slice(start).split('/')) {
-		if (!part || part === '.') continue;
-		if (part === '..') {
-			if (parts.length > 0 && parts[parts.length - 1] !== '..') parts.pop();
-			else if (!prefix) parts.push(part);
-			continue;
-		}
-		parts.push(part);
-	}
-	const normalized = prefix + parts.join('/');
-	return drive ? normalized.toLowerCase() : normalized;
-}
-
 function validateOutputPath(value: string, label: string): string {
 	const trimmed = value.trim();
 	if (!trimmed) throw new Error(label + ' output path cannot be empty.');
 	const portable = trimmed.replace(/\\/g, '/');
-	const normalized = canonicalPath(trimmed);
+	const normalized = canonicalOutputPath(trimmed);
 	const absolute = /^(?:[a-z]:\/|\/)/i.test(portable);
 	if (!absolute && portable.split('/').includes('..')) {
 		throw new Error(label + ' output path must stay inside the vault or use an absolute path.');
@@ -105,8 +87,8 @@ function validateOutputPath(value: string, label: string): string {
 }
 
 function pathsOverlap(left: string, right: string): boolean {
-	const a = canonicalPath(left);
-	const b = canonicalPath(right);
+	const a = canonicalOutputPath(left);
+	const b = canonicalOutputPath(right);
 	return a === b || a.startsWith(b + '/') || b.startsWith(a + '/');
 }
 
@@ -134,7 +116,7 @@ function selectOutputs(
 	const deduped: LabeledOutput[] = [];
 	for (const item of selected) {
 		validateOutputPath(item.out.path, item.stage);
-		const key = canonicalPath(item.out.path);
+		const key = canonicalOutputPath(item.out.path);
 		const previous = seen.get(key);
 		if (previous) {
 			if (previous.out.content === item.out.content) continue;
@@ -154,14 +136,15 @@ function selectOutputs(
 /** Builds the zip entry list: every consolidated format + split files. */
 function zipEntries(
 	consolidated: Map<ConsolidatedFormatId, OutputFile>,
-	split: OutputFile[]
+	split: OutputFile[],
+	externalBase: string
 ): ZipEntry[] {
 	const encoder = new TextEncoder();
 	const all = [...consolidated.values(), ...split];
 	const seen = new Map<string, string>();
 	const entries: ZipEntry[] = [];
 	for (const out of all) {
-		const name = zipEntryName(out.path);
+		const name = zipEntryName(out.path, externalBase);
 		const previous = seen.get(name);
 		if (previous !== undefined) {
 			if (previous !== out.content) throw new Error('ZIP entry name conflict: ' + name + '.');
@@ -175,12 +158,15 @@ function zipEntries(
 
 export async function runExports(
 	gateway: ExportGateway,
-	settings: ExporterSettings,
+	rawSettings: ExporterSettings,
 	targets: ExportTarget[],
 	onProgress: ProgressCallback,
 	signal?: AbortSignal,
 	loadedFiles?: VaultFile[]
 ): Promise<ExportResult> {
+	// External output folder: every configured destination is re-rooted once,
+	// before validation and before the ZIP/plain outputs are compared.
+	const settings = resolveOutputSettings(rawSettings);
 	const startedAt = Date.now();
 	const uniqueTargets = [...new Set(targets)];
 	if (uniqueTargets.length === 0) throw new Error('Select at least one export target.');
@@ -288,6 +274,7 @@ export async function runExports(
 	const consolidated = consolidatedOutputs(notes, settings, exportedAt, requestedFormats);
 	const splitRequested = zipRequested || uniqueTargets.some((target) => target === 'all' || target === 'split');
 	const split = splitRequested ? buildSplitFiles(notes, settings) : [];
+	const externalBase = usesExternalOutputFolder(settings) ? externalFolderBase(settings.externalOutputFolder) : '';
 	const plainTargets = uniqueTargets.filter((target) => target !== 'zip');
 	const plainOutputs = selectOutputs(plainTargets, consolidated, split);
 	const zipPath = zipRequested ? validateOutputPath(settings.zipOutputPath, 'ZIP bundle') : '';
@@ -305,7 +292,7 @@ export async function runExports(
 	if (zipRequested) {
 		onProgress({ stage: 'ZIP bundle', current: 0, total: 1, log: 'Building archive (all formats + split)...' });
 		await yieldToUi();
-		zipData = buildZip(zipEntries(consolidated, split));
+		zipData = buildZip(zipEntries(consolidated, split, externalBase));
 	}
 
 	if (zipRequested && zipData) {

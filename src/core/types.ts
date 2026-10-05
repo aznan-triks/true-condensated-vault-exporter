@@ -50,6 +50,10 @@ export interface ExporterSettings {
 	documentTitle: string;
 	/** Whether the sidebar restores its previous target selection between sessions */
 	rememberTargetSelection: boolean;
+	/** Whether every output is written into `externalOutputFolder` instead of the vault */
+	useExternalOutputFolder: boolean;
+	/** Absolute OS folder that receives exports while external output is enabled */
+	externalOutputFolder: string;
 	/** Persisted sidebar targets; in-memory command overrides never alter this */
 	lastSelectedTargets: RememberedExportTarget[];
 	/** Seconds before a successful progress panel auto-closes; zero disables auto-close */
@@ -125,6 +129,8 @@ export interface ExporterSettings {
 export const DEFAULT_SETTINGS: ExporterSettings = {
 	documentTitle: 'Vault export',
 	rememberTargetSelection: true,
+	useExternalOutputFolder: false,
+	externalOutputFolder: '',
 	lastSelectedTargets: ['all'],
 	progressPanelAutoCloseSeconds: 8,
 	autoRevealOutput: false,
@@ -161,6 +167,7 @@ export const DEFAULT_SETTINGS: ExporterSettings = {
 
 const STRING_SETTING_KEYS = [
 	'documentTitle',
+	'externalOutputFolder',
 	'scopeRoot',
 	'scopeTag',
 	'notebooklmOutputPath',
@@ -207,9 +214,10 @@ export function mergeSettings(loaded: unknown): ExporterSettings {
 		result.htmlAccentColor = DEFAULT_SETTINGS.htmlAccentColor;
 	}
 	result.htmlFooterText = result.htmlFooterText.slice(0, 200);
+	result.externalOutputFolder = result.externalOutputFolder.trim().slice(0, 400);
 
 	for (const key of [
-		'rememberTargetSelection', 'autoRevealOutput', 'stripFrontmatter', 'renderDataview', 'includeCanvas', 'htmlShowToc', 'htmlShowSearch',
+		'rememberTargetSelection', 'useExternalOutputFolder', 'autoRevealOutput', 'stripFrontmatter', 'renderDataview', 'includeCanvas', 'htmlShowToc', 'htmlShowSearch',
 		'htmlShowPaths', 'htmlShowMetadata', 'htmlShowFooter',
 	] as const) {
 		if (typeof source[key] === 'boolean') {

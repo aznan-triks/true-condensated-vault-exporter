@@ -3,9 +3,10 @@
  * Searchable settings with grouped controls and HTML export personalization.
  */
 
-import { App, PluginSettingTab, Setting } from 'obsidian';
+import { App, Notice, PluginSettingTab, Setting } from 'obsidian';
 import type VaultExporterPlugin from '../main';
 import { PROGRESS_PANEL_AUTO_CLOSE_OPTIONS } from '../core/types';
+import { isAbsoluteOutputPath } from '../core/outputTarget';
 import { VaultPathSuggest } from '../ui/VaultPathSuggest';
 
 export class VaultExporterSettingsTab extends PluginSettingTab {
@@ -142,6 +143,66 @@ export class VaultExporterSettingsTab extends PluginSettingTab {
 				await this.plugin.saveSettings();
 			}
 		);
+
+		// SECTION: EXTERNAL OUTPUT FOLDER
+		const destinationSection = this.createSection(sections, 'External Output Folder');
+		this.createSetting(
+			destinationSection,
+			'Export to an External Folder',
+			'Write every output into a folder outside the vault instead of writing the configured output paths inside it. Relative paths keep their subfolders; absolute paths keep only their file or folder name. Requires an absolute folder path, for example C:\\Exports or /Users/you/Exports.'
+		)
+			.addToggle((toggle) => {
+				toggle.setValue(this.plugin.settings.useExternalOutputFolder);
+				toggle.onChange(async (value) => {
+					this.plugin.settings.useExternalOutputFolder = value;
+					await this.plugin.saveSettings();
+					if (value && !isAbsoluteOutputPath(this.plugin.settings.externalOutputFolder)) {
+						const picked = await this.pickExternalOutputFolder();
+						if (!picked) {
+							new Notice('No external folder selected — exports keep going into the vault.');
+						}
+					}
+					this.refreshExternalFolderDescription(externalFolderSetting);
+				});
+			});
+
+		const externalFolderSetting = this.createSetting(
+			destinationSection,
+			'External Folder',
+			this.describeExternalFolder()
+		);
+		externalFolderSetting.addText((text) => {
+			text.setValue(this.plugin.settings.externalOutputFolder);
+			text.setPlaceholder('C:\\Exports or /Users/you/Exports');
+			text.inputEl.style.width = '100%';
+			text.onChange(async (value) => {
+				this.plugin.settings.externalOutputFolder = value.trim();
+				await this.plugin.saveSettings();
+				this.refreshExternalFolderDescription(externalFolderSetting);
+			});
+		});
+		externalFolderSetting.addButton((button) => {
+			button.setButtonText('Choose folder…');
+			button.setTooltip('Open the system folder picker');
+			button.onClick(async () => {
+				await this.pickExternalOutputFolder();
+			});
+		});
+		externalFolderSetting.addExtraButton((button) => {
+			button.setIcon('folder-open');
+			button.setTooltip('Open the external folder in the file manager');
+			button.onClick(async () => {
+				const folder = this.plugin.settings.externalOutputFolder.trim();
+				if (!isAbsoluteOutputPath(folder)) {
+					new Notice('Choose an absolute external folder first.');
+					return;
+				}
+				if (!(await this.plugin.gateway.openOutputFolder(folder))) {
+					new Notice('Could not open the external folder on this device.');
+				}
+			});
+		});
+		this.refreshExternalFolderDescription(externalFolderSetting);
 
 		// SECTION: OUTPUT PATHS & SPLIT MODE
 		const outputSection = this.createSection(sections, 'Output Paths & Split Options');
@@ -390,6 +451,41 @@ export class VaultExporterSettingsTab extends PluginSettingTab {
 					await this.plugin.saveSettings();
 				});
 			});
+	}
+
+	/** Description for the external-folder setting, including its current state. */
+	private describeExternalFolder(): string {
+		const folder = this.plugin.settings.externalOutputFolder.trim();
+		if (!this.plugin.settings.useExternalOutputFolder) {
+			return 'Absolute folder that receives exports while the option above is on. Leave both off to keep writing into the vault.';
+		}
+		if (!folder) {
+			return '⚠ No folder selected yet — exports still go into the vault. Use “Choose folder…” or type an absolute path.';
+		}
+		if (!isAbsoluteOutputPath(folder)) {
+			return '⚠ “' + folder + '” is not an absolute path — exports still go into the vault. Use C:\\Exports or /Users/you/Exports.';
+		}
+		return 'Every output path above is re-created inside ' + folder + '.';
+	}
+
+	private refreshExternalFolderDescription(setting: Setting): void {
+		const invalid = this.plugin.settings.useExternalOutputFolder
+			&& !isAbsoluteOutputPath(this.plugin.settings.externalOutputFolder);
+		setting.setDesc(this.describeExternalFolder());
+		setting.settingEl.toggleClass('ve-settings__invalid', invalid);
+	}
+
+	/** Opens the native folder picker and stores the selection. */
+	private async pickExternalOutputFolder(): Promise<string | null> {
+		const picked = await this.plugin.gateway.pickOutputFolder(this.plugin.settings.externalOutputFolder);
+		if (!picked) {
+			return null;
+		}
+		this.plugin.settings.externalOutputFolder = picked;
+		await this.plugin.saveSettings();
+		this.display();
+		new Notice('External export folder: ' + picked);
+		return picked;
 	}
 
 	private createSection(parent: HTMLElement, title: string): HTMLElement {

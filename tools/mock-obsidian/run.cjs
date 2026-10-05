@@ -117,7 +117,23 @@ async function buildPlugin() {
 	const { makeVault } = require('./app-mock.cjs');
 	const { app } = makeVault(VAULT);
 	app.containerEl = window.document.body.createDiv({ cls: 'app-container' });
-	app.setting = { tabs: [], open() { this.isOpen = true; }, openTabById(id) { this.lastTabId = id; } };
+	// Mirrors the app-level settings modal, including two behaviours reported on
+	// real installs: `open()` renders asynchronously, and `openTabById` is
+	// ignored until the render finished. A settings shortcut must therefore wait
+	// and retry instead of firing once and hoping.
+	app.setting = {
+		tabs: [],
+		isOpen: false,
+		activeTab: null,
+		open() {
+			return new Promise((resolve) => setTimeout(() => { this.isOpen = true; resolve(); }, 5));
+		},
+		openTabById(id) {
+			if (!this.isOpen) return;
+			this.lastTabId = id;
+			this.activeTab = id;
+		},
+	};
 	const PluginClass = loadPluginClass();
 	const plugin = new PluginClass(app, MANIFEST);
 	app.pluginViews = plugin._views;
@@ -168,7 +184,8 @@ const has = (rel) => fs.existsSync(path.join(VAULT, rel));
 
 	console.log('\n--- plugin load ---');
 	record('plugin id from manifest', plugin.manifest.id === 'vault-exporter', plugin.manifest.id);
-	record('9 commands registered', plugin._commands.length === 9, plugin._commands.map((c) => c.id).join(', '));
+	record('10 commands registered', plugin._commands.length === 10, plugin._commands.map((c) => c.id).join(', '));
+	record('settings shortcut command registered', plugin._commands.some((c) => c.id === 'open-settings'));
 	record('settings tab registered', plugin._settingTabs.length === 1);
 	record('sidebar view registered', plugin._views.has('vault-exporter-sidebar'));
 	record('ribbon icon registered', plugin._ribbonIcons.length === 1, plugin._ribbonIcons[0]?.icon);
@@ -192,6 +209,12 @@ const has = (rel) => fs.existsSync(path.join(VAULT, rel));
 	record('default target scope is clearly summarized', view?.containerEl.querySelector('.ve-sidebar__selection-summary')?.textContent.includes('All 4 non-ZIP targets selected') === true);
 	const selectionStatus = view?.containerEl.querySelector('.ve-sidebar__selection-summary');
 	record('target selection summary is announced accessibly', selectionStatus?.getAttribute('role') === 'status' && selectionStatus.getAttribute('aria-live') === 'polite');
+	const settingsBtn = view.containerEl.querySelector('.ve-sidebar__settings');
+	settingsBtn?.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+	await sleep(80);
+	record('sidebar settings button opens the app settings modal', plugin.app.setting.isOpen === true);
+	record('sidebar settings button lands on the plugin settings tab', plugin.app.setting.lastTabId === 'vault-exporter', String(plugin.app.setting.lastTabId));
+
 	const htmlTarget = [...view.containerEl.querySelectorAll('.ve-target')].find((row) => row.querySelector('.ve-target__label')?.textContent === 'Export as HTML document');
 	if (htmlTarget) {
 		htmlTarget.click();
@@ -286,12 +309,23 @@ const has = (rel) => fs.existsSync(path.join(VAULT, rel));
 	tab.display();
 	record('settings items rendered', tab.containerEl.querySelectorAll('.setting-item').length >= 25, tab.containerEl.querySelectorAll('.setting-item').length);
 	record('list rows rendered', tab.containerEl.querySelectorAll('.ve-list-item').length >= 3, tab.containerEl.querySelectorAll('.ve-list-item').length);
+	const itemByName = (label) => [...tab.containerEl.querySelectorAll('.setting-item')]
+		.find((el) => el.querySelector('.setting-item-name')?.textContent === label);
+	record('external output folder controls rendered', Boolean(itemByName('Export to an External Folder')?.querySelector('input[type="checkbox"]')) && Boolean(itemByName('External Folder')?.querySelector('input[type="text"]')));
+	record('external folder row offers the native picker', Boolean(itemByName('External Folder')?.querySelector('button')),
+		[...(itemByName('External Folder')?.querySelectorAll('button') ?? [])].map((b) => b.textContent || b.getAttribute('data-icon')).join(', '));
 	const searchInput = tab.containerEl.querySelector('.ve-settings__search input');
 	if (searchInput) {
 		searchInput.value = 'focused controls';
 		searchInput.dispatchEvent(new window.Event('input', { bubbles: true }));
 		const visibleRows = [...tab.containerEl.querySelectorAll('.ve-settings-row')].filter((row) => !row.hidden);
 		record('settings search filters matching controls and sections', visibleRows.length === 1 && visibleRows[0].textContent.includes('HTML Accent Color') && [...tab.containerEl.querySelectorAll('.ve-settings-section')].filter((section) => !section.hidden).length === 1, visibleRows.map((row) => row.textContent.trim().slice(0, 40)).join(', '));
+		searchInput.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+		searchInput.value = 'external';
+		searchInput.dispatchEvent(new window.Event('input', { bubbles: true }));
+		record('settings search finds the external output controls',
+			[...tab.containerEl.querySelectorAll('.ve-settings-row')].filter((row) => !row.hidden).length >= 2
+				&& [...tab.containerEl.querySelectorAll('.ve-settings-section')].filter((section) => !section.hidden).length === 1);
 		searchInput.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
 		record('Escape clears settings search', searchInput.value === '' && [...tab.containerEl.querySelectorAll('.ve-settings-section')].every((section) => !section.hidden));
 	} else {
@@ -433,7 +467,7 @@ const has = (rel) => fs.existsSync(path.join(VAULT, rel));
 	cancelBtn?.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
 	record('cancel click handled', Boolean(cancelBtn));
 	record('panel reports cancellation or completion', ['Cancelled', 'Done'].includes(await waitFinished()), panelStatus());
-	record('no stuck running state', plugin._commands.length === 9);
+	record('no stuck running state', plugin._commands.length === 10 && window.document.querySelector('.ve-panel__cancel')?.isShown() === false, window.document.querySelector('.ve-panel__status')?.textContent);
 
 	console.log('\n--- reveal shortcut ---');
 	// Fresh, deterministic run: the reveal button appears after a successful export.
@@ -448,6 +482,43 @@ const has = (rel) => fs.existsSync(path.join(VAULT, rel));
 	} else {
 		record('reveal button offered after an export', false, `no .ve-panel__reveal (panel: ${panelText().slice(0, 120)})`);
 	}
+
+	console.log('\n--- external output folder ---');
+	const EXTERNAL = path.join(os.tmpdir(), 'vault-exporter-smoke-external');
+	fs.rmSync(EXTERNAL, { recursive: true, force: true });
+	const mockState = require('./obsidian-mock.cjs').__state;
+	// Enabling the toggle with no folder opens the native picker.
+	mockState.pickedFolder = EXTERNAL;
+	plugin.settings.useExternalOutputFolder = false;
+	plugin.settings.externalOutputFolder = '';
+	await plugin.saveSettings();
+	tab.display();
+	const externalToggle = itemByName('Export to an External Folder')?.querySelector('input[type="checkbox"]');
+	if (externalToggle) {
+		externalToggle.checked = true;
+		externalToggle.dispatchEvent(new window.Event('change', { bubbles: true }));
+		await sleep(120);
+	}
+	record('enabling external output opens the picker and stores the folder',
+		plugin._data?.settings?.useExternalOutputFolder === true && plugin._data?.settings?.externalOutputFolder === EXTERNAL,
+		String(plugin._data?.settings?.externalOutputFolder));
+	record('external folder description shows the destination', (itemByName('External Folder')?.textContent ?? '').includes(EXTERNAL));
+
+	const vaultBefore = fs.readdirSync(VAULT).sort();
+	record('export-markdown (external) finishes', (await runCommand('export-markdown')) === 'Done');
+	record('external output written outside the vault', fs.existsSync(path.join(EXTERNAL, 'Vault export.md')));
+	record('export history records the external path', String(plugin.history[0]?.files?.[0]?.path ?? '').startsWith(EXTERNAL), String(plugin.history[0]?.files?.[0]?.path));
+	record('the vault gained no new output file',
+		JSON.stringify(fs.readdirSync(VAULT).sort()) === JSON.stringify(vaultBefore),
+		fs.readdirSync(VAULT).filter((name) => !vaultBefore.includes(name)).join(', '));
+	await view.refresh();
+	record('sidebar announces the external destination', /outside the vault/.test(view.containerEl.textContent ?? ''));
+
+	plugin.settings.useExternalOutputFolder = false;
+	plugin.settings.externalOutputFolder = '';
+	await plugin.saveSettings();
+	fs.rmSync(EXTERNAL, { recursive: true, force: true });
+	tab.display();
 
 	console.log('\n--- graceful degradation without Electron ---');
 	plugin.gateway.revealOutput = () => null;

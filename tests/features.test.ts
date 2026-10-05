@@ -174,6 +174,56 @@ describe('orchestrator', () => {
 		expect(asText).toContain('Vault export - split/A.txt');
 	});
 
+	it('writes every output inside the external folder when it is enabled', async () => {
+		const { gateway, written } = fakeGateway(manyFiles);
+		await runExports(gateway, {
+			...DEFAULT_SETTINGS,
+			useExternalOutputFolder: true,
+			externalOutputFolder: 'C:\\Exports',
+		}, ['all'], () => {});
+		expect([...written.keys()].sort()).toEqual([
+			'C:/Exports/Vault export - NotebookLM.txt',
+			'C:/Exports/Vault export - split/A.txt',
+			'C:/Exports/Vault export.html',
+			'C:/Exports/Vault export.md',
+		]);
+	});
+
+	it('stores the external ZIP in the external folder with folder-relative entry names', async () => {
+		const { gateway, written, writtenBinary } = fakeGateway(manyFiles);
+		const result = await runExports(gateway, {
+			...DEFAULT_SETTINGS,
+			useExternalOutputFolder: true,
+			externalOutputFolder: '/tmp/ve-exports',
+		}, ['zip'], () => {});
+		expect(written.size).toBe(0);
+		expect([...writtenBinary.keys()]).toEqual(['/tmp/ve-exports/Vault export.zip']);
+		expect(result.written[0]!.path).toBe('/tmp/ve-exports/Vault export.zip');
+		const asText = new TextDecoder().decode(writtenBinary.get('/tmp/ve-exports/Vault export.zip')!);
+		// Entry names are relative to the external folder, not to the OS root.
+		expect(asText).toContain('Vault export - NotebookLM.txt');
+		expect(asText).toContain('Vault export - split/A.txt');
+		expect(asText).not.toContain('ve-exports/Vault export.md');
+	});
+
+	it('passes the external output paths to the gateway so vault reads stay protected', async () => {
+		const seen: string[] = [];
+		const gateway: ExportGateway = {
+			loadVaultFiles: async (settings) => {
+				seen.push(settings.htmlOutputPath, settings.splitOutputFolder);
+				return manyFiles;
+			},
+			writeFile: async () => {},
+			writeBinary: async () => {},
+		};
+		await runExports(gateway, {
+			...DEFAULT_SETTINGS,
+			useExternalOutputFolder: true,
+			externalOutputFolder: '/tmp/ve-exports',
+		}, ['html'], () => {});
+		expect(seen).toEqual(['/tmp/ve-exports/Vault export.html', '/tmp/ve-exports/Vault export - split']);
+	});
+
 	it('stops mid-run when cancelled and writes nothing afterwards', async () => {
 		const { gateway, written } = fakeGateway(manyFiles);
 		const controller = new AbortController();

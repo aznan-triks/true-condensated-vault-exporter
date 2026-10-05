@@ -5,6 +5,7 @@
  * where deflate would expand the data, are stored uncompressed.
  */
 
+import { canonicalOutputPath } from './outputTarget';
 import { deflateRawSync } from 'zlib';
 
 let CRC_TABLE: Uint32Array | null = null;
@@ -167,10 +168,21 @@ export function buildZip(entries: ZipEntry[], modifiedAt: Date = new Date()): Ui
 /**
  * Maps a configured output path to a sensible archive entry name.
  * Vault-relative paths keep their structure; absolute paths are reduced
- * to "<last folder>/<file>" so the bundle stays portable.
+ * to "<last folder>/<file>" so the bundle stays portable. When `basePath` is
+ * given (the external output folder), paths inside it are stored relative to
+ * that folder instead.
  */
-export function zipEntryName(targetPath: string): string {
-	const normalized = targetPath.trim().replace(/\\/g, '/');
+export function zipEntryName(targetPath: string, basePath = ''): string {
+	const portable = targetPath.trim().replace(/\\/g, '/');
+	const base = basePath.trim().replace(/\\/g, '/').replace(/\/+$/, '');
+	if (base) {
+		const baseKey = canonicalOutputPath(base);
+		const targetKey = canonicalOutputPath(portable);
+		if (targetKey.startsWith(baseKey + '/') && targetKey.length > baseKey.length + 1) {
+			return portable.slice(base.length + 1);
+		}
+	}
+	const normalized = portable;
 	const absolute = normalized.startsWith('/') || /^[a-z]:\//i.test(normalized);
 	const parts: string[] = [];
 	for (const part of normalized.split('/')) {
