@@ -10,7 +10,7 @@ import * as path from 'path';
  * old `Shell.revealInFileExplorer` — fails here instead of in the user's vault.
  */
 
-const state = vi.hoisted(() => ({ shellCalls: [] as string[], shellThrows: false }));
+const state = vi.hoisted(() => ({ shellCalls: [] as string[], openPathCalls: [] as string[], shellThrows: false, pickedFolder: '', dialogCanceled: false }));
 
 vi.mock('obsidian', () => {
 	class TFile {
@@ -49,6 +49,15 @@ vi.mock('electron', () => ({
 			if (state.shellThrows) throw new Error("Cannot find module 'electron'");
 			state.shellCalls.push(target);
 		},
+		openPath: async (target: string) => {
+			state.openPathCalls.push(target);
+			return '';
+		},
+	},
+	dialog: {
+		showOpenDialog: async () => (state.dialogCanceled
+			? { canceled: true, filePaths: [] }
+			: { canceled: false, filePaths: [state.pickedFolder] }),
 	},
 }));
 
@@ -61,7 +70,17 @@ if (typeof host.window.require !== 'function') {
 	host.window.require = (id: string) => {
 		if (id === 'electron') {
 			if (state.shellThrows) throw new Error("Cannot find module 'electron'");
-			return { shell: { showItemInFolder: (target: string) => state.shellCalls.push(target) } };
+			return {
+				shell: {
+					showItemInFolder: (target: string) => state.shellCalls.push(target),
+					openPath: async (target: string) => { state.openPathCalls.push(target); return ''; },
+				},
+				dialog: {
+					showOpenDialog: async () => (state.dialogCanceled
+						? { canceled: true, filePaths: [] }
+						: { canceled: false, filePaths: [state.pickedFolder] }),
+				},
+			};
 		}
 		throw new Error('Unexpected require: ' + id);
 	};
@@ -77,6 +96,10 @@ import { ObsidianVaultGateway } from '../src/obsidian/vaultGateway';
 import { DEFAULT_SETTINGS } from '../src/core/types';
 
 let vaultDir: string;
+
+function has(relative: string): boolean {
+	return fs.existsSync(path.join(vaultDir, relative));
+}
 
 function write(relative: string, content: string): void {
 	const full = path.join(vaultDir, relative);
@@ -151,7 +174,10 @@ function gatewayWith(app: { vault: unknown; metadataCache: unknown }): ObsidianV
 beforeEach(() => {
 	vaultDir = fs.mkdtempSync(path.join(os.tmpdir(), 've-gateway-'));
 	state.shellCalls.length = 0;
+	state.openPathCalls.length = 0;
 	state.shellThrows = false;
+	state.pickedFolder = '';
+	state.dialogCanceled = false;
 });
 afterEach(() => {
 	fs.rmSync(vaultDir, { recursive: true, force: true });
@@ -183,6 +209,57 @@ describe('ObsidianVaultGateway', () => {
 		const gateway = gatewayWith(makeApp());
 		const files = await gateway.loadVaultFiles(DEFAULT_SETTINGS);
 		expect(files.map((f) => f.path)).toEqual(['Notes/Keep.md']);
+	});
+
+	it('reports the vault base path and maps it back from an external output folder', () => {
+		const gateway = gatewayWith(makeApp());
+		expect(gateway.getVaultBasePath()).toBe(vaultDir);
+	});
+
+	it('protects external outputs that are written back inside the vault', async () => {
+		write('Notes/Keep.md', '# Keep');
+		const outputs = path.join(vaultDir, 'Exports');
+		fs.mkdirSync(outputs, { recursive: true });
+		fs.writeFileSync(path.join(outputs, 'Vault export.md'), 'previous external export', 'utf8');
+		const gateway = gatewayWith(makeApp());
+		const files = await gateway.loadVaultFiles({
+			...DEFAULT_SETTINGS,
+			useExternalOutputFolder: true,
+			externalOutputFolder: outputs,
+		});
+		expect(files.map((f) => f.path)).toEqual(['Notes/Keep.md']);
+	});
+
+	it('writes absolute external outputs outside the vault', async () => {
+		const gateway = gatewayWith(makeApp());
+		const external = fs.mkdtempSync(path.join(os.tmpdir(), 've-external-'));
+		try {
+			const target = path.join(external, 'nested', 'Vault export.md');
+			await gateway.writeFile(target, 'outside');
+			expect(fs.readFileSync(target, 'utf8')).toBe('outside');
+			expect(has('nested/Vault export.md')).toBe(false);
+		} finally {
+			fs.rmSync(external, { recursive: true, force: true });
+		}
+	});
+
+	it('returns the folder chosen in the native picker and null on cancel', async () => {
+		const gateway = gatewayWith(makeApp());
+		const external = fs.mkdtempSync(path.join(os.tmpdir(), 've-pick-'));
+		try {
+			state.pickedFolder = external;
+			expect(await gateway.pickOutputFolder()).toBe(external);
+			state.dialogCanceled = true;
+			expect(await gateway.pickOutputFolder()).toBeNull();
+		} finally {
+			fs.rmSync(external, { recursive: true, force: true });
+		}
+	});
+
+	it('opens a folder in the OS file manager', async () => {
+		const gateway = gatewayWith(makeApp());
+		expect(await gateway.openOutputFolder(vaultDir)).toBe(true);
+		expect(state.openPathCalls).toEqual([vaultDir]);
 	});
 
 	it('writes text and binary outputs, creating parent folders and updating existing files', async () => {

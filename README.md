@@ -26,6 +26,8 @@ An Obsidian desktop plugin for turning a vault, folder, or tagged subset into fi
 2. Choose targets and select **Run export**. The sidebar summarizes the selected target count and formats. Select **All non-ZIP exports** for NotebookLM, HTML, Markdown, and split output; **ZIP bundle** is a separate target.
 3. Track live progress and elapsed time, cancel a run, and review the file count, size, skipped notes, and duration when it finishes. Reveal the output manually from the panel, or enable automatic reveal on success.
 
+**Settings** in the sidebar footer opens this plugin’s settings page directly; the **Open Vault Exporter settings** command does the same from the Command Palette, so you can assign it a hotkey.
+
 The sidebar also shows a scope preview and the five most recent runs, including each run’s duration. It remembers your selected export targets by default; turn this off in **Settings → General** to start with all targets instead. Use a history row’s folder button to reveal its first output, or clear the history without deleting exported files. When a tag filter is active, the preview is path-based and the sidebar says so; Canvas files are not included in tag-scoped exports. The sidebar and progress panel adapt to narrower and shorter windows, with larger touch targets.
 
 ### Scope and content
@@ -52,6 +54,7 @@ The settings page is grouped and searchable: type a setting name or description 
 
 - **Scope Root / Scope Tag** and exclusion lists control what is read.
 - Each consolidated format, the ZIP, and split files have configurable output paths. Use vault-relative paths or absolute paths on desktop; a blank split destination means the vault root.
+- **External Output Folder** redirects every output outside the vault. Turn it on, pick an absolute folder with the system folder picker, and all consolidated files, ZIP bundles, and split files are written there instead — relative paths keep their subfolders, absolute paths keep only their final name. The section shows where exports currently go, and the sidebar footer and scope preview both link to these settings. Outputs written back inside the vault (for example when the external folder is a vault subfolder) are still protected from re-export.
 - Split mode chooses folder-grouped text files or a one-to-one Markdown mirror.
 - Markdown-processing settings control frontmatter, Dataview, Canvas, wikilinks, and ignored properties.
 - **Export Feedback & Behavior** lets you keep successful progress panels open or choose their auto-close delay. Cancelled and failed panels remain visible for review. You can also reveal the first output automatically in the desktop file manager.

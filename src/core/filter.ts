@@ -4,6 +4,8 @@
  * plus protection against re-exporting previous export outputs.
  */
 
+import { isAbsoluteOutputPath, resolveOutputPath, vaultRelativeOutputPath } from './outputTarget';
+
 export interface FilterOptions {
 	scopeRoot: string;
 	excludedFolders: string[];
@@ -173,23 +175,42 @@ export function isFileIncluded(relativePath: string, options: FilterOptions): bo
 /**
  * Builds the list of output locations that must be protected from export,
  * from the current settings.
+ *
+ * Absolute locations (external output folder, absolute per-format paths) are
+ * mapped back to a vault-relative path when they live inside the vault and a
+ * `vaultBasePath` is provided; locations outside the vault need no protection.
  */
-function isAbsoluteOutputPath(value: string): boolean {
-	return /^(?:[a-z]:[\\/]|[\\/]{1,2})/i.test(value.trim());
-}
-
 export function reservedOutputPaths(settings: {
 	notebooklmOutputPath: string;
 	htmlOutputPath: string;
 	markdownOutputPath: string;
 	zipOutputPath: string;
 	splitOutputFolder: string;
-}): string[] {
-	return [
+	useExternalOutputFolder?: boolean;
+	externalOutputFolder?: string;
+}, options?: { vaultBasePath?: string | null }): string[] {
+	const external = {
+		useExternalOutputFolder: settings.useExternalOutputFolder === true,
+		externalOutputFolder: settings.externalOutputFolder ?? '',
+	};
+	const vaultBasePath = options?.vaultBasePath?.trim() ?? '';
+	const reserved: string[] = [];
+	for (const candidate of [
 		settings.notebooklmOutputPath,
 		settings.htmlOutputPath,
 		settings.markdownOutputPath,
 		settings.zipOutputPath,
 		settings.splitOutputFolder,
-	].filter((p) => p && p.trim().length > 0 && !isAbsoluteOutputPath(p));
+	]) {
+		if (!candidate || candidate.trim().length === 0) continue;
+		const resolved = resolveOutputPath(external, candidate);
+		if (!isAbsoluteOutputPath(resolved)) {
+			reserved.push(resolved);
+			continue;
+		}
+		if (!vaultBasePath) continue;
+		const relative = vaultRelativeOutputPath(resolved, vaultBasePath);
+		if (relative) reserved.push(relative);
+	}
+	return reserved;
 }
