@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.2.0] - 2026-10-07
+
+### Added
+- **Split Subfolders, Naming Styles, Depth Modes & Presets.** Folder-grouped split exports can now produce one `.txt` file per subfolder as well:
+  - **Split Subfolder Naming (`splitSubfolderStyle`):** choose between *Flat with parent prefix* (`Parent - Subfolder.txt`, default and recommended for NotebookLM), *Flat with subfolder name only* (`Subfolder.txt`, with automatic disambiguation on collision), *Flat with underscore path* (`Parent_Subfolder.txt`), and *Mirrored subfolder tree* (`Parent/Subfolder.txt`).
+  - **Split Subfolder Depth (`splitSubfolderDepth`) & per-folder overrides:** choose 1-level direct subfolders or recursive nested subfolders for selected folders in `Split Subfolders`, or enable 2-level or full recursive splitting across the entire scope automatically. Each folder in `Split Subfolders` also has a button to cycle between Default, `1 level (/*)`, and `Recursive (/**)`.
+  - **Split Presets (`SPLIT_PRESETS`) & Live Output Preview:** 7 one-click presets in both Settings and the Sidebar (*Top-level only*, *Selected subfolders (NotebookLM)*, *All 2 levels (flat)*, *All subfolders (flat)*, *Short names*, *Folder tree*, and *1 .md per note*), quick-add folder buttons (*Quick add folder* and *+ All parent folders*), and a live preview of the resulting split file paths.
+
 ## [2.1.1] - 2026-10-05
 
 ### Added

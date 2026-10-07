@@ -10,7 +10,14 @@ import { formatForNotebookLM } from '../src/core/notebooklmFormatter';
 import { formatForHtml, simpleMarkdownToHtml, renderInline, noteHeadings } from '../src/core/htmlFormatter';
 import { formatForMarkdown } from '../src/core/markdownFormatter';
 import { parseCanvasContent } from '../src/core/canvasParser';
-import { buildSplitFiles } from '../src/features/exportSplit';
+import {
+	SPLIT_PRESETS,
+	applySplitPreset,
+	buildSplitFiles,
+	detectSplitPreset,
+	parseSubfolderSplitRule,
+	previewSplitFiles,
+} from '../src/features/exportSplit';
 import { cleanNote, createExportContext, parseVault } from '../src/core/pipeline';
 import { DEFAULT_SETTINGS, ExporterSettings, VaultFile, mergeSettings } from '../src/core/types';
 import {
@@ -739,6 +746,200 @@ describe('formatters and split export', () => {
 		expect(outputs[0]?.path).toBe('out/Knowledge Base/80_History/Event1.md');
 		expect(outputs[0]?.content.startsWith('---\ntitle: Event 1')).toBe(true);
 	});
+
+	it('splits selected subfolders with flat-prefixed naming by default and supports chaining (direct 1-level mode)', () => {
+		const nestedFiles: VaultFile[] = [
+			{ path: 'Knowledge Base/01_World/Overview.md', name: 'Overview.md', content: 'world overview' },
+			{ path: 'Knowledge Base/01_World/Regions/North.md', name: 'North.md', content: 'north region' },
+			{ path: 'Knowledge Base/01_World/Regions/Cities/Capital.md', name: 'Capital.md', content: 'capital city' },
+			{ path: 'Knowledge Base/01_World/Factions/Guild.md', name: 'Guild.md', content: 'guild faction' },
+			{ path: 'Knowledge Base/80_History/Eras/Ancient.md', name: 'Ancient.md', content: 'ancient era' },
+		];
+		const settings = {
+			...DEFAULT_SETTINGS,
+			scopeRoot: 'Knowledge Base',
+			splitOutputFolder: 'out',
+			splitSubfolders: ['Knowledge Base/01_World'],
+			splitSubfolderDepth: 'direct' as const,
+		};
+		const ctx = createExportContext(nestedFiles, settings);
+		const notes = nestedFiles.map((f) => cleanNote(f, ctx));
+		const outputs = buildSplitFiles(notes, settings);
+
+		expect(outputs.map((o) => o.path).sort()).toEqual([
+			'out/01_World - Factions.txt',
+			'out/01_World - Regions.txt',
+			'out/01_World.txt',
+			'out/80_History.txt',
+		]);
+		expect(outputs.find((o) => o.path === 'out/01_World.txt')?.content).toContain('world overview');
+		expect(outputs.find((o) => o.path === 'out/01_World - Regions.txt')?.content).toContain('north region');
+		// In 1-level mode, Cities stays grouped inside Regions until 01_World/Regions is also selected
+		expect(outputs.find((o) => o.path === 'out/01_World - Regions.txt')?.content).toContain('capital city');
+		expect(outputs.find((o) => o.path === 'out/01_World - Factions.txt')?.content).toContain('guild faction');
+		expect(outputs.find((o) => o.path === 'out/80_History.txt')?.content).toContain('ancient era');
+
+		// Chaining a deeper subfolder splits that deeper level as well
+		const chainedSettings = {
+			...settings,
+			splitSubfolders: ['01_World', '01_World/Regions'],
+		};
+		const chainedOutputs = buildSplitFiles(notes, chainedSettings);
+		expect(chainedOutputs.map((o) => o.path).sort()).toEqual([
+			'out/01_World - Factions.txt',
+			'out/01_World - Regions - Cities.txt',
+			'out/01_World - Regions.txt',
+			'out/01_World.txt',
+			'out/80_History.txt',
+		]);
+		expect(chainedOutputs.find((o) => o.path === 'out/01_World - Regions - Cities.txt')?.content).toContain('capital city');
+	});
+
+	it('supports all subfolder naming styles (flat-prefixed, flat-leaf, flat-underscored, nested) and scope-wide depth modes', () => {
+		const nestedFiles: VaultFile[] = [
+			{ path: '01_World/Regions/North.md', name: 'North.md', content: 'north region' },
+			{ path: '01_World/Regions/Cities/Capital.md', name: 'Capital.md', content: 'capital city' },
+			{ path: '01_World/Regions/Cities/Districts/Market.md', name: 'Market.md', content: 'market district' },
+			{ path: '80_History/Eras/Ancient/Timeline.md', name: 'Timeline.md', content: 'timeline' },
+		];
+		const baseSettings = {
+			...DEFAULT_SETTINGS,
+			splitOutputFolder: 'out',
+			splitSubfolders: ['01_World'],
+			splitSubfolderDepth: 'recursive' as const,
+		};
+		const ctx = createExportContext(nestedFiles, baseSettings);
+		const notes = nestedFiles.map((f) => cleanNote(f, ctx));
+
+		// flat-leaf
+		const leafOutputs = buildSplitFiles(notes, { ...baseSettings, splitSubfolderStyle: 'flat-leaf' });
+		expect(leafOutputs.map((o) => o.path).sort()).toEqual([
+			'out/80_History.txt',
+			'out/Cities.txt',
+			'out/Districts.txt',
+			'out/Regions.txt',
+		]);
+
+		// flat-underscored
+		const underscoredOutputs = buildSplitFiles(notes, { ...baseSettings, splitSubfolderStyle: 'flat-underscored' });
+		expect(underscoredOutputs.map((o) => o.path).sort()).toEqual([
+			'out/01_World_Regions.txt',
+			'out/01_World_Regions_Cities.txt',
+			'out/01_World_Regions_Cities_Districts.txt',
+			'out/80_History.txt',
+		]);
+
+		// nested
+		const nestedOutputs = buildSplitFiles(notes, { ...baseSettings, splitSubfolderStyle: 'nested' });
+		expect(nestedOutputs.map((o) => o.path).sort()).toEqual([
+			'out/01_World/Regions.txt',
+			'out/01_World/Regions/Cities.txt',
+			'out/01_World/Regions/Cities/Districts.txt',
+			'out/80_History.txt',
+		]);
+
+		// all-two-levels across the entire scope without needing splitSubfolders
+		const twoLevelsOutputs = buildSplitFiles(notes, {
+			...DEFAULT_SETTINGS,
+			splitOutputFolder: 'out',
+			splitSubfolderDepth: 'all-two-levels',
+			splitSubfolderStyle: 'flat-prefixed',
+		});
+		expect(twoLevelsOutputs.map((o) => o.path).sort()).toEqual([
+			'out/01_World - Regions.txt',
+			'out/80_History - Eras.txt',
+		]);
+
+		// all-recursive across the entire scope
+		const allRecursiveOutputs = buildSplitFiles(notes, {
+			...DEFAULT_SETTINGS,
+			splitOutputFolder: 'out',
+			splitSubfolderDepth: 'all-recursive',
+			splitSubfolderStyle: 'flat-prefixed',
+		});
+		expect(allRecursiveOutputs.map((o) => o.path).sort()).toEqual([
+			'out/01_World - Regions - Cities - Districts.txt',
+			'out/01_World - Regions - Cities.txt',
+			'out/01_World - Regions.txt',
+			'out/80_History - Eras - Ancient.txt',
+		]);
+
+		// Per-folder override: 01_World/* (1-level) + 80_History/** (recursive)
+		const mixedSettings = {
+			...DEFAULT_SETTINGS,
+			splitOutputFolder: 'out',
+			splitSubfolderDepth: 'direct' as const,
+			splitSubfolderStyle: 'flat-leaf' as const,
+			splitSubfolders: ['01_World/*', '80_History/**'],
+		};
+		const mixedOutputs = buildSplitFiles(notes, mixedSettings);
+		expect(mixedOutputs.map((o) => o.path).sort()).toEqual([
+			'out/Ancient.txt',
+			'out/Regions.txt',
+		]);
+		expect(parseSubfolderSplitRule('Knowledge Base/01_World/**', 'Knowledge Base', 'direct')).toEqual({
+			path: '01_World',
+			mode: 'recursive',
+		});
+		expect(parseSubfolderSplitRule('01_World/*', '', 'recursive')).toEqual({
+			path: '01_World',
+			mode: 'direct',
+		});
+	});
+
+	it('disambiguates colliding leaf folder names only when two split groups share a leaf name in flat-leaf mode', () => {
+		const collidingFiles: VaultFile[] = [
+			{ path: 'Projects/Archive/old-spec.md', name: 'old-spec.md', content: 'project archive' },
+			{ path: 'Projects/Frontend/ui.md', name: 'ui.md', content: 'frontend ui' },
+			{ path: 'Notes/Archive/old-note.md', name: 'old-note.md', content: 'notes archive' },
+		];
+		const settings = {
+			...DEFAULT_SETTINGS,
+			splitOutputFolder: 'out',
+			splitSubfolders: ['Projects', 'Notes'],
+			splitSubfolderStyle: 'flat-leaf' as const,
+		};
+		const ctx = createExportContext(collidingFiles, settings);
+		const notes = collidingFiles.map((f) => cleanNote(f, ctx));
+		const outputs = buildSplitFiles(notes, settings);
+		expect(outputs.map((o) => o.path).sort()).toEqual([
+			'out/Frontend.txt',
+			'out/Notes - Archive.txt',
+			'out/Projects - Archive.txt',
+		]);
+	});
+
+	it('applies and detects split presets and builds live preview paths', () => {
+		expect(SPLIT_PRESETS.length).toBeGreaterThanOrEqual(7);
+		expect(detectSplitPreset(DEFAULT_SETTINGS)).toBe('top-level');
+
+		const s = { ...DEFAULT_SETTINGS, splitSubfolders: ['Projects'] };
+		expect(detectSplitPreset(s)).toBe('notebooklm-selected');
+
+		applySplitPreset(s, 'notebooklm-deep');
+		expect(s.splitSubfolderDepth).toBe('all-recursive');
+		expect(s.splitSubfolderStyle).toBe('flat-prefixed');
+		expect(detectSplitPreset(s)).toBe('notebooklm-deep');
+		expect(previewSplitFiles(s)).toContain('Vault export - split/Projects - SubfolderA - Deep.txt');
+
+		applySplitPreset(s, 'folder-tree');
+		expect(s.splitSubfolderStyle).toBe('nested');
+		expect(detectSplitPreset(s)).toBe('folder-tree');
+		expect(previewSplitFiles(s)).toContain('Vault export - split/Projects/SubfolderA/Deep.txt');
+
+		applySplitPreset(s, 'clean-leaf');
+		expect(s.splitSubfolderStyle).toBe('flat-leaf');
+		expect(detectSplitPreset(s)).toBe('clean-leaf');
+
+		applySplitPreset(s, 'top-level');
+		expect(s.splitSubfolders).toEqual([]);
+		expect(detectSplitPreset(s)).toBe('top-level');
+
+		applySplitPreset(s, 'markdown-mirror');
+		expect(s.splitMode).toBe('individual-files');
+		expect(detectSplitPreset(s)).toBe('markdown-mirror');
+		expect(previewSplitFiles(s)[0]).toMatch(/\.md$/);
+	});
 });
 
 describe('pipeline', () => {
@@ -803,6 +1004,29 @@ describe('settings', () => {
 		expect(DEFAULT_SETTINGS.htmlTheme).toBe('system');
 		expect(DEFAULT_SETTINGS.htmlAccentColor).toMatch(/^#[0-9a-f]{6}$/i);
 		expect(DEFAULT_SETTINGS.htmlShowToc).toBe(true);
+		expect(DEFAULT_SETTINGS.splitSubfolders).toEqual([]);
+		expect(DEFAULT_SETTINGS.splitSubfolderDepth).toBe('direct');
+		expect(DEFAULT_SETTINGS.splitSubfolderStyle).toBe('flat-prefixed');
+	});
+
+	it('normalizes splitSubfolders, splitSubfolderDepth, and splitSubfolderStyle', () => {
+		const merged = mergeSettings({
+			splitSubfolders: [' Projects ', '', 'Projects', 'Notes/**'],
+			splitSubfolderDepth: 'all-two-levels',
+			splitSubfolderStyle: 'nested',
+		});
+		expect(merged.splitSubfolders).toEqual(['Projects', 'Notes/**']);
+		expect(merged.splitSubfolderDepth).toBe('all-two-levels');
+		expect(merged.splitSubfolderStyle).toBe('nested');
+
+		const invalid = mergeSettings({
+			splitSubfolders: 'not-an-array',
+			splitSubfolderDepth: 'infinite',
+			splitSubfolderStyle: 'random',
+		});
+		expect(invalid.splitSubfolders).toEqual([]);
+		expect(invalid.splitSubfolderDepth).toBe('direct');
+		expect(invalid.splitSubfolderStyle).toBe('flat-prefixed');
 	});
 
 	it('defaults to writing inside the vault and round-trips an external folder', () => {

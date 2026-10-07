@@ -1,6 +1,6 @@
 # Project context: Vault Exporter
 
-> Last updated: 2026-10-05 (v2.1.0). Keep this file in English.
+> Last updated: 2026-10-07 (v2.2.0). Keep this file in English.
 
 ## Product
 
@@ -50,7 +50,7 @@ npm run dev      # esbuild watch mode
 - Dataview support is intentionally a subset. Unsupported or malformed blocks remain in the note; do not silently interpret them as matching all files.
 - Tag scoping excludes Canvas files. The sidebar's live count is path-based while a tag filter is active and displays a warning.
 - Markdown wikilinks point to vault-root-relative paths, not paths relative to each exported file. Consolidated outputs in a subfolder and split mirrors may need their links adjusted.
-- Individual split files that cannot be read are skipped and included in the export result.
+- Individual split files that cannot be read are skipped and included in the export result. In `folder-grouped` split mode, `splitSubfolders`, `splitSubfolderDepth` (`'direct' | 'recursive' | 'all-two-levels' | 'all-recursive'`, with per-entry `/*` and `/**` overrides), and `splitSubfolderStyle` (`'flat-prefixed' | 'flat-leaf' | 'flat-underscored' | 'nested'`, defaulting to `'flat-prefixed'`) let subfolders emit one `.txt` file per subfolder, backed by one-click presets (`SPLIT_PRESETS`) and a live preview in settings.
 - The sidebar remembers selected export targets by default, but context commands remain in-memory-only. It summarizes selected targets in an `aria-live` status region and updates controls in place so keyboard focus is preserved. Clearing recent export history never deletes output files; history reveal targets the first written file.
 - The sidebar settings button and the `open-settings` command use `openSettingsTab()` in `src/obsidian/appSetting.ts`. It must keep working without `app.setting.tabs` carrying our tab id and while `app.setting.open()` is asynchronous (retry, never throw). The plugin sets its own settings tab's `id` via `withSettingsTabId()`.
 - Export feedback preferences control completed-panel auto-close (`0` means keep open) and optional automatic reveal of the first output. Keep the duration choices synchronized between `PROGRESS_PANEL_AUTO_CLOSE_OPTIONS`, settings UI, and tests. The progress panel and history expose elapsed time; success feedback includes written-file count, bytes, and skipped files.
