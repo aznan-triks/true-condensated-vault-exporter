@@ -5,8 +5,15 @@
 
 import { App, Notice, PluginSettingTab, Setting } from 'obsidian';
 import type VaultExporterPlugin from '../main';
-import { PROGRESS_PANEL_AUTO_CLOSE_OPTIONS } from '../core/types';
+import { PROGRESS_PANEL_AUTO_CLOSE_OPTIONS, SplitPresetId } from '../core/types';
 import { isAbsoluteOutputPath } from '../core/outputTarget';
+import {
+	SPLIT_PRESETS,
+	applySplitPreset,
+	detectSplitPreset,
+	isCandidateSplitFolder,
+	previewSplitFiles,
+} from '../features/exportSplit';
 import { VaultPathSuggest } from '../ui/VaultPathSuggest';
 
 interface SettingsSectionDefinition {
@@ -286,15 +293,18 @@ export class VaultExporterSettingsTab extends PluginSettingTab {
 				new VaultPathSuggest(this.app, text.inputEl, () => this.plugin.gateway.getAllFiles());
 			});
 
-		this.createSetting(outputSection, 'Split Export Mode', 'Choose one text file per top-level folder, or one cleaned Markdown file for each note.')
+		this.renderSplitPresetsSetting(outputSection);
+
+		this.createSetting(outputSection, 'Split Export Mode', 'Choose one text file per folder group, or one cleaned Markdown file for each note.')
 			.addDropdown((drop) => {
-				drop.addOption('folder-grouped', 'Folder-grouped (1 .txt per category folder)');
+				drop.addOption('folder-grouped', 'Folder-grouped (1 .txt per folder group)');
 				drop.addOption('individual-files', 'Individual notes (1-to-1 markdown files)');
 				drop.setValue(this.plugin.settings.splitMode);
 				drop.onChange(async (val) => {
 					if (val === 'folder-grouped' || val === 'individual-files') {
 						this.plugin.settings.splitMode = val;
 						await this.plugin.saveSettings();
+						this.display();
 					}
 				});
 			});
@@ -305,9 +315,52 @@ export class VaultExporterSettingsTab extends PluginSettingTab {
 				text.onChange(async (val) => {
 					this.plugin.settings.splitGroupFolder = val.trim();
 					await this.plugin.saveSettings();
+					this.updateSplitPreview();
 				});
 				new VaultPathSuggest(this.app, text.inputEl, () => this.plugin.gateway.getAllFolders());
 			});
+
+		this.createSetting(
+			outputSection,
+			'Split Subfolder Naming',
+			'Folder-grouped mode: choose how subfolder split files are named and organized inside the split destination folder.'
+		)
+			.addDropdown((drop) => {
+				drop.addOption('flat-prefixed', 'Flat with parent prefix — Parent - Subfolder.txt (recommended for NotebookLM)');
+				drop.addOption('flat-leaf', 'Flat with subfolder name only — Subfolder.txt (auto-disambiguates on collision)');
+				drop.addOption('flat-underscored', 'Flat with underscore path — Parent_Subfolder.txt');
+				drop.addOption('nested', 'Mirrored subfolder tree — Parent/Subfolder.txt');
+				drop.setValue(this.plugin.settings.splitSubfolderStyle);
+				drop.onChange(async (val) => {
+					if (val === 'flat-prefixed' || val === 'flat-leaf' || val === 'flat-underscored' || val === 'nested') {
+						this.plugin.settings.splitSubfolderStyle = val;
+						await this.plugin.saveSettings();
+						this.display();
+					}
+				});
+			});
+
+		this.createSetting(
+			outputSection,
+			'Split Subfolder Depth',
+			'Folder-grouped mode: choose whether subfolder splitting applies to selected folders (1 level or recursive) or automatically across the entire scope.'
+		)
+			.addDropdown((drop) => {
+				drop.addOption('direct', 'Selected folders — direct subfolders (1 level per selected folder)');
+				drop.addOption('recursive', 'Selected folders — all nested subfolders (recursive)');
+				drop.addOption('all-two-levels', 'Entire scope — main folders & direct subfolders (2 levels everywhere)');
+				drop.addOption('all-recursive', 'Entire scope — every folder & nested subfolder recursively');
+				drop.setValue(this.plugin.settings.splitSubfolderDepth);
+				drop.onChange(async (val) => {
+					if (val === 'direct' || val === 'recursive' || val === 'all-two-levels' || val === 'all-recursive') {
+						this.plugin.settings.splitSubfolderDepth = val;
+						await this.plugin.saveSettings();
+						this.display();
+					}
+				});
+			});
+
+		this.renderSplitSubfoldersSetting(outputSection);
 
 		this.createSetting(outputSection, 'Split Files Destination Folder', 'Vault-relative folder or absolute disk path (desktop only) for split files.')
 			.addText((text) => {
@@ -316,9 +369,12 @@ export class VaultExporterSettingsTab extends PluginSettingTab {
 				text.onChange(async (val) => {
 					this.plugin.settings.splitOutputFolder = val.trim();
 					await this.plugin.saveSettings();
+					this.updateSplitPreview();
 				});
 				new VaultPathSuggest(this.app, text.inputEl, () => this.plugin.gateway.getAllFolders());
 			});
+
+		this.renderSplitPreview(outputSection);
 
 		// SECTION: MARKDOWN PROCESSING
 		const processingSection = getSection('processing');
@@ -715,6 +771,246 @@ export class VaultExporterSettingsTab extends PluginSettingTab {
 		row.addClass('ve-settings-row--targeted');
 		window.setTimeout(() => row.removeClass('ve-settings-row--targeted'), 1400);
 		row.querySelector<HTMLElement>('input, select, textarea, button')?.focus({ preventScroll: true });
+	}
+
+	private renderSplitPresetsSetting(containerEl: HTMLElement): void {
+		const title = 'Split Preset';
+		const activePreset = detectSplitPreset(this.plugin.settings);
+		const activeDef = SPLIT_PRESETS.find((preset) => preset.id === activePreset);
+		const desc = activeDef
+			? activeDef.description
+			: 'Choose a ready-made split configuration for NotebookLM, subfolder trees, or individual Markdown files, or customize the options below.';
+		const row = containerEl.createDiv({ cls: 've-settings-row ve-settings-row--list' });
+		this.decorateSettingRow(row, title, desc);
+		const setting = new Setting(row).setName(title).setDesc(desc);
+
+		setting.addDropdown((drop) => {
+			for (const preset of SPLIT_PRESETS) {
+				drop.addOption(preset.id, preset.label);
+			}
+			drop.addOption('custom', 'Custom split configuration');
+			drop.setValue(activePreset);
+			drop.onChange(async (val) => {
+				if (SPLIT_PRESETS.some((preset) => preset.id === val)) {
+					applySplitPreset(this.plugin.settings, val as SplitPresetId);
+					await this.plugin.saveSettings();
+					this.display();
+				}
+			});
+		});
+
+		const pillsContainer = row.createDiv({ cls: 've-preset-pills' });
+		pillsContainer.createSpan({ text: 'Quick presets:', cls: 've-quick-tags__label' });
+		for (const preset of SPLIT_PRESETS) {
+			const isActive = activePreset === preset.id;
+			const btn = pillsContainer.createEl('button', {
+				text: preset.shortLabel,
+				cls: 've-preset-pill' + (isActive ? ' is-active' : ''),
+				attr: {
+					type: 'button',
+					'aria-pressed': String(isActive),
+					'data-preset-id': preset.id,
+				},
+			});
+			btn.title = preset.description;
+			btn.addEventListener('click', async () => {
+				applySplitPreset(this.plugin.settings, preset.id);
+				await this.plugin.saveSettings();
+				this.display();
+			});
+		}
+	}
+
+	private renderSplitPreview(containerEl: HTMLElement): void {
+		const row = containerEl.createDiv({ cls: 've-settings-row ve-settings-row--preview' });
+		this.decorateSettingRow(row, 'Split Output Preview', 'Live preview of the file paths produced by your current split settings.');
+		row.createDiv({ cls: 've-html-preview__label', text: 'Live preview · split output file paths' });
+		const preview = row.createDiv({
+			cls: 've-split-preview',
+			attr: { 'aria-label': 'Preview of split output file paths' },
+		});
+		this.populateSplitPreview(preview);
+	}
+
+	private updateSplitPreview(): void {
+		const preview = this.containerEl.querySelector<HTMLElement>('.ve-split-preview');
+		if (!preview) return;
+		this.populateSplitPreview(preview);
+	}
+
+	private populateSplitPreview(preview: HTMLElement): void {
+		preview.empty();
+		const activePreset = detectSplitPreset(this.plugin.settings);
+		const presetDef = SPLIT_PRESETS.find((preset) => preset.id === activePreset);
+		const header = preview.createDiv({ cls: 've-split-preview__header' });
+		header.createSpan({
+			cls: 've-split-preview__badge',
+			text: presetDef ? 'Preset: ' + presetDef.shortLabel : 'Custom configuration',
+		});
+		const samplePaths = previewSplitFiles(this.plugin.settings, this.plugin.gateway.getAllFolders());
+		const list = preview.createDiv({ cls: 've-split-preview__list' });
+		for (const samplePath of samplePaths) {
+			list.createEl('code', { cls: 've-split-preview__item', text: samplePath });
+		}
+	}
+
+	private renderSplitSubfoldersSetting(containerEl: HTMLElement): void {
+		const title = 'Split Subfolders';
+		const desc = 'Folder-grouped mode: subfolders that also create one .txt file per subfolder. Click an item’s depth button to override 1-level (/*) vs recursive (/**) for that folder.';
+		const items = this.plugin.settings.splitSubfolders;
+		const row = containerEl.createDiv({ cls: 've-settings-row ve-settings-row--list' });
+		this.decorateSettingRow(row, title, desc);
+		const setting = new Setting(row).setName(title).setDesc(desc);
+		const listDiv = row.createDiv({ cls: 've-list-setting' });
+
+		items.forEach((item, index) => {
+			const itemRow = listDiv.createDiv({ cls: 've-list-item' });
+			itemRow.createSpan({ text: item, cls: 've-list-item__text' });
+
+			const actions = itemRow.createDiv({ cls: 've-list-item__actions' });
+			const isExplicitRecursive = item.endsWith('/**') || item === '**';
+			const isExplicitDirect = !isExplicitRecursive && (item.endsWith('/*') || item === '*');
+			const defaultIsRecursive =
+				this.plugin.settings.splitSubfolderDepth === 'recursive' ||
+				this.plugin.settings.splitSubfolderDepth === 'all-recursive';
+			const modeLabel = isExplicitRecursive
+				? 'Recursive (/**)'
+				: isExplicitDirect
+					? '1 level (/*)'
+					: defaultIsRecursive
+						? 'Default (recursive)'
+						: 'Default (1 level)';
+
+			const modeBtn = actions.createEl('button', {
+				text: modeLabel,
+				cls: 've-list-item__mode',
+				attr: { type: 'button' },
+			});
+			modeBtn.title = 'Cycle subfolder split depth (Default → 1 level → Recursive)';
+			modeBtn.setAttribute('aria-label', 'Cycle depth mode for ' + item);
+			modeBtn.addEventListener('click', async () => {
+				const base = item.replace(/\/\*\*$/, '').replace(/\/\*$/, '');
+				const nextItem = isExplicitRecursive
+					? base
+					: isExplicitDirect
+						? (base ? base + '/**' : '/**')
+						: (base ? base + '/*' : '/*');
+				const updated = items.map((existing, i) => (i === index ? nextItem : existing));
+				this.plugin.settings.splitSubfolders = [...new Set(updated.filter(Boolean))];
+				await this.plugin.saveSettings();
+				this.display();
+			});
+
+			const delBtn = actions.createEl('button', {
+				text: '✕',
+				cls: 've-list-item__del',
+				attr: { type: 'button' },
+			});
+			delBtn.title = 'Remove';
+			delBtn.setAttribute('aria-label', 'Remove ' + item);
+			delBtn.addEventListener('click', async () => {
+				this.plugin.settings.splitSubfolders = items.filter((_, i) => i !== index);
+				await this.plugin.saveSettings();
+				this.display();
+			});
+		});
+
+		// Quick-add folder suggestions (prioritizing folders that contain subfolders)
+		const allFolders = this.plugin.gateway
+			.getAllFolders()
+			.filter((folder) => isCandidateSplitFolder(folder, this.plugin.settings));
+		const normalizedItems = new Set(
+			items.map((item) => item.replace(/\/\*\*$/, '').replace(/\/\*$/, '').toLowerCase())
+		);
+		const foldersWithChildren = allFolders.filter((folder) =>
+			allFolders.some((other) => other.toLowerCase().startsWith(folder.toLowerCase() + '/'))
+		);
+		const suggestedFolders = [
+			...foldersWithChildren,
+			...allFolders.filter((folder) => !foldersWithChildren.includes(folder)),
+		].filter((folder) => !normalizedItems.has(folder.toLowerCase()));
+
+		if (suggestedFolders.length > 0 || items.length > 0) {
+			const quickRow = row.createDiv({ cls: 've-quick-tags' });
+			if (suggestedFolders.length > 0) {
+				quickRow.createSpan({ text: 'Quick add folder:', cls: 've-quick-tags__label' });
+				const unaddedParentFolders = foldersWithChildren.filter(
+					(folder) => !normalizedItems.has(folder.toLowerCase())
+				);
+				if (unaddedParentFolders.length > 1) {
+					const addAllParentsBtn = quickRow.createEl('button', {
+						text: '+ All parent folders (' + unaddedParentFolders.length + ')',
+						cls: 've-subfolder-pill ve-subfolder-pill--all',
+						attr: { type: 'button' },
+					});
+					addAllParentsBtn.title = 'Add every folder that contains subfolders';
+					addAllParentsBtn.addEventListener('click', async () => {
+						this.plugin.settings.splitSubfolders = [...new Set([...items, ...unaddedParentFolders])];
+						await this.plugin.saveSettings();
+						this.display();
+					});
+				}
+				suggestedFolders.slice(0, 10).forEach((folder) => {
+					const pill = quickRow.createEl('button', {
+						text: '+ ' + folder,
+						cls: 've-subfolder-pill',
+						attr: { type: 'button' },
+					});
+					pill.title = 'Split subfolders inside ' + folder;
+					pill.addEventListener('click', async () => {
+						this.plugin.settings.splitSubfolders = [...items, folder];
+						await this.plugin.saveSettings();
+						this.display();
+					});
+				});
+			}
+			if (items.length > 0) {
+				const clearBtn = quickRow.createEl('button', {
+					text: 'Clear list',
+					cls: 've-subfolder-clear',
+					attr: { type: 'button' },
+				});
+				clearBtn.title = 'Remove all selected subfolders from the list';
+				clearBtn.addEventListener('click', async () => {
+					this.plugin.settings.splitSubfolders = [];
+					await this.plugin.saveSettings();
+					this.display();
+				});
+			}
+		}
+
+		let newText = '';
+		const addFolder = async (): Promise<void> => {
+			const cleaned = newText.trim().replace(/\\/g, '/').replace(/\/+(?!\*)/g, '/').replace(/\/+$/, '');
+			if (cleaned && !items.includes(cleaned)) {
+				this.plugin.settings.splitSubfolders = [...items, cleaned];
+				await this.plugin.saveSettings();
+				this.display();
+			}
+		};
+
+		setting.addText((text) => {
+			text.setPlaceholder('Add or search subfolder...');
+			text.inputEl.setAttribute('aria-label', 'Add to ' + title);
+			text.onChange((value) => {
+				newText = value.trim();
+			});
+			text.inputEl.addEventListener('keydown', async (event) => {
+				if (event.key === 'Enter') {
+					event.preventDefault();
+					await addFolder();
+				}
+			});
+			new VaultPathSuggest(this.app, text.inputEl, () => this.plugin.gateway.getAllFolders());
+		});
+
+		setting.addButton((button) => {
+			button.setButtonText('Add');
+			button.setCta();
+			button.onClick(async () => {
+				await addFolder();
+			});
+		});
 	}
 
 	private renderStringListSetting(
