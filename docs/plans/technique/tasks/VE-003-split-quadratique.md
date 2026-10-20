@@ -93,7 +93,7 @@ Référence : cible `markdown` seule sur le même corpus = **37 / 40 / 116 ms** 
 
 ## Journal d'exécution
 
-### 2026-10-21 — implementation validated, numerical gate blocked (hash follows)
+### 2026-10-21 — `7bf8a83`, implementation validated, numerical gate blocked; documentation follow-up
 
 - Baseline: `git pull --rebase` up to date, `npm run check` **PASS** (133 tests / 100 smoke). Read the full plan and affected source/test sites.
 - Tests first in `tests/features.test.ts`, suite `linear split validation (VE-003)`: **7 passed / 1 failed** before the fix. `canonicalizes a linear number of paths instead of every pair` observed **10,300** canonicalizations for only 100 outputs (required <1,000); it now passes. The other tests lock exact overlap messages in both insertion directions, four non-overlapping pairs (including case-sensitive outputs), and the complete ordered 50-path/content list across five folders. Existing conflicts, ZIP overlap, unsafe-path and cancellation tests are unchanged.
@@ -117,4 +117,4 @@ Référence : cible `markdown` seule sur le même corpus = **37 / 40 / 116 ms** 
 - **Numerical gate NOT met:** final real-timer total **2,036.18 ms**, exceeding the strict 2,000 ms bound by **36.18 ms (1.81%)**. No rerun selected for a better number, no setting/default changed to game the target, no completion claim. The dated audit's 153.12 s baseline is left unchanged.
 - **Out-of-scope observation (not fixed):** every `checkCancelled(signal, snapshot())` eagerly copies `written`/`skippedFiles` and reduces all written bytes even when the signal is not aborted. In the write loop this performs growing work on each file; it is separate from the two planned root causes. Keep all partial-result/cancellation safeguards intact.
 - **Proposal, awaiting user approval:** extend VE-003 narrowly to construct the existing cancellation snapshot only when cancellation is actually observed, without changing its contents or any error handling; test identical partial results and remeasure with the same harness. Alternatively the user may explicitly accept the measured 2.036 s bound. No further implementation or subsequent plan is started pending that decision.
-- Status: **bloqué**, not `fait`. Remaining: decision on this small scope extension / numerical criterion, final measurement and validation if approved, then VE-005.
+- Implementation `7bf8a83` pushed to the session branch; this documentation follow-up records its hash. Status: **bloqué**, not `fait`. Remaining: decision on this small scope extension / numerical criterion, final measurement and validation if approved, then VE-005.
