@@ -102,6 +102,36 @@ describe('filter', () => {
 		expect(isFileIncluded('Knowledge Base/01_World/Timeline.md', opts2)).toBe(true);
 	});
 
+	describe('Unicode path comparisons (VE-006)', () => {
+		const nfd = 'Notes/Cafe\u0301.md';
+		it('resolves NFC text to the original NFD disk path', () => {
+			const resolver = buildLinkResolver([{ path: nfd, name: 'Cafe\u0301.md' }]);
+			expect(resolver('Café')).toBe(nfd);
+			expect(resolver('Notes/Café.md')).toBe(nfd);
+		});
+		it('excludes NFD folders using NFC settings', () => {
+			expect(isFileIncluded('Notes/Cafe\u0301/inside.md', { ...options, excludedFolders: ['Notes/Café'] })).toBe(false);
+		});
+		it('reserves NFD paths using NFC destinations', () => {
+			expect(isFileIncluded(nfd, { ...options, reservedPaths: ['Notes/Café.md'] })).toBe(false);
+		});
+		it('includes NFD paths under an NFC scope', () => {
+			expect(isFileIncluded('Notes/Cafe\u0301/inside.md', { ...options, scopeRoot: 'Notes/Café' })).toBe(true);
+		});
+		it('normalizes onlyPath, excludedFiles and excludedPrefixes comparisons too', () => {
+			expect(isFileIncluded(nfd, { ...options, onlyPath: 'Notes/Café.md' })).toBe(true);
+			expect(isFileIncluded(nfd, { ...options, excludedFiles: ['Café.md'] })).toBe(false);
+			expect(isFileIncluded('Cafe\u0301-private/inside.md', { ...options, excludedPrefixes: ['Café-'] })).toBe(false);
+		});
+		it('keeps distinct names distinct and preserves NFD output names', () => {
+			expect(isFileIncluded('Notes/Cafe.md', { ...options, excludedFiles: ['Notes/Café.md'] })).toBe(true);
+			const files = [{ path: nfd, name: 'Cafe\u0301.md', content: 'body' }];
+			const settings = { ...DEFAULT_SETTINGS, splitMode: 'individual-files' as const, splitOutputFolder: 'out' };
+			const ctx = createExportContext(files, settings);
+			expect(buildSplitFiles(files.map((f) => cleanNote(f, ctx)), settings)[0]?.path).toBe('out/' + nfd);
+		});
+	});
+
 	it('matches normalized tags and their nested subtags without prefix collisions', () => {
 		expect(matchesTag(['#Research', 'projects/notes'], '#research')).toBe(true);
 		expect(matchesTag(['projects/notes'], 'projects')).toBe(true);

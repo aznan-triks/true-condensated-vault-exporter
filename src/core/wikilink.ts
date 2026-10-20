@@ -50,7 +50,7 @@ export function buildLinkResolver(files: { path: string; name: string }[]): (tar
 	const byPath = new Map<string, string>();
 	const byBasename = new Map<string, string>();
 	const normalizeTarget = (value: string): string =>
-		value.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '').replace(/\.(md|canvas)$/i, '').toLowerCase();
+		value.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '').replace(/\.(md|canvas)$/i, '').toLowerCase().normalize('NFC');
 
 	for (const file of files) {
 		const noExt = normalizeTarget(file.path);

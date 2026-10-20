@@ -40,6 +40,14 @@ export function normalizePath(p: string): string {
 	return parts.join('/');
 }
 
+/**
+ * Comparison-only key: NFC text matches NFD disk names without renaming either.
+ * Canonically equivalent Linux names intentionally share a key for portable exports.
+ */
+export function pathKey(value: string): string {
+	return normalizePath(value).normalize('NFC');
+}
+
 /** Matches a selected tag against Obsidian tags, including nested tags. */
 export function matchesTag(tags: readonly string[], selectedTag: string): boolean {
 	const normalizeTag = (tag: string): string =>
@@ -73,7 +81,7 @@ export function isCleanExportArtifact(fileName: string): boolean {
  * @param options Filter options
  */
 export function isFileIncluded(relativePath: string, options: FilterOptions): boolean {
-	const normPath = normalizePath(relativePath);
+	const normPath = pathKey(relativePath);
 	if (!normPath) {
 		return false;
 	}
@@ -97,13 +105,13 @@ export function isFileIncluded(relativePath: string, options: FilterOptions): bo
 	const parentFolder = parts.length > 1 ? parts.slice(0, -1).join('/') : '';
 
 	// 0. Only-path override (context commands) wins over everything else
-	const normOnly = options.onlyPath ? normalizePath(options.onlyPath) : '';
+	const normOnly = options.onlyPath ? pathKey(options.onlyPath) : '';
 	if (normOnly && normPath !== normOnly) {
 		return false;
 	}
 
 	// 1. Check scope root if specified
-	const normScope = normalizePath(options.scopeRoot);
+	const normScope = pathKey(options.scopeRoot);
 	if (normScope && normScope.length > 0) {
 		if (!normPath.startsWith(normScope + '/') && normPath !== normScope) {
 			return false;
@@ -112,7 +120,7 @@ export function isFileIncluded(relativePath: string, options: FilterOptions): bo
 
 	// 2. Reserved output paths (previous export results) are never exported again
 	for (const reserved of options.reservedPaths ?? []) {
-		const normReserved = normalizePath(reserved);
+		const normReserved = pathKey(reserved);
 		if (!normReserved) continue;
 		if (normPath === normReserved || normPath.startsWith(normReserved + '/')) {
 			return false;
@@ -121,7 +129,7 @@ export function isFileIncluded(relativePath: string, options: FilterOptions): bo
 
 	// 3. Check excluded files (match against full path or just filename)
 	for (const excludedFile of options.excludedFiles) {
-		const normExcluded = normalizePath(excludedFile);
+		const normExcluded = pathKey(excludedFile);
 		if (!normExcluded) continue;
 		if (fileName.toLowerCase() === normExcluded.toLowerCase() ||
 			normPath.toLowerCase() === normExcluded.toLowerCase() ||
@@ -139,7 +147,7 @@ export function isFileIncluded(relativePath: string, options: FilterOptions): bo
 
 	// 5. Check excluded folders (exact match or path contains folder)
 	for (const excludedFolder of options.excludedFolders) {
-		const normExcluded = normalizePath(excludedFolder);
+		const normExcluded = pathKey(excludedFolder);
 		if (!normExcluded) continue;
 
 		// Full parent folder match
@@ -161,7 +169,8 @@ export function isFileIncluded(relativePath: string, options: FilterOptions): bo
 	// 6. Check excluded prefixes on any folder part
 	for (const prefix of options.excludedPrefixes) {
 		if (!prefix) continue;
-		const lowPrefix = prefix.toLowerCase();
+		const lowPrefix = pathKey(prefix).toLowerCase();
+		if (!lowPrefix) continue;
 		for (const part of parts.slice(0, -1)) {
 			if (part.toLowerCase().startsWith(lowPrefix)) {
 				return false;

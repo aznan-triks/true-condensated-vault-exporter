@@ -260,6 +260,16 @@ describe('ObsidianVaultGateway', () => {
 		expect(fs.readFileSync(path.join(vaultDir, 'Notes/A.md'), 'utf8')).toContain('%%secret%%');
 	});
 
+	it('compares NFC settings with real NFD files without renaming them (VE-006)', async () => {
+		const nfd = 'Notes/Cafe\u0301/Keep.md';
+		write(nfd, 'body');
+		const gateway = gatewayWith(makeApp());
+		const files = await gateway.loadVaultFiles({ ...DEFAULT_SETTINGS, scopeRoot: 'Notes/Café' });
+		expect(files.map((f) => f.path)).toEqual([nfd]);
+		expect(await gateway.loadVaultFiles({ ...DEFAULT_SETTINGS, excludedFolders: ['Notes/Café'] })).toEqual([]);
+		expect(has(nfd)).toBe(true);
+	});
+
 	it('writes absolute external outputs outside the vault', async () => {
 		const gateway = gatewayWith(makeApp());
 		const external = fs.mkdtempSync(path.join(os.tmpdir(), 've-external-'));
