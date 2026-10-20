@@ -3,6 +3,7 @@
 ## Unreleased
 
 ### Fixed
+- HTML exports recognize tilde and long fences, require matching fence markers/lengths, and render four-space/tab-indented code without turning it into headings. Code headings are also excluded from note navigation. Language-less blocks no longer emit an empty language class; existing list/table/quote rendering is retained.
 - Split filenames now sanitize Windows-forbidden/control characters and trailing dots/spaces in generated segments, and prefix reserved device names such as CON. Ambiguous split destinations fail before any output is written, naming both source notes/folders and the target—including case-only or equal-content collisions. Rename a source or choose another split mode; no automatic numbered renaming is performed.
 - Consolidated Markdown escapes brackets and backslashes in table-of-contents labels and source hints, so special-character titles keep valid links. Section titles and existing anchor generation remain unchanged.
 - Ignored Frontmatter Properties now hides Category, Order, Status and Tags as well as custom metadata in consolidated exports, including case-insensitive/common legacy aliases. With no matching ignored property the metadata is unchanged. The setting now explicitly explains that individual split files preserve raw frontmatter unless Strip Frontmatter is enabled.

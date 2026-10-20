@@ -797,6 +797,53 @@ describe('formatters and split export', () => {
 		expect(noFooter).not.toContain('<footer class="ve-footer">');
 	});
 
+	describe('HTML code blocks (VE-011)', () => {
+		it('renders tilde fences with a language class', () => {
+			expect(simpleMarkdownToHtml('~~~js\nconst x = 1;\n~~~')).toContain('<pre><code class="language-js">');
+		});
+		it('does not emit an empty language class', () => {
+			const html = simpleMarkdownToHtml('```\nx\n```');
+			expect(html).toContain('<pre><code>');
+			expect(html).not.toContain('language-');
+		});
+		it('groups and escapes indented code without generating headings', () => {
+			const html = simpleMarkdownToHtml('    # not a heading\n    <code>\n\n    still code');
+			expect(html).toContain('<pre><code>');
+			expect(html).not.toContain('<h1');
+			expect(html).toContain('    # not a heading\n    &lt;code&gt;');
+			expect(html.match(/<pre>/g)).toHaveLength(1);
+		});
+		it('does not close four backticks with three or with another marker', () => {
+			const html = simpleMarkdownToHtml('````md\n```js\nx\n```\n~~~\n# literal\n````\n# Visible');
+			expect(html).toContain('```js');
+			expect(html).toContain('# literal');
+			expect(html).not.toContain('<h1 id="literal"');
+			expect(html).toContain('<h1 id="visible"');
+		});
+		it('treats four-space fences and tab-indented lines as literal indented code', () => {
+			const html = simpleMarkdownToHtml('    ```js\n    x\n    ```\n\n\t# literal');
+			expect(html).not.toContain('language-js');
+			expect(html).not.toContain('<h1');
+			expect(html).toContain('    ```js');
+		});
+		it('keeps quotes, tables and indented list markers rendering as before', () => {
+			const html = simpleMarkdownToHtml('> quote\n\n| a | b |\n| - | - |\n| 1 | 2 |\n\nparagraph\n\n    - item');
+			expect(html).toContain('<blockquote');
+			expect(html).toContain('<table>');
+			expect(html).toContain('<li>item</li>');
+			expect(html).not.toContain('<pre>');
+		});
+		it('uses the same fence and indentation exclusions in the note TOC', () => {
+			const body = '~~~md\n# hidden tilde\n~~~\n\n    # hidden indent\n\n# Yes\n````md\n```\n# hidden short fence\n```\n````\n## Yes 2';
+			expect(noteHeadings(body)).toEqual(['Yes', 'Yes 2']);
+			const file = { path: 'A.md', name: 'A.md', content: body };
+			const note = cleanNote(file, createExportContext([file], DEFAULT_SETTINGS));
+			const html = formatForHtml([note], DEFAULT_SETTINGS, 'now');
+			expect(html).not.toMatch(/<a[^>]*>hidden/);
+			expect(html).not.toMatch(/<h[12][^>]*>hidden/);
+		});
+	});
+
 	it('noteHeadings ignores code fences', () => {
 		expect(noteHeadings('# A\n```\n# not a heading\n```\n## B')).toEqual(['A', 'B']);
 	});
