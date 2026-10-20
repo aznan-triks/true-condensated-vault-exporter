@@ -100,3 +100,20 @@ Sur un corpus de 40 Mo (cas courant), le gain attendu est de ~500 Mo de RSS — 
 
 - Re-rendre les formats pour le ZIP peut produire un contenu différent si un formateur dépend d'un état (aucun ne le fait ; `exportedAt` est passé explicitement). Un test d'égalité le verrouille.
 - L'ordre d'écriture change : un échec du ZIP après les fichiers laisse des fichiers sans archive — c'est déjà le cas dans l'autre sens aujourd'hui, et VE-009 rend l'état explicite.
+
+## Journal d'exécution
+
+### 2026-10-21 — blocked before implementation; user decision required
+
+- Baseline: `git pull --rebase` up to date; `npm run check` **PASS (210 tests, 107 smoke)** after VE-011 (`b71ba3e`, completion `7b00f85`). Read the full plan, orchestrator retention/validation/write paths, complete ZIP writer, gateway binary path, command error handling and affected tests. No VE-013 source or existing test has been changed.
+- **Legitimate existing-test conflict:** action step 1 deliberately changes the write order, but two VE-009 regressions explicitly lock the opposite order in `tests/features.test.ts`:
+  - `reports an empty partial result when the ZIP write fails` (line 514), with `['zip', 'all']`, requires **zero** text writes and an empty partial result. Files-first necessarily leaves successful text files before that failure.
+  - `retains a successful ZIP in the partial result when a later plain write fails` (line 526), with `['zip', 'markdown']`, requires the ZIP and its exact bytes in partialResult. With ZIP-last and the first plain write failing, no ZIP exists.
+  - Focused existing VE-009 run: **3/3 PASS**. These are not flaky tests to loosen: their scenarios must be explicitly migrated while preserving exact path/byte/cause accounting. Written approval is required before changing them under the standing test-conflict rule.
+- **Related error-contract gap in the proposed order:** VE-009 intentionally leaves ZIP construction errors unwrapped because construction currently precedes every write. VE-013 moves construction after the plain writes. Simply moving the blocks would leave those already-written files absent from the UI/history when a generator, ZIP-name check or compressor throws; `registry.ts` only recovers a partial result from `ExportFailedError`.
+- Concrete current-code proof with a fake gateway: NotebookLM path `/a/shared/export.txt`, Markdown path `/b/shared/export.txt`, `['all', 'zip']` gives bare `Error: ZIP entry name conflict: shared/export.txt.` and **zero writes**. Distinct disk paths pass inter-format checks but collapse to the same ZIP entry. After a simple files-first move that same deferred check would run after successful files. Proof bundled with the existing esbuild dependency under `/tmp`; both disposable files removed. No actual disk output/user data was touched.
+- **Proposed narrow adjustment, awaiting approval:**
+  1. Keep VE-013's files-first/ZIP-last order; migrate those two tests to (a) ZIP-only failure with no completed output and (b) failed ZIP after successful plain files with exact retained paths/UTF-8 bytes; also test first-plain failure before any ZIP write. Do not weaken the non-rollback/partial-result guarantees or cancellation smoke.
+  2. Extend typed partial-failure handling to ZIP construction **only when prior files have been written**; preserve the bare pre-write error behavior otherwise. Preflight predictable ZIP path/name conflicts before any write where possible. Add tests-first coverage for a deferred ZIP-construction failure retaining the completed outputs.
+  3. Then implement lazy entries, retention reduction and the binary-copy guard, run the unchanged memory/time/equality gates and full check. No dependencies, build configuration, release or data changes.
+- **Status: bloqué.** Remaining: written approval for this test/error-contract migration, then regressions before implementation and actual 20k × 8 KiB measurements. No memory/time improvement is claimed yet; the audit figures above remain historical. VE-014 through VE-017 have not been started, preserving the imposed order.
