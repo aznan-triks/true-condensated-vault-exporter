@@ -112,11 +112,11 @@ Avant correctif, les deux premiers cas A et les trois cas B échouent.
 
 ## Journal d'exécution
 
-### 2026-10-21 — implementation hash pending
+### 2026-10-21 — `9ac9bd9`; documentation follow-up
 
 - Baseline pull/check PASS (162 tests / 101 smoke); read the full plan, parser, clause/quote scanners, rendering fallback and pipeline call.
 - Tests first, `faithful queries (VE-007)`: **8 failed / 3 passed**. Failures reproduce rewritten double-/single-quoted and escaped-quote literals, modified source/column names, and all three unsupported FROM forms becoming empty results. Positive quoted-folder-with-comma/parentheses/AND/OR and tag sources already rendered correctly; FROM "" stayed visible.
 - Added local `stripWithoutIdOutsideStrings`, preserving quoted text/escapes while recognizing real directives. FROM validation masks quoted strings before rejecting link/function/union/comma syntax. The existing null/error fallback and valid empty-result output are unchanged; no per-block logging.
 - All **11 tests pass**, including showId distinction and two supported sources still rendering tables. Updated module documentation and changelog to state the supported subset and quote requirement for syntax-looking folder names. `npm run check` PASS: **173/173 tests, 101/101 smoke**, typecheck/build green. Fence handling is left for VE-016.
 
-- Remaining: record the green implementation hash and final tracker status.
+- Implementation `9ac9bd9` pushed; tracker marked `fait`. All acceptance criteria met; remaining: none.

@@ -9,7 +9,7 @@ Implementation of the dated [2026-10-20 audit](../../audits/bugs-et-performance.
 | [VE-003](tasks/VE-003-split-quadratique.md) | P1 | fait | `7bf8a83`, `f284dd7` | 9 new tests; check PASS (142 / 100); 16k: 1,727.26 ms, real timers | Strict <2s gate met; output order and cancellation preserved |
 | [VE-005](tasks/VE-005-wikilinks-incomplets.md) | P2 | fait | `47ef39b` | 13 new tests + 1 smoke; check PASS (155 / 101) | Shared parser; empty links and code protection preserved |
 | [VE-006](tasks/VE-006-normalisation-unicode.md) | P2 | fait | `9780ac8` | 7 new tests; check PASS (162 / 101) | All NFC/NFD cases pass; filenames remain unchanged |
-| [VE-007](tasks/VE-007-dataview-echec-silencieux.md) | P2 | en cours | Implementation hash pending | 11 new tests; check PASS (173 / 101) | Literals preserved; unsupported FROM blocks remain visible |
+| [VE-007](tasks/VE-007-dataview-echec-silencieux.md) | P2 | fait | `9ac9bd9` | 11 new tests; check PASS (173 / 101) | Literals and unsupported queries preserved; supported sources still render |
 | [VE-008](tasks/VE-008-snapshot-settings.md) | P2 | à faire | — | — | Per-run settings snapshot |
 | [VE-009](tasks/VE-009-echec-partiel.md) | P2 | à faire | — | — | Report partial failure and harden cancellation smoke |
 | [VE-010](tasks/VE-010-ignored-properties.md) | P2 | à faire | — | — | Filter built-in metadata fields |
