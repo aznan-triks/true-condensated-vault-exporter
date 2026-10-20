@@ -94,7 +94,7 @@ Avant correctif, les trois premières assertions échouent.
 
 ## Journal d'exécution
 
-### 2026-10-21 — implementation hash pending
+### 2026-10-21 — `67cea85`; documentation follow-up
 
 - Baseline pull/check PASS (187 tests / 107 smoke); read the full plan, Markdown formatter and existing wikilink label escaper.
 - All **5 new tests failed** first: closing/opening brackets, backslashes, an already-escaped bracket and the indexed/source-hint examples produced invalid/unescaped TOC labels.
@@ -102,4 +102,4 @@ Avant correctif, les trois premières assertions échouent.
 - All five now pass, including a link regex whose decoded label equals the original title, `[A\\]B](#ab-0)` and the other indexed examples, unchanged section headings and escaped path hints. Legacy `<small>`/emphasis formatting remains; `*`/`_` source-hint styling is deliberately not broadened in this task.
 - `npm run check` PASS: **192/192 tests, 107/107 smoke**, typecheck/build. Existing TOC/wikilink tests required no changes.
 
-- Remaining: record the green implementation hash and final tracker status.
+- Implementation `67cea85` pushed; tracker marked `fait`. All acceptance criteria met; remaining: none.
