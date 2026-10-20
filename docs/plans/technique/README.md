@@ -14,7 +14,7 @@ Implementation of the dated [2026-10-20 audit](../../audits/bugs-et-performance.
 | [VE-009](tasks/VE-009-echec-partiel.md) | P2 | fait | `60cfdca` | 3 new tests + 6 net smoke assertions; check PASS (180 / 107) | Partial paths/bytes exact; failure history and strict cancellation smoke pass |
 | [VE-010](tasks/VE-010-ignored-properties.md) | P2 | fait | `d34e657` | 7 new tests; check PASS (187 / 107) | All built-ins filtered; default output and raw split YAML retained |
 | [VE-012](tasks/VE-012-markdown-echappement.md) | P2 | fait | `67cea85` | 5 new tests; check PASS (192 / 107) | Valid special-character links; raw section titles and anchors retained |
-| [VE-004](tasks/VE-004-collisions-noms-sortie.md) | P3 | en cours | Implementation hash pending | 11 new tests; check PASS (203 / 107) | Portable generated names; both sources named before any write |
+| [VE-004](tasks/VE-004-collisions-noms-sortie.md) | P3 | fait | `82f8652` | 11 new tests; check PASS (203 / 107) | Safe corpus unchanged; strict named collision guard before text/ZIP writes |
 | [VE-011](tasks/VE-011-html-fences.md) | P3 | à faire | — | — | HTML code blocks and heading extraction |
 | [VE-013](tasks/VE-013-memoire-sorties.md) | P3 | à faire | — | — | Release output strings and binary copies |
 | [VE-014](tasks/VE-014-progress-panel-timer.md) | P3 | à faire | — | — | Progress panel lifecycle |
