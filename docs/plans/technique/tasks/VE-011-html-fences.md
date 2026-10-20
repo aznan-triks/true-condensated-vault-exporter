@@ -112,7 +112,7 @@ Les quatre premiers échouent avant correctif.
 
 ## Journal d'exécution
 
-### 2026-10-21 — implementation hash pending
+### 2026-10-21 — `b71ba3e`; documentation follow-up
 
 - Baseline pull/check PASS (203 tests / 107 smoke); read full plan and both HTML scans, heading-ID allocation and prose cleaner scanner.
 - Tests first: **6 failed / 1 passed**. Tilde fences, empty language classes, indented headings, short/mismatched closers, four-space openers and note-TOC filtering failed. Existing quote/table/list behavior was already correct.
@@ -120,4 +120,4 @@ Les quatre premiers échouent avant correctif.
 - Applied the same fence and indentation exclusions to `collectHeadings`, not only rendering; code no longer consumes heading IDs or appears in the note TOC. Anchor generation, heading/list/table/callout rendering itself and the prose cleaner are unchanged. Duplication with the cleaner is explicitly documented rather than a cross-parser rewrite.
 - All **7 tests pass**, covering all six required assertions plus literal nested/other-marker fences, tabs, safe escaping, list retention and consolidated TOC exclusions. `npm run check` PASS: **210/210 tests, 107/107 smoke**, typecheck/build. The intended TOC change is code exclusion only (despite the plan's generic "no TOC impact" note).
 
-- Remaining: record the green implementation hash and final tracker status.
+- Implementation `b71ba3e` pushed; tracker marked `fait`. All acceptance criteria met; remaining: none.
