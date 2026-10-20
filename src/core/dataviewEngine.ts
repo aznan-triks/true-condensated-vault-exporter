@@ -6,6 +6,10 @@
  * Queries may be written on a single line (`TABLE status FROM "Notes" WHERE
  * status = "active"`) or with one clause per line; both forms are equivalent.
  *
+ * Supported sources: FROM "folder", FROM #tag (also quoted tags), TABLE columns,
+ * WHERE, SORT and WITHOUT ID. Link/function/union sources and FROM "" remain visible.
+ * Unquoted source names containing syntax such as parentheses must be quoted.
+ *
  * Supported WHERE expression subset:
  *   - boolean combinators:  A and B, A or B, ( ... )   ('or' binds loosest)
  *   - equality:             field = value,  field != value
@@ -54,6 +58,31 @@ function stripEnclosingQuotes(str: string): string {
 	return trimmed;
 }
 
+/** Removes directives only outside quoted strings, preserving escaped quotes verbatim. */
+function stripWithoutIdOutsideStrings(text: string): { text: string; withoutId: boolean } {
+	let result = '';
+	let quote = '';
+	let withoutId = false;
+	for (let i = 0; i < text.length; i++) {
+		const char = text[i] ?? '';
+		if (quote) {
+			result += char;
+			if (char === '\\') result += text[++i] ?? '';
+			else if (char === quote) quote = '';
+			continue;
+		}
+		if (char === '"' || char === "'") quote = char;
+		const directive = !quote && (i === 0 || !/\w/.test(text[i - 1] ?? ''))
+			? /^WITHOUT\s+ID\b/i.exec(text.slice(i)) : null;
+		if (directive) {
+			result += ' ';
+			i += directive[0].length - 1;
+			withoutId = true;
+		} else result += char;
+	}
+	return { text: result, withoutId };
+}
+
 /**
  * Parses a Dataview block.
  *
@@ -71,8 +100,7 @@ export function parseDataviewQuery(rawBlock: string): ParsedDataviewQuery | null
 		.trim();
 	if (!text) return null;
 
-	const withoutId = /\bWITHOUT\s+ID\b/i.test(text);
-	const stripped = text.replace(/\bWITHOUT\s+ID\b/gi, ' ');
+	const { text: stripped, withoutId } = stripWithoutIdOutsideStrings(text);
 	const typeMatch = /^(TABLE|LIST)\b/i.exec(stripped);
 	if (!typeMatch) return null;
 
@@ -105,6 +133,9 @@ export function parseDataviewQuery(rawBlock: string): ParsedDataviewQuery | null
 			return null;
 		}
 		if (clause.keyword === 'from') {
+			// Ignore syntax-looking characters inside quoted folder/tag names.
+			const syntax = clause.body.replace(/"(?:\\[\s\S]|[^"\\])*"|'(?:\\[\s\S]|[^'\\])*'/g, ' ');
+			if (/\[\[|[(),]|\b(?:AND|OR)\b/i.test(syntax)) return null;
 			const fromVal = stripEnclosingQuotes(clause.body);
 			if (!fromVal) return null;
 			if (fromVal.startsWith('#')) {

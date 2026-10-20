@@ -3,6 +3,7 @@
 ## Unreleased
 
 ### Fixed
+- Dataview keeps `WITHOUT ID` inside quoted literals, folder names and column labels unchanged. Unsupported link/function/union sources now retain the original query block instead of showing a misleading empty result. Source names containing syntax such as parentheses must be quoted; `FROM ""` remains unsupported and visible.
 - Path filters and wikilink resolution now compare canonically equivalent NFC/NFD Unicode names, preventing missed accent-containing scopes, exclusions and reserved outputs. Original disk names and link destinations are preserved. Distinct Linux names that differ only in Unicode composition intentionally share the same comparison key.
 - Wikilinks now handle current-note anchors, empty heading/alias suffixes, and escaped table pipes consistently in extraction and export. Resized embeds display the attachment name rather than numeric dimensions; standard Markdown output intentionally omits those dimensions. Empty or malformed links are preserved.
 - Split exports now index output ancestors instead of comparing every pair of paths, and append grouped notes without copying each group on every note. Output order and overlap errors are preserved. Writing yields to the UI in batches using the existing yield setting, while cancellation is checked between every file. Cancellation snapshots are built only when needed, avoiding growing copies after every file; the measured 16,000-note split run now meets the <2s gate in the Node harness.

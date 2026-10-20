@@ -420,6 +420,40 @@ describe('dataviewEngine', () => {
 		expect(result).not.toContain('World');
 	});
 
+	describe('faithful queries (VE-007)', () => {
+		it.each(['"WITHOUT ID"', "'WITHOUT ID'", '"a \\"WITHOUT ID\\" value"'])('preserves literal %s and does not hide the ID column', (literal) => {
+			const query = parseDataviewQuery('TABLE title\nWHERE title = ' + literal);
+			expect(query?.whereClauses).toEqual(['title = ' + literal]);
+			expect(query?.showId).toBe(true);
+		});
+		it('preserves source names and column labels containing WITHOUT ID', () => {
+			const query = parseDataviewQuery('TABLE title AS "WITHOUT ID" FROM "WITHOUT ID folder"');
+			expect(query?.fromPath).toBe('WITHOUT ID folder');
+			expect(query?.columnLabels).toEqual(['WITHOUT ID']);
+			expect(query?.showId).toBe(true);
+		});
+		it('still recognizes the real WITHOUT ID directive outside quoted literals', () => {
+			const query = parseDataviewQuery('TABLE title FROM "F" WHERE title = "WITHOUT ID"\nWITHOUT ID');
+			expect(query?.showId).toBe(false);
+			expect(query?.whereClauses).toEqual(['title = "WITHOUT ID"']);
+		});
+		it.each(['[[Some Note]]', 'outgoing([[Some Note]])', '#tag AND "Folder"'])('preserves the entire unsupported FROM %s block', (source) => {
+			const block = '```dataview\nTABLE title FROM ' + source + '\n```';
+			expect(renderDataviewBlocks(block, parsed)).toBe(block);
+		});
+		it.each(['"Folder, Sub (AND OR)"', '#lore'])('still evaluates supported FROM %s', (source) => {
+			const files = parseVault([{ path: 'Folder, Sub (AND OR)/A.md', name: 'A.md', content: '---\ntitle: Result\ntags: [lore]\n---\nbody' }]);
+			const block = '```dataview\nTABLE title FROM ' + source + '\n```';
+			const rendered = renderDataviewBlocks(block, files);
+			expect(rendered).toContain('Result');
+			expect(rendered).not.toContain('```dataview');
+		});
+		it('continues to preserve an unsupported all-files FROM source', () => {
+			const block = '```dataview\nTABLE title FROM ""\n```';
+			expect(renderDataviewBlocks(block, parsed)).toBe(block);
+		});
+	});
+
 	it('supports WITHOUT ID and contains() in dataview queries', () => {
 		const queryText = 'TABLE WITHOUT ID title, ordre\nFROM "Knowledge Base/80_History"\nWHERE contains(title, "Event")\nSORT ordre DESC';
 		const parseResult = parseDataviewQuery(queryText);
