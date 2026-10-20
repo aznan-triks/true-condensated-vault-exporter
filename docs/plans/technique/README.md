@@ -5,7 +5,7 @@ Implementation of the dated [2026-10-20 audit](../../audits/bugs-et-performance.
 | Plan | Priorité | Statut | Commit(s) | Mesure/Tests | Notes |
 |------|----------|--------|-----------|--------------|-------|
 | [VE-001](tasks/VE-001-collision-sorties-sources.md) | P0 | fait | `10cccd7` | 6 new tests; check PASS (130 tests / 99 smoke) | Rejected before all writes; portable case-only guard |
-| [VE-002](tasks/VE-002-reservation-destinations.md) | P1 | à faire | — | — | Resolve and reserve the same destinations |
+| [VE-002](tasks/VE-002-reservation-destinations.md) | P1 | bloqué | — (no implementation) | Reproduced step 4 double-resolution and step 6 inequality; baseline check PASS | Await user approval of the minimal contract/test corrections in the task journal |
 | [VE-003](tasks/VE-003-split-quadratique.md) | P1 | à faire | — | — | Split output validation and grouping complexity |
 | [VE-005](tasks/VE-005-wikilinks-incomplets.md) | P2 | à faire | — | — | Shared wikilink parsing |
 | [VE-006](tasks/VE-006-normalisation-unicode.md) | P2 | à faire | — | — | NFC/NFD comparison keys |

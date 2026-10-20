@@ -107,3 +107,22 @@ Et dans `tests/features.test.ts` : un test avec un gateway réel (ou un double q
 
 - L'option `alreadyResolved` est un drapeau : mal utilisée, elle laisse passer une destination non résolue. Atténuation : un seul appelant, documenté, et un test d'idempotence.
 - Un utilisateur ayant déjà des dossiers `Exports/Exports` les verra rester (ils ne sont plus *créés*, mais pas nettoyés). À signaler dans le message de release ; ne jamais supprimer de fichiers automatiquement.
+
+## Journal d'exécution
+
+### 2026-10-20 — blocked before implementation; user decision required
+
+- Baseline: `git pull --rebase` up to date; `npm run check` **PASS**, 130 tests and 99 smoke assertions after VE-001 (`10cccd7`, documentation `51d1850`). Read the full plan and all listed affected sites.
+- **Contradiction in action step 4:** it asks the sidebar to resolve settings, then call `reservedOutputPaths` **without** `alreadyResolved`. That is the very double-resolution the gateway fix is intended to remove. Reproduction with the plan's `C:/Vault/Exports` fixture and blank split destination gives:
+  - first resolution: `splitOutputFolder = C:/Vault/Exports`;
+  - second resolution: `splitOutputFolder = C:/Vault/Exports/Exports`;
+  - reservation exactly as step 4 prescribes: `Exports/Vault export - NotebookLM.txt`, `Exports/Vault export.html`, `Exports/Vault export.md`, `Exports/Vault export.zip`, **`Exports/Exports`** (not `Exports`).
+- **Contradiction in action step 6:** literal `resolveOutputSettings(resolveOutputSettings(s)) === resolveOutputSettings(s)` cannot follow merely from preventing re-resolution in the reservation function. The resolver's required absolute-path rule deliberately keeps only the final segment. For example `resolveOutputPath(raw, 'C:/Vault/Exports/nested/report.md')` returns `C:/Vault/Exports/report.md`; making paths under the external root implicitly "already resolved" would change that rule, which this plan explicitly forbids.
+- **Existing test that would legitimately break:** `tests/gateway.test.ts`, `protects external outputs that are written back inside the vault`, passes raw external settings to `loadVaultFiles`. Step 3's unconditional `alreadyResolved: true` interprets its relative `Vault export.md` as a vault-root output instead of `Exports/Vault export.md`. Preserving that exact raw call conflicts with step 1's resolved-only gateway contract. Its assertions must be retained, but its input must be explicitly resolved (requires approval before modifying an existing test).
+- Evidence executed with the existing esbuild dependency and pure core functions from a disposable `/tmp/ve-002-proof.mjs`; script removed. No VE-002 production code, dependency, build setting, or existing test changed. No red commit pushed.
+- **Proposed minimal alternative, awaiting approval:**
+  1. Keep the optional `alreadyResolved` flag and the resolver's current absolute-path semantics as planned.
+  2. Gateway **and sidebar** reserve resolved settings using `alreadyResolved: true` (correct step 4's flag).
+  3. Test stable **reservation of resolved settings**, not literal repeated resolution: expect `Exports`, never `Exports/Exports`, with matching sidebar/gateway sets. Keep default raw-settings compatibility tests for `reservedOutputPaths`.
+  4. Migrate the existing raw gateway test's argument through `resolveOutputSettings`, preserving its name/coverage/assertions; add resolved blank-split and real two-run regression tests before the fix.
+- Status: **bloqué**. Remaining: obtain written user approval for these adjustments; then execute VE-002 tests first and continue the imposed order. VE-003 and later plans have not been started.
