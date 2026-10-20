@@ -3,6 +3,7 @@
 ## Unreleased
 
 ### Fixed
+- Failed writes now report the failing path and the exact files/bytes already written, including ZIP output. The progress panel, notification and history retain that partial result. Completed files are deliberately kept—there is no automatic deletion or rollback.
 - Each export now uses a deep settings snapshot, so editing settings or list properties during a run cannot mix rendering rules or redirect that run’s destinations. Saved/live settings remain editable and are not modified by the export.
 - Dataview keeps `WITHOUT ID` inside quoted literals, folder names and column labels unchanged. Unsupported link/function/union sources now retain the original query block instead of showing a misleading empty result. Source names containing syntax such as parentheses must be quoted; `FROM ""` remains unsupported and visible.
 - Path filters and wikilink resolution now compare canonically equivalent NFC/NFD Unicode names, preventing missed accent-containing scopes, exclusions and reserved outputs. Original disk names and link destinations are preserved. Distinct Linux names that differ only in Unicode composition intentionally share the same comparison key.

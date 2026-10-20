@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import * as outputTarget from '../src/core/outputTarget';
 import { inflateRawSync } from 'zlib';
 import { crc32, buildZip, zipEntryName } from '../src/core/zip';
-import { runExports, ExportCancelledError } from '../src/features/exportOrchestrator';
+import { runExports, ExportCancelledError, ExportFailedError } from '../src/features/exportOrchestrator';
 import {
 	ExportHistoryEntry,
 	sanitizeHistory,
@@ -488,6 +488,51 @@ describe('orchestrator', () => {
 			};
 			await runExports(gateway, raw, ['markdown'], () => {});
 			expect(raw).toEqual(before);
+		});
+	});
+
+	describe('partial write failures (VE-009)', () => {
+		it('reports exactly the completed files, bytes and failed third path', async () => {
+			const { gateway, written } = fakeGateway(manyFiles);
+			const originalWrite = gateway.writeFile;
+			gateway.writeFile = async (path, content) => {
+				if (path === 'Vault export.md') throw new Error('disk full');
+				await originalWrite(path, content);
+			};
+			const error: unknown = await runExports(gateway, DEFAULT_SETTINGS, ['notebooklm', 'html', 'markdown'], () => {}).catch((failure: unknown) => failure);
+			const completed = [...written].map(([path, content]) => ({ path, bytes: new TextEncoder().encode(content).length }));
+			expect(error).toMatchObject({
+				name: 'ExportFailedError', failedPath: 'Vault export.md',
+				partialResult: { written: completed, skippedFiles: [], totalBytes: completed.reduce((sum, f) => sum + f.bytes, 0) },
+			});
+			expect(error).toBeInstanceOf(ExportFailedError);
+			expect(error instanceof Error ? error.message : '').toContain('disk full');
+			expect(error instanceof Error ? error.message : '').toContain('Vault export.md');
+			expect(completed.map((f) => f.path)).toEqual(['Vault export - NotebookLM.txt', 'Vault export.html']);
+		});
+
+		it('reports an empty partial result when the ZIP write fails', async () => {
+			const { gateway, written, writtenBinary } = fakeGateway(manyFiles);
+			gateway.writeBinary = async () => { throw new Error('archive disk full'); };
+			const error: unknown = await runExports(gateway, DEFAULT_SETTINGS, ['zip', 'all'], () => {}).catch((failure: unknown) => failure);
+			expect(error).toMatchObject({
+				name: 'ExportFailedError', failedPath: 'Vault export.zip',
+				partialResult: { written: [], skippedFiles: [], totalBytes: 0 },
+			});
+			expect(written.size).toBe(0);
+			expect(writtenBinary.size).toBe(0);
+		});
+
+		it('retains a successful ZIP in the partial result when a later plain write fails', async () => {
+			const { gateway, writtenBinary } = fakeGateway(manyFiles);
+			gateway.writeFile = async () => { throw new Error('plain disk full'); };
+			const error: unknown = await runExports(gateway, DEFAULT_SETTINGS, ['zip', 'markdown'], () => {}).catch((failure: unknown) => failure);
+			const bytes = writtenBinary.get(DEFAULT_SETTINGS.zipOutputPath)?.length ?? 0;
+			expect(error).toMatchObject({
+				name: 'ExportFailedError', failedPath: 'Vault export.md',
+				partialResult: { written: [{ path: 'Vault export.zip', bytes }], totalBytes: bytes },
+			});
+			expect(bytes).toBeGreaterThan(0);
 		});
 	});
 

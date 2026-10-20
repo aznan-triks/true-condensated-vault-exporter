@@ -11,7 +11,7 @@ Implementation of the dated [2026-10-20 audit](../../audits/bugs-et-performance.
 | [VE-006](tasks/VE-006-normalisation-unicode.md) | P2 | fait | `9780ac8` | 7 new tests; check PASS (162 / 101) | All NFC/NFD cases pass; filenames remain unchanged |
 | [VE-007](tasks/VE-007-dataview-echec-silencieux.md) | P2 | fait | `9ac9bd9` | 11 new tests; check PASS (173 / 101) | Literals and unsupported queries preserved; supported sources still render |
 | [VE-008](tasks/VE-008-snapshot-settings.md) | P2 | fait | `85857ae` | 4 new tests; check PASS (177 / 101) | Uniform rendering and destinations during UI mutations; raw unchanged |
-| [VE-009](tasks/VE-009-echec-partiel.md) | P2 | à faire | — | — | Report partial failure and harden cancellation smoke |
+| [VE-009](tasks/VE-009-echec-partiel.md) | P2 | en cours | Implementation hash pending | 3 new tests + 6 net smoke assertions; check PASS (180 / 107) | Typed partial failures; exact history; deterministic Cancelled smoke |
 | [VE-010](tasks/VE-010-ignored-properties.md) | P2 | à faire | — | — | Filter built-in metadata fields |
 | [VE-012](tasks/VE-012-markdown-echappement.md) | P2 | à faire | — | — | Escape Markdown TOC labels |
 | [VE-004](tasks/VE-004-collisions-noms-sortie.md) | P3 | à faire | — | — | Portable split names and source-aware errors |

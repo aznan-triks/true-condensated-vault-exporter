@@ -461,13 +461,38 @@ const has = (rel) => fs.existsSync(path.join(VAULT, rel));
 	record('clean export written next to the note', has('Projects/Alpha (clean export).md'));
 	record('export-active-folder finishes', (await runCommand('export-active-folder')) === 'Done');
 
+	console.log('\n--- partial failure (VE-009) ---');
+	const originalWrite = plugin.gateway.writeFile;
+	plugin.gateway.writeFile = async function (target, content) {
+		if (target === 'Vault export.md') throw new Error('disk full (VE-009 smoke)');
+		await originalWrite.call(this, target, content);
+	};
+	record('failed write reports Failed', (await runCommand('export-all')) === 'Failed');
+	record('failed panel names completed files and failed path', /2 files written/.test(panelText()) && panelText().includes('Vault export.md'), panelText().slice(-220));
+	record('failed history records the two completed paths',
+		JSON.stringify(plugin.history[0]?.files?.map((f) => f.path)) === JSON.stringify(['Vault export - NotebookLM.txt', 'Vault export.html']),
+		JSON.stringify(plugin.history[0]?.files?.map((f) => f.path)));
+	record('failure notice reports completed files', require('./obsidian-mock.cjs').__state.notices.some((n) => /Failed.*2 files written/.test(n.message)));
+	const expectedFailureLog = consoleErrors.findIndex((message) => message.includes('disk full (VE-009 smoke)'));
+	record('expected write failure is logged', expectedFailureLog >= 0);
+	if (expectedFailureLog >= 0) consoleErrors.splice(expectedFailureLog, 1);
+	plugin.gateway.writeFile = originalWrite;
+
 	console.log('\n--- cancellation ---');
-	void runCommand('export-all');
-	await sleep(15);
-	const cancelBtn = window.document.querySelector('.ve-panel__cancel');
-	cancelBtn?.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
-	record('cancel click handled', Boolean(cancelBtn));
-	record('panel reports cancellation or completion', ['Cancelled', 'Done'].includes(await waitFinished()), panelStatus());
+	let cancelClicked = false;
+	plugin.gateway.writeFile = async function (target, content) {
+		await originalWrite.call(this, target, content);
+		if (!cancelClicked) {
+			const cancel = window.document.querySelector('.ve-panel__cancel');
+			cancelClicked = Boolean(cancel);
+			cancel?.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+		}
+	};
+	const cancelledStatus = await runCommand('export-all');
+	plugin.gateway.writeFile = originalWrite;
+	record('cancel click handled after the first completed write', cancelClicked);
+	record('panel reports cancellation, never success', cancelledStatus === 'Cancelled', panelStatus());
+	record('cancel summary and history report the one completed file', /1 files/.test(panelText()) && plugin.history[0]?.files?.length === 1, panelText().slice(-140));
 	record('no stuck running state', plugin._commands.length === 10 && window.document.querySelector('.ve-panel__cancel')?.isShown() === false, window.document.querySelector('.ve-panel__status')?.textContent);
 
 	console.log('\n--- reveal shortcut ---');

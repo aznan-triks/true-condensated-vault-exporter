@@ -25,6 +25,14 @@ export class ExportCancelledError extends Error {
 	}
 }
 
+/** A write failure keeps successful outputs intact and reports their exact partial result. */
+export class ExportFailedError extends Error {
+	constructor(message: string, readonly partialResult: ExportResult, readonly failedPath?: string, cause?: unknown) {
+		super(message, { cause });
+		this.name = 'ExportFailedError';
+	}
+}
+
 export interface ExportResult {
 	written: { path: string; bytes: number }[];
 	/** Notes skipped because their content could not be read */
@@ -170,6 +178,7 @@ function zipEntries(
 	return entries;
 }
 
+/** Written files are never rolled back: cancellation and write failures report what was kept. */
 export async function runExports(
 	gateway: ExportGateway,
 	rawSettings: ExporterSettings,
@@ -321,10 +330,21 @@ export async function runExports(
 		zipData = buildZip(zipEntries(consolidated, split, externalBase));
 	}
 
+	const writeOutput = async (path: string, write: () => Promise<void>): Promise<void> => {
+		try {
+			await write();
+		} catch (error: unknown) {
+			if (error instanceof ExportCancelledError) throw error;
+			const message = error instanceof Error ? error.message : String(error);
+			throw new ExportFailedError('Export failed after writing ' + written.length + ' file(s) at "' + path + '": ' + message, snapshot(), path, error);
+		}
+	};
+
 	if (zipRequested && zipData) {
 		checkCancelled(signal, snapshot);
 		onProgress({ stage: 'ZIP bundle', current: 1, total: 1, currentFile: zipPath, log: 'Writing ' + zipPath });
-		await gateway.writeBinary(zipPath, zipData);
+		const archive = zipData;
+		await writeOutput(zipPath, () => gateway.writeBinary(zipPath, archive));
 		written.push({ path: zipPath, bytes: zipData.length });
 		await yieldToUi();
 		checkCancelled(signal, snapshot);
@@ -339,7 +359,7 @@ export async function runExports(
 			currentFile: item.out.path,
 			log: 'Writing ' + item.out.path,
 		});
-		await gateway.writeFile(item.out.path, item.out.content);
+		await writeOutput(item.out.path, () => gateway.writeFile(item.out.path, item.out.content));
 		written.push({ path: item.out.path, bytes: utf8ByteLength(item.out.content) });
 		if ((i + 1) % every === 0 || i + 1 === plainOutputs.length) await yieldToUi();
 		checkCancelled(signal, snapshot);
