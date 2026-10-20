@@ -1,0 +1,102 @@
+# VE-013 — Mémoire : ne pas retenir toutes les sorties et toutes leurs copies
+
+| | |
+|---|---|
+| **Priorité** | **P3** — courant seulement sur les très gros vaults (seuil mesuré ~150 Mo de texte) |
+| **Type** | performance (mémoire) |
+| **Preuve** | **Mesuré** (Node 22, corpus synthétique, `--max-old-space-size`) |
+| **Références** | `src/features/exportOrchestrator.ts:52-65, 137-157, 291-320` · `src/core/zip.ts:70-160` · `src/obsidian/vaultGateway.ts:177-181` |
+| **Dépend de** | VE-009 (même phase d'écriture) |
+| **Bloque** | — |
+| **Séance** | 1 |
+
+## Constat — mesure de départ
+
+Corpus de 20 000 notes × 8 Ko (≈ **154 Mo** de Markdown brut), les quatre formats activés + ZIP, même code que la production :
+
+| Indicateur | Valeur |
+|---|---|
+| Sorties produites | `md` 156 Mo + `html` 165 Mo + `nlm` 157 Mo + `split` 155 Mo = **634 Mo** |
+| `heapUsed` en fin de parcours | 1 134 Mo |
+| **RSS de pic** | **2 243 Mo** |
+| Durée | 10,6 s |
+
+Mesures complémentaires :
+
+- ZIP de 120 Mo **incompressibles** : 252 Mo d'`ArrayBuffer` (données + archive), RSS 577 Mo. Le contenu est compressible dans le cas ci-dessus (ZIP final 4 Mo), mais l'archive intermédiaire existe quand même.
+- `crc32` 120 Mo : 360 ms ; encodage UTF-8 de 318 Mo : 561 ms ; `cleanNote` seul sur 154 Mo : 3,1 s / 588 Mo de RSS.
+- `writeBinary` recopie l'archive dans un second `ArrayBuffer` (`vaultGateway.ts:179-180`).
+
+Ordre de grandeur : **~14,6 × la taille du corpus** en RSS. À 300 Mo de notes (vault très volumineux), on dépasse 4 Go — zone d'OOM d'Electron.
+
+## Comportement actuel / attendu
+
+- **Actuel** : les quatre chaînes de sortie sont construites et conservées (`consolidated` Map + `split`), le ZIP est construit **avant** les fichiers (`l. 291-305`), `zipEntries` encode **toutes** les chaînes en `Uint8Array` d'un coup (`l. 137-157`), puis `writeBinary` en fait une copie. Au pic : 4 chaînes (634 Mo) + 4 tableaux d'octets (634 Mo) + archive (≈150 Mo) + copie (≈150 Mo).
+- **Attendu** : au plus **une** sortie non compressée vivante à la fois ; pic < 1,2 Go sur le même corpus ; durée ≤ +20 %.
+
+## Cause racine
+
+Aucune libération explicite et un ordre défavorable : tout est calculé, puis tout est encodé, puis tout est écrit, puis tout est copié. Le point d'étranglement n'est pas `cleanNote` (3,1 s pour 154 Mo) mais la **rétention simultanée** des représentations (chaîne, octets, archive, copie).
+
+## Sites affectés
+
+| Site | Rétention |
+|---|---|
+| `exportOrchestrator.ts:52-65` (`consolidatedOutputs`) | toutes les chaînes consolidées |
+| `exportOrchestrator.ts:274-276` | `split` complet |
+| `exportOrchestrator.ts:137-157` (`zipEntries`) | **toutes** les encodages UTF-8 |
+| `exportOrchestrator.ts:291-305` | ZIP construit avant les fichiers |
+| `zip.ts:70-160` (`buildZip`) | archive complète + `entries[].data` + copie finale par `concat` (inévitable sans streaming) |
+| `vaultGateway.ts:177-181` | copie de l'archive |
+
+## Plan d'action
+
+1. **Écrire les fichiers avant le ZIP** (inverser les blocs `l. 298-305` et `l. 307-320`) et **libérer la référence** après chaque écriture (`item.out.content = ''` ou suppression de la Map). Les erreurs restent couvertes par VE-009 (le ZIP n'est plus « déjà écrit » en cas d'échec d'un fichier — comportement plus simple à expliquer).
+2. **Encoder paresseusement** : faire de `zipEntries` un générateur (`function* zipEntries(...)`) et faire consommer ce générateur par `buildZip` en une seule passe. Après chaque entrée, la chaîne source et son `Uint8Array` ne sont plus référencés ; seule la partie **compressée** reste. La copie finale de `concat` (`zip.ts:120-160`) reste inévitable tant que `writeBinary` exige un `Uint8Array` complet — ne pas essayer de la supprimer.
+   - `buildZip` conserve son API publique pour les tests (`buildZip(entries: ZipEntry[])`) en acceptant `Iterable<ZipEntry>` ; le central directory n'a besoin que des métadonnées déjà accumulées.
+   - Si les formats ne sont plus en mémoire au moment du ZIP (étape 1), les **re-rendre** un par un : `format.render(notes, settings, exportedAt)` avec le **même** `exportedAt` (obligatoire pour que l'archive soit identique aux fichiers).
+3. **Supprimer la copie inutile** dans `writeBinary` : si `data.byteOffset === 0 && data.byteLength === data.buffer.byteLength && data.buffer instanceof ArrayBuffer`, passer `data.buffer` directement ; sinon copier (cas `SharedArrayBuffer`). Gain : une archive entière.
+4. **Facultatif, mesuré** : remplacer `utf8ByteLength` (`l. 48-50`, appelé `l. 317`) par `Buffer.byteLength(content, 'utf8')` — 561 ms pour 318 Mo contre ~0 (calcul natif sans allocation). Ne le faire que si le profil après étapes 1-3 montre encore ce coût.
+5. **Ne pas** tenter de ZIP en flux : `ExportGateway.writeBinary` prend un `ArrayBuffer` complet et `DataAdapter.append` n'accepte que du texte. C'est une contrainte de l'API Obsidian, pas un choix. À documenter pour éviter un futur plan irréalisable.
+
+## Preuve de gain
+
+Même script que la mesure de départ (corpus 20 k × 8 Ko, `node --max-old-space-size=4096`) :
+
+| Critère | Avant | Cible |
+|---|---|---|
+| RSS de pic | 2 243 Mo | **< 1 200 Mo** |
+| Durée | 10,6 s | ≤ 12,7 s |
+| Contenu des fichiers et du ZIP | référence | identique octet pour octet (comparer les tailles et un hash) |
+
+Sur un corpus de 40 Mo (cas courant), le gain attendu est de ~500 Mo de RSS — non mesuré ici, à consigner dans la PR.
+
+## Test de non-régression
+
+- Test d'égalité : sur un petit corpus, l'archive produite avant/après a les **mêmes noms d'entrées**, les mêmes tailles et le même CRC (comparer `crc32` de l'archive ou son contenu décompressé via `DecompressionStream`/`zlib.inflateRawSync`).
+- Test d'ordre : les fichiers consolidés sont écrits **avant** `writeBinary` (espionner l'ordre des appels du gateway) — c'est un changement observable, à assumer explicitement.
+- `buildZip` avec un `Iterable` : test avec un générateur qui jette au milieu → l'erreur remonte, aucune écriture n'a eu lieu (le ZIP est construit avant `writeBinary`).
+
+## Points d'impact
+
+- `src/features/exportOrchestrator.ts`, `src/core/zip.ts`, `src/obsidian/vaultGateway.ts`.
+- Ordre des écritures visible dans le panneau de progression (ZIP en dernier au lieu du premier).
+- `tests/features.test.ts:192-206` vérifie le contenu du ZIP : doit rester vert.
+- Aucun changement de format, de nom d'entrée, ni de réglage.
+
+## Non-objectifs
+
+- Streaming de l'archive sur disque (impossible via l'API, voir étape 5).
+- Compression parallèle ou `worker_threads` : gain non mesuré, complexité réelle.
+- Réduire le coût de `cleanNote`/des formateurs (3,1 s pour 154 Mo, déjà linéaire).
+
+## Critères d'acceptation
+
+- RSS de pic < 1,2 Go sur le corpus de mesure, durée ≤ 12,7 s.
+- Archive identique (noms, tailles, CRC) et fichiers identiques.
+- `npm run check` passe.
+
+## Risques
+
+- Re-rendre les formats pour le ZIP peut produire un contenu différent si un formateur dépend d'un état (aucun ne le fait ; `exportedAt` est passé explicitement). Un test d'égalité le verrouille.
+- L'ordre d'écriture change : un échec du ZIP après les fichiers laisse des fichiers sans archive — c'est déjà le cas dans l'autre sens aujourd'hui, et VE-009 rend l'état explicite.
