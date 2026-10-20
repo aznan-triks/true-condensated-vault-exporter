@@ -7,6 +7,7 @@
 import { ExporterSettings } from '../core/types';
 import { CleanedNote } from '../core/pipeline';
 import { normalizePath } from '../core/filter';
+import { canonicalOutputPath } from '../core/outputTarget';
 
 export interface OutputFile {
 	path: string;
@@ -30,8 +31,24 @@ function relativeToFolder(notePath: string, folderPath: string): string | null {
 	return note.slice(folder.length + 1);
 }
 
+/** Portable generated segment; configured destination roots are not rewritten. */
+function safeSegment(segment: string): string {
+	const safe = segment.replace(/[<>:"/\\|?*\u0000-\u001f]/g, '_').replace(/[. ]+$/, '') || '_';
+	return /^(?:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\.|$)/i.test(safe) ? '_' + safe : safe;
+}
+
 export function buildSplitFiles(notes: CleanedNote[], settings: ExporterSettings): OutputFile[] {
 	const base = settings.splitOutputFolder;
+	const destinations = new Map<string, { path: string; source: string }>();
+	const output = (path: string, content: string, source: string): OutputFile => {
+		const key = canonicalOutputPath(path).toLowerCase();
+		const previous = destinations.get(key);
+		if (previous) {
+			throw new Error('Two split outputs would be written to "' + path + '": ' + previous.source + ' and ' + source + '. Rename one note or folder, or use another split mode.');
+		}
+		destinations.set(key, { path, source });
+		return { path, content };
+	};
 
 	if (settings.splitMode === 'individual-files') {
 		return notes.map((note) => {
@@ -39,8 +56,8 @@ export function buildSplitFiles(notes: CleanedNote[], settings: ExporterSettings
 				? '---\n' + note.rawFrontmatter + '\n---\n\n'
 				: '';
 			const rel = (relativeToFolder(note.path, settings.scopeRoot) ?? note.path)
-				.replace(/\.canvas$/i, '.md');
-			return { path: joinPath(base, rel), content: frontmatter + note.body };
+				.replace(/\.canvas$/i, '.md').split('/').map(safeSegment).join('/');
+			return output(joinPath(base, rel), frontmatter + note.body, '"' + note.path + '"');
 		});
 	}
 
@@ -60,7 +77,7 @@ export function buildSplitFiles(notes: CleanedNote[], settings: ExporterSettings
 		for (const note of groupNotes) {
 			lines.push('', SEPARATOR, note.title + ' (' + note.path + ')', SEPARATOR, '', note.body, '');
 		}
-		const safeName = group.replace(/[<>:"/\\|?*]/g, '_') + '.txt';
-		return { path: joinPath(base, safeName), content: lines.join('\n') };
+		const safeName = safeSegment(group) + '.txt';
+		return output(joinPath(base, safeName), lines.join('\n'), 'folder "' + group + '"');
 	});
 }

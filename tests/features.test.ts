@@ -536,6 +536,21 @@ describe('orchestrator', () => {
 		});
 	});
 
+	it.each([
+		{ paths: ['A?B/x.md', 'A_B/y.md'], splitMode: 'folder-grouped' as const },
+		{ paths: ['X.md', 'X.canvas'], splitMode: 'individual-files' as const },
+	])('rejects named split collisions before plain or ZIP writes: $paths (VE-004)', async ({ paths, splitMode }) => {
+		const files = paths.map((path) => ({ path, name: path.split('/').pop() ?? path, content: path.endsWith('.canvas') ? '{"nodes":[{"type":"text","text":"body"}]}' : 'body' }));
+		const { gateway, written, writtenBinary } = fakeGateway(files);
+		let error: unknown;
+		try { await runExports(gateway, { ...DEFAULT_SETTINGS, splitMode, splitOutputFolder: 'out' }, ['zip', 'all'], () => {}); }
+		catch (failure: unknown) { error = failure; }
+		expect(error instanceof Error ? error.message : '').toContain('Two split outputs');
+		for (const path of paths) expect(error instanceof Error ? error.message : '').toContain(splitMode === 'folder-grouped' ? path.split('/')[0] : path);
+		expect(written.size).toBe(0);
+		expect(writtenBinary.size).toBe(0);
+	});
+
 	it('rejects an empty target list', async () => {
 		const { gateway } = fakeGateway(manyFiles);
 		await expect(runExports(gateway, DEFAULT_SETTINGS, [], () => {})).rejects.toThrow('Select at least one');

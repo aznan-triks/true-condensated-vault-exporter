@@ -837,6 +837,36 @@ describe('formatters and split export', () => {
 		});
 	});
 
+	describe('portable split destinations (VE-004)', () => {
+		const baseFile = { path: 'A.md', name: 'A.md', content: 'same' };
+		const baseNote = cleanNote(baseFile, createExportContext([baseFile], DEFAULT_SETTINGS));
+		const notes = (paths: string[]) => paths.map((path) => ({ ...baseNote, path, title: path }));
+		it('names both folders in a sanitization collision', () => {
+			expect(() => buildSplitFiles(notes(['A?B/x.md', 'A_B/y.md']), { ...DEFAULT_SETTINGS, splitOutputFolder: 'out' }))
+				.toThrow(/Two split outputs.*A\?B.*A_B/);
+		});
+		it('rejects md/canvas collisions even when their output bodies are identical', () => {
+			expect(() => buildSplitFiles(notes(['X.md', 'X.canvas']), { ...DEFAULT_SETTINGS, splitMode: 'individual-files', splitOutputFolder: 'out' }))
+				.toThrow(/Two split outputs.*X\.md.*X\.canvas/);
+		});
+		it('rejects case-only destination collisions for portability', () => {
+			expect(() => buildSplitFiles(notes(['A.md', 'a.md']), { ...DEFAULT_SETTINGS, splitMode: 'individual-files', splitOutputFolder: 'out' }))
+				.toThrow(/Two split outputs.*A\.md.*a\.md/);
+		});
+		it('sanitizes each generated segment, strips trailing dots/spaces and preserves legal ampersands', () => {
+			const outputs = buildSplitFiles(notes(['Bad?Dir. /Q&A?:*|"<>\u0001.md']), { ...DEFAULT_SETTINGS, splitMode: 'individual-files', splitOutputFolder: 'out' });
+			expect(outputs[0]?.path).toBe('out/Bad_Dir/Q&A________.md');
+			expect(outputs[0]?.path).not.toMatch(/[<>:"\\|?*\u0000-\u001f]/);
+		});
+		it.each(['CON.md', 'nul.extra.md', 'COM1.md', 'Lpt9.md'])('prefixes the reserved Windows segment %s', (path) => {
+			expect(buildSplitFiles(notes([path]), { ...DEFAULT_SETTINGS, splitMode: 'individual-files', splitOutputFolder: 'out' })[0]?.path).toBe('out/_' + path);
+		});
+		it('leaves the complete ordered ten-note safe corpus unchanged', () => {
+			const paths = ['A.md', 'B/C.md', ...Array.from({ length: 8 }, (_, i) => 'D/' + i + '.md')];
+			expect(buildSplitFiles(notes(paths), { ...DEFAULT_SETTINGS, splitMode: 'individual-files', splitOutputFolder: 'out' }).map((f) => f.path)).toEqual(paths.map((path) => 'out/' + path));
+		});
+	});
+
 	it('groups split files by first folder under the scope root', () => {
 		const settings = { ...DEFAULT_SETTINGS, scopeRoot: 'Knowledge Base', splitOutputFolder: 'out' };
 		const outputs = buildSplitFiles(notesFor(settings), settings);
