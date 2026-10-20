@@ -180,7 +180,7 @@ export async function runExports(
 ): Promise<ExportResult> {
 	// External output folder: every configured destination is re-rooted once,
 	// before validation and before the ZIP/plain outputs are compared.
-	const settings = resolveOutputSettings(rawSettings);
+	const settings: ExporterSettings = structuredClone(resolveOutputSettings(rawSettings));
 	const startedAt = Date.now();
 	const uniqueTargets = [...new Set(targets)];
 	if (uniqueTargets.length === 0) throw new Error('Select at least one export target.');

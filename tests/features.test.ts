@@ -12,7 +12,7 @@ import {
 	totalBytes,
 	relativeTime,
 } from '../src/features/exportHistory';
-import { DEFAULT_SETTINGS, ExportGateway, VaultFile } from '../src/core/types';
+import { DEFAULT_SETTINGS, ExportGateway, ExporterSettings, VaultFile } from '../src/core/types';
 import { isFileIncluded, reservedOutputPaths } from '../src/core/filter';
 
 /* ---------------- ZIP writer ---------------- */
@@ -438,6 +438,57 @@ describe('orchestrator', () => {
 			expect(content).toContain('Sommaire');
 			expect(content).not.toContain('[[');
 		}
+	});
+
+	describe('per-run settings snapshot (VE-008)', () => {
+		it('keeps all links and destination/title settings uniform during a mutation', async () => {
+			const files = Array.from({ length: 12 }, (_, i) => ({ path: 'N/' + i + '.md', name: i + '.md', content: '[[Target]]' }));
+			files.push({ path: 'Target.md', name: 'Target.md', content: 'target' });
+			const { gateway, written } = fakeGateway(files);
+			const raw: ExporterSettings = { ...DEFAULT_SETTINGS, yieldEvery: 1, wikilinkFormat: 'markdown', ignoredProperties: [] };
+			await runExports(gateway, raw, ['markdown'], (progress) => {
+				if (progress.stage === 'Cleaning notes' && progress.current === 3) {
+					raw.wikilinkFormat = 'keep-wikilink';
+					raw.markdownOutputPath = 'changed.md';
+					raw.documentTitle = 'Changed mid-run';
+				}
+			});
+			expect([...written.keys()]).toEqual(['Vault export.md']);
+			const text = written.get('Vault export.md') ?? '';
+			expect(text.match(/\[Target\]\(Target\.md\)/g)).toHaveLength(12);
+			expect(text).not.toContain('[[Target]]');
+			expect(text).not.toContain('Changed mid-run');
+			expect(raw.wikilinkFormat).toBe('keep-wikilink');
+			expect(raw.markdownOutputPath).toBe('changed.md');
+		});
+
+		it('isolates in-place ignoredProperties mutations from rendered metadata', async () => {
+			const files = Array.from({ length: 6 }, (_, i) => ({ path: 'N/' + i + '.md', name: i + '.md', content: '---\nreviewer: Alice\n---\nbody' }));
+			const { gateway, written } = fakeGateway(files);
+			const raw: ExporterSettings = { ...DEFAULT_SETTINGS, yieldEvery: 1, stripFrontmatter: false, ignoredProperties: [] };
+			await runExports(gateway, raw, ['notebooklm'], (progress) => {
+				if (progress.stage === 'Cleaning notes' && progress.current === 3) raw.ignoredProperties.push('reviewer');
+			});
+			expect(written.get(DEFAULT_SETTINGS.notebooklmOutputPath)?.match(/reviewer: Alice/g)).toHaveLength(6);
+			expect(raw.ignoredProperties).toEqual(['reviewer']);
+		});
+
+		it.each([false, true])('does not mutate raw settings and detaches arrays with external output %s', async (useExternalOutputFolder) => {
+			const raw = { ...structuredClone(DEFAULT_SETTINGS), useExternalOutputFolder, externalOutputFolder: '/tmp/ve-snapshot' };
+			const before = structuredClone(raw);
+			const gateway: ExportGateway = {
+				loadVaultFiles: async (settings) => {
+					expect(settings).not.toBe(raw);
+					expect(settings.ignoredProperties).not.toBe(raw.ignoredProperties);
+					expect(settings.excludedFolders).not.toBe(raw.excludedFolders);
+					expect(settings.lastSelectedTargets).not.toBe(raw.lastSelectedTargets);
+					return manyFiles;
+				},
+				writeFile: async () => {}, writeBinary: async () => {},
+			};
+			await runExports(gateway, raw, ['markdown'], () => {});
+			expect(raw).toEqual(before);
+		});
 	});
 
 	it('rejects an empty target list', async () => {
