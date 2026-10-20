@@ -310,6 +310,63 @@ describe('orchestrator', () => {
 		expect(writtenBinary.size).toBe(0);
 	});
 
+	describe('source overwrite protection (VE-001)', () => {
+		const source: VaultFile = { path: 'A.md', name: 'A.md', content: '---\nstatus: keep-me\n---\nBody %%secret%%' };
+
+		it.each(['split', 'markdown', 'zip'] as const)('rejects a %s output equal to a source before any write', async (target) => {
+			const { gateway, written, writtenBinary } = fakeGateway([source]);
+			const stages: string[] = [];
+			await expect(runExports(gateway, {
+				...DEFAULT_SETTINGS,
+				splitMode: 'individual-files',
+				splitOutputFolder: target === 'split' ? '' : 'out',
+				markdownOutputPath: target === 'markdown' ? 'A.md' : DEFAULT_SETTINGS.markdownOutputPath,
+				zipOutputPath: 'A.md',
+			}, [target], (progress) => { stages.push(progress.stage); })).rejects.toThrow(
+				'Output "A.md" would overwrite the note "A.md". Choose another output folder or name.'
+			);
+			expect(written.size).toBe(0);
+			expect(writtenBinary.size).toBe(0);
+			expect(stages).toContain('Validating outputs');
+		});
+
+		it('rejects an absolute split output inside the vault before any write', async () => {
+			const { gateway, written, writtenBinary } = fakeGateway([{ ...source, path: 'Exports/A.md' }]);
+			const withBase: ExportGateway & { getVaultBasePath(): string } = {
+				...gateway,
+				getVaultBasePath: () => '/vault',
+			};
+			await expect(runExports(withBase, {
+				...DEFAULT_SETTINGS,
+				scopeRoot: 'Exports',
+				useExternalOutputFolder: true,
+				externalOutputFolder: '/vault/Exports',
+				splitMode: 'individual-files',
+				splitOutputFolder: '',
+			}, ['split'], () => {})).rejects.toThrow(
+				'Output "/vault/Exports/A.md" would overwrite the note "Exports/A.md".'
+			);
+			expect(written.size).toBe(0);
+			expect(writtenBinary.size).toBe(0);
+		});
+
+		it('rejects portable case-only source collisions before any write', async () => {
+			const { gateway, written } = fakeGateway([source]);
+			await expect(runExports(gateway, { ...DEFAULT_SETTINGS, markdownOutputPath: 'a.md' }, ['markdown'], () => {}))
+				.rejects.toThrow('Output "a.md" would overwrite the note "A.md".');
+			expect(written.size).toBe(0);
+		});
+
+		it('keeps distinct split destinations working', async () => {
+			const { gateway, written } = fakeGateway([source]);
+			const result = await runExports(gateway, {
+				...DEFAULT_SETTINGS, splitMode: 'individual-files', splitOutputFolder: 'out',
+			}, ['split'], () => {});
+			expect([...written.keys()]).toEqual(['out/A.md']);
+			expect(result.written).toHaveLength(1);
+		});
+	});
+
 	it('rejects an empty target list', async () => {
 		const { gateway } = fakeGateway(manyFiles);
 		await expect(runExports(gateway, DEFAULT_SETTINGS, [], () => {})).rejects.toThrow('Select at least one');

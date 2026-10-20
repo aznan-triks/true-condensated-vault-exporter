@@ -289,6 +289,8 @@ export type ProgressCallback = (progress: ExportProgress) => void;
 
 /** What the export features need from the host (implemented by the Obsidian gateway, faked in tests). */
 export interface ExportGateway {
+	/** Absolute vault root, used to compare absolute outputs with source notes. */
+	getVaultBasePath?(): string | null;
 	loadVaultFiles(
 		settings: ExporterSettings,
 		signal?: AbortSignal,

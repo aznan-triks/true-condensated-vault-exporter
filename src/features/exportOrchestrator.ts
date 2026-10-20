@@ -14,7 +14,7 @@ import { CleanedNote, cleanNote, createExportContext } from '../core/pipeline';
 import { CONSOLIDATED_FORMATS, ConsolidatedFormatId } from './formats';
 import { OutputFile, buildSplitFiles } from './exportSplit';
 import { buildZip, zipEntryName, ZipEntry } from '../core/zip';
-import { canonicalOutputPath, externalFolderBase, resolveOutputSettings, usesExternalOutputFolder } from '../core/outputTarget';
+import { canonicalOutputPath, externalFolderBase, resolveOutputSettings, usesExternalOutputFolder, vaultRelativeOutputPath } from '../core/outputTarget';
 
 export type ExportTarget = RememberedExportTarget;
 
@@ -90,6 +90,11 @@ function pathsOverlap(left: string, right: string): boolean {
 	const a = canonicalOutputPath(left);
 	const b = canonicalOutputPath(right);
 	return a === b || a.startsWith(b + '/') || b.startsWith(a + '/');
+}
+
+/** Portable comparison key; absolute outputs inside the vault refer to the same sources. */
+function sourceKey(path: string, vaultBasePath: string): string {
+	return (vaultRelativeOutputPath(path, vaultBasePath) ?? canonicalOutputPath(path)).toLowerCase();
 }
 
 /** Selects the individual files to write for the requested targets (no zip). */
@@ -284,6 +289,18 @@ export async function runExports(
 			if (pathsOverlap(zipPath, item.out.path)) {
 				throw new Error('ZIP bundle path overlaps another selected output: ' + item.out.path + '.');
 			}
+		}
+	}
+
+	onProgress({ stage: 'Validating outputs', current: 0, total: 1, log: 'Checking outputs against source notes...' });
+	const vaultBasePath = gateway.getVaultBasePath?.() ?? '';
+	const sources = new Map(files.map((file) => [sourceKey(file.path, vaultBasePath), file.path]));
+	const outputPaths = plainOutputs.map((item) => item.out.path);
+	if (zipRequested) outputPaths.push(zipPath);
+	for (const path of outputPaths) {
+		const source = sources.get(sourceKey(path, vaultBasePath));
+		if (source !== undefined) {
+			throw new Error('Output "' + path + '" would overwrite the note "' + source + '". Choose another output folder or name.');
 		}
 	}
 
