@@ -7,7 +7,7 @@ Implementation of the dated [2026-10-20 audit](../../audits/bugs-et-performance.
 | [VE-001](tasks/VE-001-collision-sorties-sources.md) | P0 | fait | `10cccd7` | 6 new tests; check PASS (130 tests / 99 smoke) | Rejected before all writes; portable case-only guard |
 | [VE-002](tasks/VE-002-reservation-destinations.md) | P1 | fait | `2160c68` | 3 new tests + 1 smoke; check PASS (133 / 100); Markdown count 2 → 2 | No Exports/Exports; sidebar and gateway aligned |
 | [VE-003](tasks/VE-003-split-quadratique.md) | P1 | fait | `7bf8a83`, `f284dd7` | 9 new tests; check PASS (142 / 100); 16k: 1,727.26 ms, real timers | Strict <2s gate met; output order and cancellation preserved |
-| [VE-005](tasks/VE-005-wikilinks-incomplets.md) | P2 | en cours | Implementation hash pending | 13 new tests + 1 smoke; check PASS (155 / 101) | Seven syntax cases fixed; extraction/transform share parser; empty links unchanged |
+| [VE-005](tasks/VE-005-wikilinks-incomplets.md) | P2 | fait | `47ef39b` | 13 new tests + 1 smoke; check PASS (155 / 101) | Shared parser; empty links and code protection preserved |
 | [VE-006](tasks/VE-006-normalisation-unicode.md) | P2 | à faire | — | — | NFC/NFD comparison keys |
 | [VE-007](tasks/VE-007-dataview-echec-silencieux.md) | P2 | à faire | — | — | Preserve unsupported Dataview queries and literals |
 | [VE-008](tasks/VE-008-snapshot-settings.md) | P2 | à faire | — | — | Per-run settings snapshot |
