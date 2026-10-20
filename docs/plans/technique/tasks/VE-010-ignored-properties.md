@@ -110,7 +110,7 @@ Cas de non-régression : sans réglage, les quatre paires restent présentes (te
 
 ## Journal d'exécution
 
-### 2026-10-21 — implementation hash pending
+### 2026-10-21 — `d34e657`; documentation follow-up
 
 - Baseline pull/check PASS (180 tests / 107 smoke); read the full plan, visibleMetadata and all three formatter consumers, settings description, type comment, split raw-copy branch and YAML parser alias cases.
 - Tests first: **5 failed / 2 passed**. Canonical/case-insensitive/alias lists failed to hide the four built-ins; custom-only metadata and consolidated-label assertions failed too. Exact default pair order/values and verbatim split frontmatter were already correct and remain so.
@@ -118,4 +118,4 @@ Cas de non-régression : sans réglage, les quatre paires restent présentes (te
 - Updated the setting description, type comment and README **now**, as required by the user's documentation rules and the plan's acceptance criteria (the action step's parenthetical delay is not followed). Individual split raw frontmatter is deliberately not filtered; Strip Frontmatter remains its control.
 - All **7 tests pass**, proving four hidden built-ins across all consolidated formats, retained custom fields, unchanged default metadata and intact split YAML. `npm run check` PASS: **187/187 tests, 107/107 smoke**, typecheck/build. No settings schema or dependency change.
 
-- Remaining: record the green implementation hash and final tracker status.
+- Implementation `d34e657` pushed; tracker marked `fait`. All acceptance criteria met; remaining: none.
