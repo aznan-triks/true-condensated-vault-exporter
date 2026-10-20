@@ -100,7 +100,7 @@ function writeFixture(root) {
 		'# Alpha', '', 'Body of Alpha with [[Beta]] and #project.', '',
 		'%%internal comment%%', '', 'Embedded note: ![[Beta]]', 'Embedded image: ![[Assets/pic.png]]', '', 'Inline `code with %% kept`.', '',
 		'```python', 'print("hi") # not a heading', '```', '',
-		'## Tasks', '- [ ] one', '',
+		'## Tasks', '- [ ] one', '', 'Anchor-only reference: [[#Tasks]]', '',
 	].join('\n'));
 	write('Projects/Beta.md', '---\ntags: [project]\nstatus: done\n---\n# Beta\n\nBeta links to [[Alpha|the alpha note]]. #project\n');
 	write('Dataview/Projects.md', [
@@ -261,6 +261,7 @@ const has = (rel) => fs.existsSync(path.join(VAULT, rel));
 		record('markdown: both project notes present', md.includes('# Alpha') && md.includes('# Beta'));
 		record('markdown: frontmatter stripped', !md.includes('cssclasses') && !md.includes('status: done'));
 		record('markdown: wikilink resolved', md.includes('Beta') && !md.includes('[[Beta]]'));
+		record('markdown: anchor-only wikilink rendered', md.includes('Anchor-only reference: Tasks') && !md.includes('[[#Tasks]]'));
 		record('markdown: prose comment removed but inline code kept', !md.includes('%%internal comment%%') && md.includes('code with %% kept'));
 		record('markdown: fenced code intact', md.includes('print("hi") # not a heading'));
 		record('markdown: dataview table rendered', md.includes('| status |') && /\| Alpha \| done \|/.test(md) && /\| Beta \| done \|/.test(md));

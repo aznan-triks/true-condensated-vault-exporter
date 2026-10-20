@@ -171,6 +171,45 @@ describe('wikilink', () => {
 		expect(out).toBe('See [Note](Missing/Note)');
 	});
 
+	describe('complete syntax (VE-005)', () => {
+		const resolver = buildLinkResolver([{ path: 'Note.md', name: 'Note.md' }, { path: 'Assets/pic.png', name: 'pic.png' }]);
+		it.each([
+			['[[#Sommaire]]', 'clean-text', 'Sommaire'],
+			['[[#Sommaire]]', 'markdown', '[Sommaire](#sommaire)'],
+			['[[Note#]]', 'clean-text', 'Note'],
+			['[[Note|]]', 'clean-text', 'Note'],
+			['[[Note#Titre\\|Alias]]', 'markdown', '[Alias](Note.md#titre)'],
+			['[[Note\\|Alias]]', 'canonical-alias', 'Note (Alias)'],
+			['![[pic.png|300]]', 'markdown', '![pic.png](Assets/pic.png)'],
+			['![[pic.png|300x200]]', 'clean-text', 'pic.png'],
+		] as const)('transforms %s in %s', (input, format, expected) => {
+			expect(transformWikilinks(input, format, resolver)).toBe(expected);
+		});
+
+		it('uses the same parsing and display names for extraction and transformation', () => {
+			const inputs = ['[[#A]]', '[[B#]]', '[[B|]]', '[[Note\\|Alias]]', '![[pic.png|300]]', '![[pic.png|300x200]]', '[[A|B|C]]'];
+			for (const input of inputs) {
+				const links = extractWikilinks(input);
+				expect(links, input).toHaveLength(1);
+				expect(transformWikilinks(input, 'clean-text'), input).toBe(links[0]?.displayName);
+			}
+			expect(extractWikilinks('[[#A]] and [[B#]]')).toHaveLength(2);
+			expect(transformWikilinks('[[A|B|C]]', 'clean-text')).toBe('B|C');
+		});
+
+		it('preserves empty and malformed links, middle backslashes, and keep-wikilink mode', () => {
+			const input = '[[]] [[#]] [[unfinished';
+			expect(extractWikilinks(input)).toEqual([]);
+			for (const format of ['clean-text', 'canonical-alias', 'markdown', 'keep-wikilink'] as const) {
+				expect(transformWikilinks(input, format)).toBe(input);
+			}
+			expect(extractWikilinks('[[Dir\\Name|Alias]]')[0]?.target).toBe('Dir\\Name');
+			expect(transformWikilinks('[[Note\\|Alias]]', 'keep-wikilink')).toBe('[[Note\\|Alias]]');
+			const neverResolve = (): string => { throw new Error('Anchor-only links must not call the resolver'); };
+			expect(transformWikilinks('[[#A]]', 'markdown', neverResolve)).toBe('[A](#a)');
+		});
+	});
+
 	it('resolves explicit extensions and URL-encodes vault paths with spaces', () => {
 		const resolver = buildLinkResolver([{ path: 'Project Notes/Target Note.md', name: 'Target Note.md' }]);
 		expect(resolver('Project Notes/Target Note.md')).toBe('Project Notes/Target Note.md');

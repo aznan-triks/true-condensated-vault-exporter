@@ -430,6 +430,16 @@ describe('orchestrator', () => {
 		});
 	});
 
+	it.each(['clean-text', 'canonical-alias', 'markdown'] as const)('renders anchor-only wikilinks in all exports with %s (VE-005)', async (wikilinkFormat) => {
+		const { gateway, written } = fakeGateway([{ path: 'Index.md', name: 'Index.md', content: '[[#Sommaire]]' }]);
+		await runExports(gateway, { ...DEFAULT_SETTINGS, wikilinkFormat }, ['all'], () => {});
+		expect(written.size).toBe(4);
+		for (const content of written.values()) {
+			expect(content).toContain('Sommaire');
+			expect(content).not.toContain('[[');
+		}
+	});
+
 	it('rejects an empty target list', async () => {
 		const { gateway } = fakeGateway(manyFiles);
 		await expect(runExports(gateway, DEFAULT_SETTINGS, [], () => {})).rejects.toThrow('Select at least one');

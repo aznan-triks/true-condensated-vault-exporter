@@ -3,6 +3,7 @@
 ## Unreleased
 
 ### Fixed
+- Wikilinks now handle current-note anchors, empty heading/alias suffixes, and escaped table pipes consistently in extraction and export. Resized embeds display the attachment name rather than numeric dimensions; standard Markdown output intentionally omits those dimensions. Empty or malformed links are preserved.
 - Split exports now index output ancestors instead of comparing every pair of paths, and append grouped notes without copying each group on every note. Output order and overlap errors are preserved. Writing yields to the UI in batches using the existing yield setting, while cancellation is checked between every file. Cancellation snapshots are built only when needed, avoiding growing copies after every file; the measured 16,000-note split run now meets the <2s gate in the Node harness.
 - External split destinations inside the vault are now reserved exactly as resolved for the export, including a blank split destination. Repeated runs no longer re-read their own mirrors, and the sidebar preview uses the same exclusions. Existing nested exports are left untouched; no files are deleted automatically.
 - Exports now reject any destination that would overwrite a loaded source note, before writing any file or building the ZIP. The error names both paths, including absolute destinations inside the vault. Case-only differences are rejected for portable safety, even on case-sensitive systems. Choose a distinct output folder or file name instead.
