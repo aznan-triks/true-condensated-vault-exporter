@@ -119,7 +119,7 @@ Référence : cible `markdown` seule sur le même corpus = **37 / 40 / 116 ms** 
 - **Proposal, awaiting user approval:** extend VE-003 narrowly to construct the existing cancellation snapshot only when cancellation is actually observed, without changing its contents or any error handling; test identical partial results and remeasure with the same harness. Alternatively the user may explicitly accept the measured 2.036 s bound. No further implementation or subsequent plan is started pending that decision.
 - Implementation `7bf8a83` pushed to the session branch; this documentation follow-up records its hash. Status: **bloqué**, not `fait`. Remaining: decision on this small scope extension / numerical criterion, final measurement and validation if approved, then VE-005.
 
-### 2026-10-21 — implementation hash pending
+### 2026-10-21 — `f284dd7`; documentation follow-up
 
 - User approval: **"enchaîne sans t'arrêter"**, following the explicit request to extend VE-003 to lazy cancellation snapshots. The numerical target is unchanged.
 - Restored the local Git metadata to the already-pushed session history after verifying all restored workspace files byte-for-byte against `60294fa`; fast-forwarded this same branch, retained a backup stash, reinstalled only the existing lockfile. Baseline check PASS (141 tests / 100 smoke).
@@ -127,4 +127,4 @@ Référence : cible `markdown` seule sur le même corpus = **37 / 40 / 116 ms** 
 - Same real-timer, no-I/O harness, default `yieldEvery: 25`, all ordered names/bodies checked: **235.21 / 448.39 / 891.28 / 1,727.26 ms** for 2k/4k/8k/16k. At 16k the previously blocked **2,036.18 ms → 1,727.26 ms** now meets <2s. No timer stubbing, default tuning, or best-of rerun. Disposable `/tmp` script and bundle removed.
 - `npm run check` PASS: **142/142 tests, 100/100 smoke**, strict typecheck and production build. The nine VE-003 tests and all prior cancellation/ordered-output tests pass. No partial-failure behavior changed (VE-009 remains separate).
 
-- Remaining: record the green implementation hash and final tracker status.
+- Implementation `f284dd7` pushed; tracker marked `fait`. All acceptance criteria met; remaining: none.
