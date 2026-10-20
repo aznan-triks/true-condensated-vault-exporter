@@ -94,11 +94,11 @@ Avant correctif, le premier test écrit la note et ne rejette pas : il échoue d
 
 ## Journal d'exécution
 
-### 2026-10-20 — implementation (commit recorded below after push)
+### 2026-10-20 — `10cccd7` (implementation), documentation follow-up
 
 - Read all affected sites. Added the optional `ExportGateway.getVaultBasePath()` contract; the real gateway already exposes that public method, so its implementation needed no change. Added a local portable source key and the `Validating outputs` progress stage in `exportOrchestrator.ts`, before ZIP construction and both write paths.
 - Tests first: `source overwrite protection (VE-001)` in `tests/features.test.ts` reproduced **5 failures** (split, Markdown, ZIP, absolute in-vault split, case-only paths all resolved and wrote instead of rejecting). The negative case `keeps distinct split destinations working` passed before and after. After correction, all **6 tests pass**, asserting named paths and no text/binary writes on rejection.
 - The absolute split fixture explicitly uses `scopeRoot: 'Exports'` so mirroring `Exports/A.md` under `/vault/Exports` targets that same source, rather than an unrelated nested destination. ZIP uses separate Markdown/split paths to isolate the overwrite failure from archive-entry collisions.
 - `npm run check`: **PASS**, 130/130 unit tests, 99/99 smoke assertions; typecheck and production build green. Existing split-root and cancellation tests unchanged.
 - Documented the intentional stricter behavior (including portable case-only rejection) in `CHANGELOG.md`. No gateway write validation, clean-export command, dependency, build configuration, or user data changed.
-- Remaining: record implementation commit and final tracker status; no code work outstanding.
+- `10cccd7` pushed to the session branch; this documentation follow-up marks the tracker `fait`. All acceptance criteria met. Remaining: none.
