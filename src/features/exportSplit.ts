@@ -50,7 +50,9 @@ export function buildSplitFiles(notes: CleanedNote[], settings: ExporterSettings
 		const relative = relativeToFolder(note.path, groupingRoot);
 		const firstSegment = relative?.split('/')[0];
 		const group = relative && relative.includes('/') ? firstSegment ?? ROOT_GROUP : ROOT_GROUP;
-		groups.set(group, [...(groups.get(group) ?? []), note]);
+		const list = groups.get(group);
+		if (list) list.push(note);
+		else groups.set(group, [note]);
 	}
 
 	return [...groups.entries()].map(([group, groupNotes]) => {

@@ -1,4 +1,5 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+import * as outputTarget from '../src/core/outputTarget';
 import { inflateRawSync } from 'zlib';
 import { crc32, buildZip, zipEntryName } from '../src/core/zip';
 import { runExports, ExportCancelledError } from '../src/features/exportOrchestrator';
@@ -364,6 +365,55 @@ describe('orchestrator', () => {
 			}, ['split'], () => {});
 			expect([...written.keys()]).toEqual(['out/A.md']);
 			expect(result.written).toHaveLength(1);
+		});
+	});
+
+	describe('linear split validation (VE-003)', () => {
+		it.each([
+			['a.md', 'a.md/b.md'], ['a.md/b.md', 'a.md'],
+		])('rejects exact ancestor overlap %s then %s', async (left, right) => {
+			const { gateway, written } = fakeGateway(manyFiles);
+			await expect(runExports(gateway, {
+				...DEFAULT_SETTINGS, htmlOutputPath: left, markdownOutputPath: right,
+			}, ['html', 'markdown'], () => {})).rejects.toThrow('Output paths overlap: ' + left + ' and ' + right + '.');
+			expect(written.size).toBe(0);
+		});
+
+		it.each([
+			['a.md', 'ab.md'], ['a/b.md', 'a/c.md'], ['A.md', 'a.md'], ['a.md', 'a/b.md'],
+		])('allows distinct outputs %s and %s', async (left, right) => {
+			const { gateway, written } = fakeGateway(manyFiles);
+			await runExports(gateway, {
+				...DEFAULT_SETTINGS, htmlOutputPath: left, markdownOutputPath: right,
+			}, ['html', 'markdown'], () => {});
+			expect([...written.keys()]).toEqual([left, right]);
+		});
+
+		it('preserves the complete insertion order of 50 split outputs across five folders', async () => {
+			const files = Array.from({ length: 50 }, (_, i) => ({
+				path: 'G' + i % 5 + '/n' + (49 - i) + '.md', name: 'n' + (49 - i) + '.md', content: 'body ' + i,
+			}));
+			const { gateway, written } = fakeGateway(files);
+			const result = await runExports(gateway, {
+				...DEFAULT_SETTINGS, splitMode: 'individual-files', splitOutputFolder: 'out',
+			}, ['split'], () => {});
+			const expected = files.map((f) => 'out/' + f.path);
+			expect([...written.keys()]).toEqual(expected);
+			expect(result.written.map((f) => f.path)).toEqual(expected);
+			expect([...written.values()]).toEqual(files.map((f) => f.content));
+		});
+
+		it('canonicalizes a linear number of paths instead of every pair', async () => {
+			const files = Array.from({ length: 100 }, (_, i) => ({ path: 'N/' + i + '.md', name: i + '.md', content: 'body' }));
+			const canonical = vi.spyOn(outputTarget, 'canonicalOutputPath');
+			try {
+				await runExports(fakeGateway(files).gateway, {
+					...DEFAULT_SETTINGS, splitMode: 'individual-files', splitOutputFolder: 'out',
+				}, ['split'], () => {});
+				expect(canonical.mock.calls.length).toBeLessThan(1000);
+			} finally {
+				canonical.mockRestore();
+			}
 		});
 	});
 

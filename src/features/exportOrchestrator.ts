@@ -118,6 +118,8 @@ function selectOutputs(
 	}
 	// Repeated targets are harmless; different outputs sharing a path are not.
 	const seen = new Map<string, LabeledOutput>();
+	// First descendant for each directory prefix, retaining the original conflict message.
+	const ancestors = new Map<string, LabeledOutput>();
 	const deduped: LabeledOutput[] = [];
 	for (const item of selected) {
 		validateOutputPath(item.out.path, item.stage);
@@ -127,10 +129,17 @@ function selectOutputs(
 			if (previous.out.content === item.out.content) continue;
 			throw new Error('Output path conflict: ' + previous.out.path + ' is used by more than one export.');
 		}
-		for (const [otherPath, other] of seen) {
-			if (pathsOverlap(otherPath, key)) {
+		const descendant = ancestors.get(key);
+		if (descendant) {
+			throw new Error('Output paths overlap: ' + descendant.out.path + ' and ' + item.out.path + '.');
+		}
+		for (let slash = key.indexOf('/'); slash !== -1; slash = key.indexOf('/', slash + 1)) {
+			const prefix = key.slice(0, slash);
+			const other = seen.get(prefix);
+			if (other) {
 				throw new Error('Output paths overlap: ' + other.out.path + ' and ' + item.out.path + '.');
 			}
+			if (!ancestors.has(prefix)) ancestors.set(prefix, item);
 		}
 		seen.set(key, item);
 		deduped.push(item);
@@ -332,7 +341,7 @@ export async function runExports(
 		});
 		await gateway.writeFile(item.out.path, item.out.content);
 		written.push({ path: item.out.path, bytes: utf8ByteLength(item.out.content) });
-		await yieldToUi();
+		if ((i + 1) % every === 0 || i + 1 === plainOutputs.length) await yieldToUi();
 		checkCancelled(signal, snapshot());
 	}
 
