@@ -9,7 +9,7 @@ import { EXPORT_COMMANDS, TARGET_LABELS, UiContext, executeTargets, isExportRunn
 import { ExportTarget } from '../features/exportOrchestrator';
 import { ExportHistoryEntry, formatBytes, formatDuration, relativeTime, totalBytes } from '../features/exportHistory';
 import { isFileIncluded, reservedOutputPaths } from '../core/filter';
-import { usesExternalOutputFolder } from '../core/outputTarget';
+import { resolveOutputSettings, usesExternalOutputFolder } from '../core/outputTarget';
 
 export const VIEW_TYPE_EXPORTER_SIDEBAR = 'vault-exporter-sidebar';
 
@@ -102,7 +102,9 @@ export class ExporterSidebarView extends ItemView {
 				this.stats = null;
 				return;
 			}
-			const reserved = reservedOutputPaths(ctx.settings, { vaultBasePath: ctx.gateway.getVaultBasePath() });
+			const reserved = reservedOutputPaths(resolveOutputSettings(ctx.settings), {
+				vaultBasePath: ctx.gateway.getVaultBasePath(), alreadyResolved: true,
+			});
 			let noteCount = 0;
 			let canvasCount = 0;
 			let bytes = 0;

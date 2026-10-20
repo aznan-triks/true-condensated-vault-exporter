@@ -520,6 +520,20 @@ const has = (rel) => fs.existsSync(path.join(VAULT, rel));
 	fs.rmSync(EXTERNAL, { recursive: true, force: true });
 	tab.display();
 
+	console.log('\n--- in-vault external split preview (VE-002) ---');
+	const settingsBeforePreview = plugin.settings;
+	await plugin.app.vault.create('Preview/A.md', 'source');
+	await plugin.app.vault.create('Preview/Exports/A.md', 'previous split export');
+	plugin.settings = {
+		...plugin.settings, scopeRoot: 'Preview', useExternalOutputFolder: true,
+		externalOutputFolder: path.join(VAULT, 'Preview/Exports'), splitOutputFolder: '',
+	};
+	await view.refresh();
+	record('sidebar excludes the resolved blank split destination',
+		view.containerEl.querySelector('.ve-card__value')?.textContent.startsWith('1 notes') === true,
+		view.containerEl.querySelector('.ve-card__value')?.textContent);
+	plugin.settings = settingsBeforePreview;
+
 	console.log('\n--- graceful degradation without Electron ---');
 	plugin.gateway.revealOutput = () => null;
 	record('reveal returns false when no OS path', plugin.gateway.revealInFileManager('Vault export.md') === false);

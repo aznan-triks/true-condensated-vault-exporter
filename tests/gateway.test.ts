@@ -94,6 +94,8 @@ const makeAdapter = (base: string): FileSystemAdapter =>
 	new (FileSystemAdapter as unknown as new (basePath: string) => FileSystemAdapter)(base);
 import { ObsidianVaultGateway } from '../src/obsidian/vaultGateway';
 import { DEFAULT_SETTINGS } from '../src/core/types';
+import { resolveOutputSettings } from '../src/core/outputTarget';
+import { runExports } from '../src/features/exportOrchestrator';
 
 let vaultDir: string;
 
@@ -222,12 +224,40 @@ describe('ObsidianVaultGateway', () => {
 		fs.mkdirSync(outputs, { recursive: true });
 		fs.writeFileSync(path.join(outputs, 'Vault export.md'), 'previous external export', 'utf8');
 		const gateway = gatewayWith(makeApp());
-		const files = await gateway.loadVaultFiles({
+		const files = await gateway.loadVaultFiles(resolveOutputSettings({
 			...DEFAULT_SETTINGS,
 			useExternalOutputFolder: true,
 			externalOutputFolder: outputs,
-		});
+		}));
 		expect(files.map((f) => f.path)).toEqual(['Notes/Keep.md']);
+	});
+
+	it('excludes previous blank-root split outputs with resolved settings (VE-002)', async () => {
+		write('Notes/Keep.md', '# Keep');
+		write('Exports/Notes/A.md', 'previous split export');
+		const gateway = gatewayWith(makeApp());
+		const files = await gateway.loadVaultFiles(resolveOutputSettings({
+			...DEFAULT_SETTINGS, useExternalOutputFolder: true,
+			externalOutputFolder: path.join(vaultDir, 'Exports'), splitOutputFolder: '',
+		}));
+		expect(files.map((f) => f.path)).toEqual(['Notes/Keep.md']);
+	});
+
+	it('keeps the Markdown count constant across reindexed split runs (VE-002)', async () => {
+		write('Notes/A.md', '---\nstatus: keep-me\n---\nBody %%secret%%');
+		const settings = {
+			...DEFAULT_SETTINGS, useExternalOutputFolder: true,
+			externalOutputFolder: path.join(vaultDir, 'Exports'), splitOutputFolder: '',
+			splitMode: 'individual-files' as const,
+		};
+		const first = await runExports(gatewayWith(makeApp()), settings, ['split'], () => {});
+		const countAfterFirst = makeApp().vault.getFiles().filter((f) => f.path.endsWith('.md')).length;
+		const second = await runExports(gatewayWith(makeApp()), settings, ['split'], () => {});
+		expect(countAfterFirst).toBe(2);
+		expect(makeApp().vault.getFiles().filter((f) => f.path.endsWith('.md'))).toHaveLength(countAfterFirst);
+		expect(first.written.map((f) => f.path)).toEqual(second.written.map((f) => f.path));
+		expect(has('Exports/Exports')).toBe(false);
+		expect(fs.readFileSync(path.join(vaultDir, 'Notes/A.md'), 'utf8')).toContain('%%secret%%');
 	});
 
 	it('writes absolute external outputs outside the vault', async () => {

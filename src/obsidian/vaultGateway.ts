@@ -37,7 +37,7 @@ export class ObsidianVaultGateway implements ExportGateway {
 		onProgress?: (current: number, total: number, currentFile?: string) => void,
 		onSkipped?: (path: string, message: string) => void
 	): Promise<VaultFile[]> {
-		const reserved = reservedOutputPaths(settings, { vaultBasePath: this.getVaultBasePath() });
+		const reserved = reservedOutputPaths(settings, { vaultBasePath: this.getVaultBasePath(), alreadyResolved: true });
 		const tag = settings.scopeTag?.replace(/^#+/, '').trim().toLowerCase();
 
 		const candidates = this.app.vault.getFiles().filter((file) => {

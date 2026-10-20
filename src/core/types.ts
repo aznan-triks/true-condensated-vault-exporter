@@ -291,6 +291,7 @@ export type ProgressCallback = (progress: ExportProgress) => void;
 export interface ExportGateway {
 	/** Absolute vault root, used to compare absolute outputs with source notes. */
 	getVaultBasePath?(): string | null;
+	/** Reads matching sources; output paths in settings must already be resolved for this run. */
 	loadVaultFiles(
 		settings: ExporterSettings,
 		signal?: AbortSignal,

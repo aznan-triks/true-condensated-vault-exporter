@@ -964,6 +964,20 @@ describe('output target (external folder)', () => {
 		expect(reservedOutputPaths(inside)).toEqual([]);
 	});
 
+	it('reserves resolved destinations without re-rooting them (VE-002)', () => {
+		const resolved = resolveOutputSettings({
+			...DEFAULT_SETTINGS, useExternalOutputFolder: true,
+			externalOutputFolder: 'C:/Vault/Exports', splitOutputFolder: '',
+		});
+		const options = { vaultBasePath: 'C:/Vault', alreadyResolved: true };
+		const reserved = reservedOutputPaths(resolved, options);
+		expect(reserved).toContain('Exports');
+		expect(reserved).not.toContain('Exports/Exports');
+		expect(reserved).toContain('Exports/Vault export.md');
+		expect(reservedOutputPaths(resolved, options)).toEqual(reserved);
+		expect(resolved.splitOutputFolder).toBe('C:/Vault/Exports');
+	});
+
 	it('excludes a vault-internal external folder from the next export', () => {
 		const reserved = reservedOutputPaths(
 			{ ...DEFAULT_SETTINGS, useExternalOutputFolder: true, externalOutputFolder: 'C:\\Vault\\Exports' },

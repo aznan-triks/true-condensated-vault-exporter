@@ -179,6 +179,8 @@ export function isFileIncluded(relativePath: string, options: FilterOptions): bo
  * Absolute locations (external output folder, absolute per-format paths) are
  * mapped back to a vault-relative path when they live inside the vault and a
  * `vaultBasePath` is provided; locations outside the vault need no protection.
+ * Set `alreadyResolved` for per-run paths from `resolveOutputSettings` to avoid
+ * re-rooting absolute split folders. The default accepts raw saved settings.
  */
 export function reservedOutputPaths(settings: {
 	notebooklmOutputPath: string;
@@ -188,7 +190,7 @@ export function reservedOutputPaths(settings: {
 	splitOutputFolder: string;
 	useExternalOutputFolder?: boolean;
 	externalOutputFolder?: string;
-}, options?: { vaultBasePath?: string | null }): string[] {
+}, options?: { vaultBasePath?: string | null; alreadyResolved?: boolean }): string[] {
 	const external = {
 		useExternalOutputFolder: settings.useExternalOutputFolder === true,
 		externalOutputFolder: settings.externalOutputFolder ?? '',
@@ -203,7 +205,7 @@ export function reservedOutputPaths(settings: {
 		settings.splitOutputFolder,
 	]) {
 		if (!candidate || candidate.trim().length === 0) continue;
-		const resolved = resolveOutputPath(external, candidate);
+		const resolved = options?.alreadyResolved ? candidate : resolveOutputPath(external, candidate);
 		if (!isAbsoluteOutputPath(resolved)) {
 			reserved.push(resolved);
 			continue;

@@ -126,3 +126,12 @@ Et dans `tests/features.test.ts` : un test avec un gateway réel (ou un double q
   3. Test stable **reservation of resolved settings**, not literal repeated resolution: expect `Exports`, never `Exports/Exports`, with matching sidebar/gateway sets. Keep default raw-settings compatibility tests for `reservedOutputPaths`.
   4. Migrate the existing raw gateway test's argument through `resolveOutputSettings`, preserving its name/coverage/assertions; add resolved blank-split and real two-run regression tests before the fix.
 - Status: **bloqué**. Remaining: obtain written user approval for these adjustments; then execute VE-002 tests first and continue the imposed order. VE-003 and later plans have not been started.
+
+### 2026-10-21 — resumed with user approval; implementation hash follows
+
+- The user's **"continue"** approves the three adjustments requested in the preceding response: resolved reservations in both callers, stable reservation rather than repeated resolution, and explicit resolution of the existing gateway test input without weakening its assertions.
+- Added `alreadyResolved` to `reservedOutputPaths`; both gateway and sidebar use it. Documented the resolved-only `loadVaultFiles` contract. Kept `resolveOutputSettings` and its absolute-leaf rule unchanged.
+- Tests first: `reserves resolved destinations without re-rooting them (VE-002)` failed on missing `Exports`; `excludes previous blank-root split outputs with resolved settings (VE-002)` loaded the prior output; `keeps the Markdown count constant across reindexed split runs (VE-002)` failed on VE-001's overwrite rejection. All three pass after the fix. The two-run regression uses the existing **real gateway fixture in `tests/gateway.test.ts`**, rather than duplicating that fixture in features tests: **2 Markdown files after each run**, same output paths, no `Exports/Exports`, original comment retained.
+- Smoke test `sidebar excludes the resolved blank split destination` failed with **2 notes**, then passed with **1 note** after the fix, exercising the actual sidebar and bundle.
+- `npm run check` **PASS**: 133/133 unit tests, 100/100 smoke assertions, typecheck and production build. Existing raw `reservedOutputPaths` tests and the feature test asserting absolute paths received by the gateway remain unchanged and green.
+- Updated the changelog; no automatic cleanup, dependency/configuration changes, or other fixes. Remaining: record the implementation hash and final tracker status.
