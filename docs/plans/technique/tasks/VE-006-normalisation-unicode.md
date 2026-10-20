@@ -115,11 +115,11 @@ Le comportement de comparaison est **reproduit**. Le fait qu'un vault donné con
 
 ## Journal d'exécution
 
-### 2026-10-21 — implementation hash pending
+### 2026-10-21 — `9780ac8`; documentation follow-up
 
 - Baseline pull/check PASS (155 tests / 101 smoke); read the full plan and every listed filtering/resolver site.
 - Tests first: **6 failed / 1 passed**. The four specified link/folder/reservation/scope regressions fail on NFC/NFD mismatches; additional coverage exercises onlyPath, excludedFiles and excludedPrefixes. The negative distinct-name/NFD-split-output test already passed. A real temporary-disk gateway regression failed to load an NFD path selected by an NFC scope.
 - Added comparison-only `pathKey` and applied it to all seven inclusion decision sites. `normalizePath`, output construction, casing policy and original resolver return paths are unchanged. Resolver keys now normalize NFC. Comments document canonically equivalent Linux names sharing a comparison key.
 - All **7 tests pass**, including original NFD link/output strings and the non-accented negative case. `npm run check` PASS: **162/162 tests, 101/101 smoke**, strict typecheck/build. Linux simulation/temporary files only, not a live macOS filesystem test; no normalization CPU target is claimed.
 
-- Remaining: record the green implementation hash and final tracker status.
+- Implementation `9780ac8` pushed; tracker marked `fait`. All acceptance criteria met; remaining: none.
