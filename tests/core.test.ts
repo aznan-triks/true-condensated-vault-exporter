@@ -809,6 +809,34 @@ describe('formatters and split export', () => {
 		expect(md).toContain('Description with World');
 	});
 
+	describe('Markdown TOC labels (VE-012)', () => {
+		it.each([
+			['A]B', '[A\\]B](#ab-0)'],
+			['[Draft] Titre', '[\\[Draft\\] Titre](#draft-titre-0)'],
+			['C\\D', '[C\\\\D](#cd-0)'],
+			['E\\[F]', '[E\\\\\\[F\\]](#ef-0)'],
+		])('escapes %s as a valid link without changing the section title', (title, expected) => {
+			const file = { path: 'A.md', name: 'A.md', content: 'body' };
+			const base = cleanNote(file, createExportContext([file], DEFAULT_SETTINGS));
+			const text = formatForMarkdown([{ ...base, title }], DEFAULT_SETTINGS, 'now');
+			expect(text).toContain(expected);
+			const link = /^1\. \[((?:\\.|[^\]\\])*)\]\(#[\w-]+\)/m.exec(text);
+			expect(link?.[1]?.replace(/\\([\\[\]])/g, '$1')).toBe(title);
+			expect(text).toContain('## 1. ' + title + ' <a id="');
+		});
+		it('escapes source hints without changing anchor generation', () => {
+			const file = { path: 'A.md', name: 'A.md', content: 'body' };
+			const base = cleanNote(file, createExportContext([file], DEFAULT_SETTINGS));
+			const notes = ['A]B', '[Draft] Titre', 'C\\D'].map((title) => ({ ...base, title, path: 'N/[Draft]/A]B.md' }));
+			const text = formatForMarkdown(notes, DEFAULT_SETTINGS, 'now');
+			expect(text).toContain('[A\\]B](#ab-0)');
+			expect(text).toContain('[\\[Draft\\] Titre](#draft-titre-1)');
+			expect(text).toContain('[C\\\\D](#cd-2)');
+			expect(text).toContain('<small>*(N/\\[Draft\\]/A\\]B.md)*</small>');
+			expect(text).toContain('## 1. A]B <a id="ab-0"></a>');
+		});
+	});
+
 	it('groups split files by first folder under the scope root', () => {
 		const settings = { ...DEFAULT_SETTINGS, scopeRoot: 'Knowledge Base', splitOutputFolder: 'out' };
 		const outputs = buildSplitFiles(notesFor(settings), settings);

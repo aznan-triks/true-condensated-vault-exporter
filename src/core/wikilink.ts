@@ -69,7 +69,7 @@ export function buildLinkResolver(files: { path: string; name: string }[]): (tar
 	};
 }
 
-function escapeMarkdownLabel(label: string): string {
+export function escapeMarkdownLabel(label: string): string {
 	return label.replace(/\\/g, '\\\\').replace(/\[/g, '\\[').replace(/\]/g, '\\]');
 }
 

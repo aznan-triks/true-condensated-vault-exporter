@@ -13,7 +13,7 @@ Implementation of the dated [2026-10-20 audit](../../audits/bugs-et-performance.
 | [VE-008](tasks/VE-008-snapshot-settings.md) | P2 | fait | `85857ae` | 4 new tests; check PASS (177 / 101) | Uniform rendering and destinations during UI mutations; raw unchanged |
 | [VE-009](tasks/VE-009-echec-partiel.md) | P2 | fait | `60cfdca` | 3 new tests + 6 net smoke assertions; check PASS (180 / 107) | Partial paths/bytes exact; failure history and strict cancellation smoke pass |
 | [VE-010](tasks/VE-010-ignored-properties.md) | P2 | fait | `d34e657` | 7 new tests; check PASS (187 / 107) | All built-ins filtered; default output and raw split YAML retained |
-| [VE-012](tasks/VE-012-markdown-echappement.md) | P2 | à faire | — | — | Escape Markdown TOC labels |
+| [VE-012](tasks/VE-012-markdown-echappement.md) | P2 | en cours | Implementation hash pending | 5 new tests; check PASS (192 / 107) | Escaped TOC labels/source hints; original section titles and anchors unchanged |
 | [VE-004](tasks/VE-004-collisions-noms-sortie.md) | P3 | à faire | — | — | Portable split names and source-aware errors |
 | [VE-011](tasks/VE-011-html-fences.md) | P3 | à faire | — | — | HTML code blocks and heading extraction |
 | [VE-013](tasks/VE-013-memoire-sorties.md) | P3 | à faire | — | — | Release output strings and binary copies |

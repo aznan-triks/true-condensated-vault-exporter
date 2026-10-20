@@ -91,3 +91,15 @@ Avant correctif, les trois premières assertions échouent.
 
 - Double échappement si un titre contient déjà `\[` : `escapeMarkdownLabel` échappe d'abord `\`, donc le résultat est correct (`\\\[`), mais un test dédié est nécessaire.
 - Un outil tiers qui analysait la ligne de sommaire sans comprendre les échappements verra des backslashes : c'est du Markdown standard.
+
+## Journal d'exécution
+
+### 2026-10-21 — implementation hash pending
+
+- Baseline pull/check PASS (187 tests / 107 smoke); read the full plan, Markdown formatter and existing wikilink label escaper.
+- All **5 new tests failed** first: closing/opening brackets, backslashes, an already-escaped bracket and the indexed/source-hint examples produced invalid/unescaped TOC labels.
+- Exported the existing `escapeMarkdownLabel` without moving or changing it, and reused it only for TOC labels/source hints. Section titles remain original text with an explicit comment. `generateAnchor`, HTML IDs and split names are unchanged.
+- All five now pass, including a link regex whose decoded label equals the original title, `[A\\]B](#ab-0)` and the other indexed examples, unchanged section headings and escaped path hints. Legacy `<small>`/emphasis formatting remains; `*`/`_` source-hint styling is deliberately not broadened in this task.
+- `npm run check` PASS: **192/192 tests, 107/107 smoke**, typecheck/build. Existing TOC/wikilink tests required no changes.
+
+- Remaining: record the green implementation hash and final tracker status.
