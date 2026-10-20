@@ -403,6 +403,19 @@ describe('orchestrator', () => {
 			expect([...written.values()]).toEqual(files.map((f) => f.content));
 		});
 
+		it('does not eagerly reduce cancellation snapshots for successful split writes', async () => {
+			const reduce = vi.spyOn(Array.prototype, 'reduce');
+			try {
+				const result = await runExports(fakeGateway(manyFiles).gateway, {
+					...DEFAULT_SETTINGS, splitMode: 'individual-files', splitOutputFolder: 'out',
+				}, ['split'], () => {});
+				expect(reduce.mock.calls.length).toBeLessThan(10);
+				expect(result.written).toHaveLength(manyFiles.length);
+			} finally {
+				reduce.mockRestore();
+			}
+		});
+
 		it('canonicalizes a linear number of paths instead of every pair', async () => {
 			const files = Array.from({ length: 100 }, (_, i) => ({ path: 'N/' + i + '.md', name: i + '.md', content: 'body' }));
 			const canonical = vi.spyOn(outputTarget, 'canonicalOutputPath');

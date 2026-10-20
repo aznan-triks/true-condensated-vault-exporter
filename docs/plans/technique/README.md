@@ -6,7 +6,7 @@ Implementation of the dated [2026-10-20 audit](../../audits/bugs-et-performance.
 |------|----------|--------|-----------|--------------|-------|
 | [VE-001](tasks/VE-001-collision-sorties-sources.md) | P0 | fait | `10cccd7` | 6 new tests; check PASS (130 tests / 99 smoke) | Rejected before all writes; portable case-only guard |
 | [VE-002](tasks/VE-002-reservation-destinations.md) | P1 | fait | `2160c68` | 3 new tests + 1 smoke; check PASS (133 / 100); Markdown count 2 → 2 | No Exports/Exports; sidebar and gateway aligned |
-| [VE-003](tasks/VE-003-split-quadratique.md) | P1 | bloqué | `7bf8a83` | 8 new tests; check PASS (141 / 100); 16k: 2,036.18 ms with real timers | 36.18 ms above the strict 2 s gate; awaiting decision, no further plans started |
+| [VE-003](tasks/VE-003-split-quadratique.md) | P1 | en cours | `7bf8a83` | 9 new tests; check PASS (142 / 100); 16k: 1,727.26 ms, real timers | Approved lazy cancellation snapshots; strict gate met |
 | [VE-005](tasks/VE-005-wikilinks-incomplets.md) | P2 | à faire | — | — | Shared wikilink parsing |
 | [VE-006](tasks/VE-006-normalisation-unicode.md) | P2 | à faire | — | — | NFC/NFD comparison keys |
 | [VE-007](tasks/VE-007-dataview-echec-silencieux.md) | P2 | à faire | — | — | Preserve unsupported Dataview queries and literals |

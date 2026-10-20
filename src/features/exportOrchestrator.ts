@@ -33,9 +33,9 @@ export interface ExportResult {
 	durationMs: number;
 }
 
-function checkCancelled(signal?: AbortSignal, partialResult?: ExportResult): void {
+function checkCancelled(signal?: AbortSignal, partialResult?: () => ExportResult): void {
 	if (signal?.aborted) {
-		throw new ExportCancelledError(partialResult);
+		throw new ExportCancelledError(partialResult?.());
 	}
 }
 
@@ -234,7 +234,7 @@ export async function runExports(
 		},
 		(filePath, message) => addSkipped(filePath, message)
 	));
-	checkCancelled(signal, snapshot());
+	checkCancelled(signal, snapshot);
 	if (files.length === 0) {
 		if (skippedFiles.length > 0) {
 			throw new Error('Could not read any of the ' + skippedFiles.length + ' matching files. ' + firstReadFailure);
@@ -247,7 +247,7 @@ export async function runExports(
 	const requestedYield = Number.isFinite(settings.yieldEvery) ? Math.floor(settings.yieldEvery) : 25;
 	const every = Math.max(1, Math.min(1000, requestedYield));
 	for (const [i, file] of files.entries()) {
-		checkCancelled(signal, snapshot());
+		checkCancelled(signal, snapshot);
 		try {
 			notes.push(cleanNote(file, ctx));
 		} catch (err: unknown) {
@@ -270,7 +270,7 @@ export async function runExports(
 	if (notes.length === 0) {
 		throw new Error('No note could be processed (' + files.length + ' files were skipped).');
 	}
-	checkCancelled(signal, snapshot());
+	checkCancelled(signal, snapshot);
 	onProgress({ stage: 'Cleaning notes', current: files.length, total: files.length, log: 'Processed ' + notes.length + ' notes.' });
 
 	const zipRequested = uniqueTargets.includes('zip');
@@ -313,7 +313,7 @@ export async function runExports(
 		}
 	}
 
-	checkCancelled(signal, snapshot());
+	checkCancelled(signal, snapshot);
 	let zipData: Uint8Array | null = null;
 	if (zipRequested) {
 		onProgress({ stage: 'ZIP bundle', current: 0, total: 1, log: 'Building archive (all formats + split)...' });
@@ -322,16 +322,16 @@ export async function runExports(
 	}
 
 	if (zipRequested && zipData) {
-		checkCancelled(signal, snapshot());
+		checkCancelled(signal, snapshot);
 		onProgress({ stage: 'ZIP bundle', current: 1, total: 1, currentFile: zipPath, log: 'Writing ' + zipPath });
 		await gateway.writeBinary(zipPath, zipData);
 		written.push({ path: zipPath, bytes: zipData.length });
 		await yieldToUi();
-		checkCancelled(signal, snapshot());
+		checkCancelled(signal, snapshot);
 	}
 
 	for (const [i, item] of plainOutputs.entries()) {
-		checkCancelled(signal, snapshot());
+		checkCancelled(signal, snapshot);
 		onProgress({
 			stage: item.stage,
 			current: i + 1,
@@ -342,7 +342,7 @@ export async function runExports(
 		await gateway.writeFile(item.out.path, item.out.content);
 		written.push({ path: item.out.path, bytes: utf8ByteLength(item.out.content) });
 		if ((i + 1) % every === 0 || i + 1 === plainOutputs.length) await yieldToUi();
-		checkCancelled(signal, snapshot());
+		checkCancelled(signal, snapshot);
 	}
 
 	const result = snapshot();

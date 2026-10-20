@@ -118,3 +118,13 @@ Référence : cible `markdown` seule sur le même corpus = **37 / 40 / 116 ms** 
 - **Out-of-scope observation (not fixed):** every `checkCancelled(signal, snapshot())` eagerly copies `written`/`skippedFiles` and reduces all written bytes even when the signal is not aborted. In the write loop this performs growing work on each file; it is separate from the two planned root causes. Keep all partial-result/cancellation safeguards intact.
 - **Proposal, awaiting user approval:** extend VE-003 narrowly to construct the existing cancellation snapshot only when cancellation is actually observed, without changing its contents or any error handling; test identical partial results and remeasure with the same harness. Alternatively the user may explicitly accept the measured 2.036 s bound. No further implementation or subsequent plan is started pending that decision.
 - Implementation `7bf8a83` pushed to the session branch; this documentation follow-up records its hash. Status: **bloqué**, not `fait`. Remaining: decision on this small scope extension / numerical criterion, final measurement and validation if approved, then VE-005.
+
+### 2026-10-21 — implementation hash pending
+
+- User approval: **"enchaîne sans t'arrêter"**, following the explicit request to extend VE-003 to lazy cancellation snapshots. The numerical target is unchanged.
+- Restored the local Git metadata to the already-pushed session history after verifying all restored workspace files byte-for-byte against `60294fa`; fast-forwarded this same branch, retained a backup stash, reinstalled only the existing lockfile. Baseline check PASS (141 tests / 100 smoke).
+- Added `does not eagerly reduce cancellation snapshots for successful split writes` first: **184 reductions** for 60 notes (expected <10), failing for the growing-snapshot work. Changed only the local cancellation helper to accept a snapshot callback and evaluate it on abort. Every cancellation check and all partial-result fields are retained; existing load/clean/write cancellation regressions pass unchanged.
+- Same real-timer, no-I/O harness, default `yieldEvery: 25`, all ordered names/bodies checked: **235.21 / 448.39 / 891.28 / 1,727.26 ms** for 2k/4k/8k/16k. At 16k the previously blocked **2,036.18 ms → 1,727.26 ms** now meets <2s. No timer stubbing, default tuning, or best-of rerun. Disposable `/tmp` script and bundle removed.
+- `npm run check` PASS: **142/142 tests, 100/100 smoke**, strict typecheck and production build. The nine VE-003 tests and all prior cancellation/ordered-output tests pass. No partial-failure behavior changed (VE-009 remains separate).
+
+- Remaining: record the green implementation hash and final tracker status.
