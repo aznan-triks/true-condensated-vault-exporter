@@ -11,7 +11,7 @@ import { formatForHtml, simpleMarkdownToHtml, renderInline, noteHeadings } from 
 import { formatForMarkdown } from '../src/core/markdownFormatter';
 import { parseCanvasContent } from '../src/core/canvasParser';
 import { buildSplitFiles } from '../src/features/exportSplit';
-import { cleanNote, createExportContext, parseVault } from '../src/core/pipeline';
+import { cleanNote, createExportContext, parseVault, visibleMetadata } from '../src/core/pipeline';
 import { DEFAULT_SETTINGS, ExporterSettings, VaultFile, mergeSettings } from '../src/core/types';
 import {
 	canonicalOutputPath,
@@ -845,6 +845,36 @@ describe('formatters and split export', () => {
 });
 
 describe('pipeline', () => {
+	describe('ignored built-in properties (VE-010)', () => {
+		const settings = { ...DEFAULT_SETTINGS, stripFrontmatter: false, ignoredProperties: [] };
+		const file = { path: 'A.md', name: 'A.md', content: '---\ncategory: Cat\norder: 1\nstatus: done\ntags: [alpha]\n---\nbody' };
+		const note = cleanNote(file, createExportContext([file], settings));
+		it.each([
+			['category', 'order', 'status', 'tags'],
+			['CATEGORY', 'Order', 'STATUS', 'Tags'],
+			['categories', 'ordre', 'statut', 'tag'],
+		])('hides all built-ins for keys %j', (...keys) => {
+			expect(visibleMetadata(note, { ...settings, ignoredProperties: keys })).toEqual([]);
+		});
+		it('keeps non-ignored custom metadata', () => {
+			const extra = { ...note, metadata: { ...note.metadata, custom: { Auteur: 'Alice' } } };
+			expect(visibleMetadata(extra, { ...settings, ignoredProperties: ['category', 'order', 'status', 'tags'] })).toEqual([['Auteur', 'Alice']]);
+		});
+		it('preserves the exact default metadata order and values', () => {
+			expect(visibleMetadata(note, settings)).toEqual([['Category', 'Cat'], ['Order', '1'], ['Status', 'done'], ['Tags', 'alpha']]);
+		});
+		it('omits built-in labels from all three consolidated formats', () => {
+			const ignored = { ...settings, ignoredProperties: ['category', 'order', 'status', 'tags'] };
+			for (const output of [formatForNotebookLM([note], ignored, 'now'), formatForMarkdown([note], ignored, 'now'), formatForHtml([note], ignored, 'now')]) {
+				for (const label of ['Category', 'Order', 'Status', 'Tags']) expect(output).not.toContain(label);
+			}
+		});
+		it('keeps split frontmatter verbatim even when its keys are ignored', () => {
+			const split = buildSplitFiles([note], { ...settings, splitMode: 'individual-files', ignoredProperties: ['category', 'order', 'status', 'tags'] });
+			expect(split[0]?.content).toBe('---\ncategory: Cat\norder: 1\nstatus: done\ntags: [alpha]\n---\n\nbody');
+		});
+	});
+
 	it('parses frontmatter exactly once per run (shared ParsedFile list)', () => {
 		const files: VaultFile[] = [
 			{ path: 'A.md', name: 'A.md', content: '---\ntitle: A\n---\nbody' },

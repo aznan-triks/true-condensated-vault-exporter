@@ -90,7 +90,7 @@ export interface ExporterSettings {
 	renderDataview: boolean;
 	/** Target format for wikilinks */
 	wikilinkFormat: WikilinkFormat;
-	/** Frontmatter property keys to ignore/strip during export */
+	/** Properties hidden in consolidated metadata; individual split frontmatter is not filtered. */
 	ignoredProperties: string[];
 	/** Whether to include Obsidian .canvas files in exports */
 	includeCanvas: boolean;

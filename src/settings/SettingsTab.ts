@@ -327,7 +327,7 @@ export class VaultExporterSettingsTab extends PluginSettingTab {
 		this.renderStringListSetting(
 			processingSection,
 			'Ignored Frontmatter Properties',
-			'YAML properties omitted from exported metadata (e.g. canvas, icon, trello keys). Autocomplete detects all properties present in your vault notes.',
+			'YAML properties omitted from consolidated export metadata, including category, order, status and tags. Individual split files keep the original frontmatter unless Strip Frontmatter is enabled. Autocomplete detects properties in your vault notes.',
 			this.plugin.settings.ignoredProperties,
 			() => this.plugin.gateway.getAllFrontmatterKeys(),
 			async (newList) => {

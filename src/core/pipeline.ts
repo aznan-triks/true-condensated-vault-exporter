@@ -108,6 +108,18 @@ export function cleanNote(file: VaultFile, ctx: ExportContext): CleanedNote {
 	};
 }
 
+/** Closed set of source aliases accepted by the metadata-visibility setting. */
+function metadataPropertyKey(value: string): string {
+	switch (value.toLowerCase()) {
+		case 'tag': return 'tags';
+		case 'categorie':
+		case 'categories': return 'category';
+		case 'ordre': return 'order';
+		case 'statut': return 'status';
+		default: return value.toLowerCase();
+	}
+}
+
 /** Visible metadata as [label, value] pairs, honoring ignoredProperties. Empty when frontmatter is stripped. */
 export function visibleMetadata(note: CleanedNote, settings: ExporterSettings): [string, string][] {
 	if (settings.stripFrontmatter || note.isCanvas) {
@@ -115,14 +127,17 @@ export function visibleMetadata(note: CleanedNote, settings: ExporterSettings): 
 	}
 	const meta = note.metadata;
 	const pairs: [string, string][] = [];
-	if (meta.category) pairs.push(['Category', meta.category]);
-	if (meta.order) pairs.push(['Order', meta.order]);
-	if (meta.status) pairs.push(['Status', meta.status]);
-	if (meta.tags.length > 0) pairs.push(['Tags', meta.tags.join(', ')]);
-	const ignored = new Set(settings.ignoredProperties.map((p) => p.toLowerCase()));
+	const ignored = new Set(settings.ignoredProperties.map(metadataPropertyKey));
+	const add = (label: string, value: string): void => {
+		if (!ignored.has(metadataPropertyKey(label))) pairs.push([label, value]);
+	};
+	if (meta.category) add('Category', meta.category);
+	if (meta.order) add('Order', meta.order);
+	if (meta.status) add('Status', meta.status);
+	if (meta.tags.length > 0) add('Tags', meta.tags.join(', '));
 	for (const [k, v] of Object.entries(meta.custom)) {
-		if (!ignored.has(k.toLowerCase()) && v !== undefined && v !== '') {
-			pairs.push([k, Array.isArray(v) ? v.join(', ') : String(v)]);
+		if (v !== undefined && v !== '') {
+			add(k, Array.isArray(v) ? v.join(', ') : String(v));
 		}
 	}
 	return pairs;
