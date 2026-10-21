@@ -3,6 +3,8 @@
 ## Unreleased
 
 ### Fixed
+- Settings text edits now save after a 300 ms pause, with close/unload flushes and visible save-failure feedback. Live settings update immediately; discrete controls remain immediate. Settings/history writes use ordered immutable snapshots instead of overlapping writes.
+- Recent history retains five runs with at most 20 output paths each, while preserving exact file counts and byte totals, including migrated legacy entries. The sidebar still reveals the first output; complete export/partial-failure results and exported files are not truncated.
 - Dataview now executes only closed top-level query fences. Queries shown inside Markdown/tilde code examples remain literal, while valid long backtick query fences render normally. Inline, unterminated, unsupported and DataviewJS examples retain their contents; literal mixed/CRLF line endings are preserved by block classification.
 - The release workflow runs the complete check on the tagged commit under Node 22 before publication. Existing install assets now fail explicitly unless a manual run opts into overwrite; missing assets can still be attached without touching unrelated files.
 - Replacing or unloading an export progress panel now releases its elapsed/auto-close timers and DOM. Late progress/completion callbacks on destroyed panels do nothing; failed/cancelled panels retain their existing visible-until-closed behavior.

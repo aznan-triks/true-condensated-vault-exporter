@@ -29,6 +29,7 @@ export default class VaultExporterPlugin extends Plugin {
 	// version (1.7.2), so it must not use the `override` modifier.
 	settings: ExporterSettings = mergeSettings(undefined);
 	history: ExportHistoryEntry[] = [];
+	private saveQueue: Promise<void> = Promise.resolve();
 	gateway!: ObsidianVaultGateway;
 	/** Registered settings tab; passed to the settings shortcut as a visibility probe. */
 	settingsTab!: VaultExporterSettingsTab;
@@ -130,6 +131,7 @@ export default class VaultExporterPlugin extends Plugin {
 	override onunload(): void {
 		cancelRunningExport();
 		ProgressPanel.destroyCurrent();
+		this.settingsTab?.flushPendingSave();
 	}
 
 	async loadSettings(): Promise<void> {
@@ -146,9 +148,13 @@ export default class VaultExporterPlugin extends Plugin {
 		this.history = sanitizeHistory(historyRaw);
 	}
 
-	private async persistSettingsData(): Promise<void> {
-		const data: PluginData = { settings: this.settings, history: this.history };
-		await this.saveData(data);
+	private persistSettingsData(): Promise<void> {
+		this.history = sanitizeHistory(this.history);
+		const data: PluginData = structuredClone({ settings: this.settings, history: this.history });
+		const save = this.saveQueue.then(() => this.saveData(data));
+		// Recover the queue only; the returned operation still rejects to its caller.
+		this.saveQueue = save.catch(() => {});
+		return save;
 	}
 
 	async saveSettings(): Promise<void> {
@@ -163,8 +169,8 @@ export default class VaultExporterPlugin extends Plugin {
 	}
 
 	setHistory(history: ExportHistoryEntry[]): void {
-		this.history = history;
-		void this.saveData({ settings: this.settings, history: this.history } as PluginData).catch((error: unknown) => {
+		this.history = sanitizeHistory(history);
+		void this.persistSettingsData().catch((error: unknown) => {
 			console.error('[vault-exporter] Could not save export history:', error);
 		});
 		for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE_EXPORTER_SIDEBAR)) {

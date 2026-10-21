@@ -10,8 +10,36 @@ import { isAbsoluteOutputPath } from '../core/outputTarget';
 import { VaultPathSuggest } from '../ui/VaultPathSuggest';
 
 export class VaultExporterSettingsTab extends PluginSettingTab {
+	private saveTimer: number | null = null;
+
 	constructor(app: App, private readonly plugin: VaultExporterPlugin) {
 		super(app, plugin);
+	}
+
+	private saveNow(): Promise<void> {
+		if (this.saveTimer !== null) {
+			window.clearTimeout(this.saveTimer);
+			this.saveTimer = null;
+		}
+		return this.plugin.saveSettings();
+	}
+
+	private scheduleSave(): void {
+		if (this.saveTimer !== null) window.clearTimeout(this.saveTimer);
+		this.saveTimer = window.setTimeout(() => this.flushPendingSave(), 300);
+	}
+
+	/** Best-effort flush for tab close/plugin unload; live settings already changed. */
+	flushPendingSave(): void {
+		if (this.saveTimer === null) return;
+		void this.saveNow().catch((error: unknown) => {
+			console.error('[vault-exporter] Could not save settings:', error);
+			new Notice('Could not save Vault Exporter settings. Your edits remain in memory; try saving again.');
+		});
+	}
+
+	override hide(): void {
+		this.flushPendingSave();
 	}
 
 	override display(): void {
@@ -50,9 +78,9 @@ export class VaultExporterSettingsTab extends PluginSettingTab {
 		this.createSetting(generalSection, 'Document Title', 'Title written at the top of consolidated exports.')
 			.addText((text) => {
 				text.setValue(this.plugin.settings.documentTitle);
-				text.onChange(async (val) => {
+				text.onChange((val) => {
 					this.plugin.settings.documentTitle = val.trim();
-					await this.plugin.saveSettings();
+					this.scheduleSave();
 				});
 			});
 		this.renderToggleSetting(
@@ -80,7 +108,7 @@ export class VaultExporterSettingsTab extends PluginSettingTab {
 					const seconds = Number(value);
 					if (PROGRESS_PANEL_AUTO_CLOSE_OPTIONS.some((option) => option === seconds)) {
 						this.plugin.settings.progressPanelAutoCloseSeconds = seconds;
-						await this.plugin.saveSettings();
+						await this.saveNow();
 					}
 				});
 			});
@@ -91,9 +119,9 @@ export class VaultExporterSettingsTab extends PluginSettingTab {
 			.addText((text) => {
 				text.setValue(this.plugin.settings.scopeRoot);
 				text.setPlaceholder('e.g. Notes or leave blank');
-				text.onChange(async (val) => {
+				text.onChange((val) => {
 					this.plugin.settings.scopeRoot = val.trim();
-					await this.plugin.saveSettings();
+					this.scheduleSave();
 				});
 				new VaultPathSuggest(this.app, text.inputEl, () => this.plugin.gateway.getAllFolders());
 			});
@@ -102,9 +130,9 @@ export class VaultExporterSettingsTab extends PluginSettingTab {
 			.addText((text) => {
 				text.setValue(this.plugin.settings.scopeTag);
 				text.setPlaceholder('e.g. #research or research');
-				text.onChange(async (val) => {
+				text.onChange((val) => {
 					this.plugin.settings.scopeTag = val.trim();
-					await this.plugin.saveSettings();
+					this.scheduleSave();
 				});
 			});
 
@@ -116,7 +144,7 @@ export class VaultExporterSettingsTab extends PluginSettingTab {
 			() => this.plugin.gateway.getAllFolders(),
 			async (newList) => {
 				this.plugin.settings.excludedFolders = newList;
-				await this.plugin.saveSettings();
+				await this.saveNow();
 			}
 		);
 
@@ -128,7 +156,7 @@ export class VaultExporterSettingsTab extends PluginSettingTab {
 			() => this.plugin.gateway.getAllFiles(),
 			async (newList) => {
 				this.plugin.settings.excludedFiles = newList;
-				await this.plugin.saveSettings();
+				await this.saveNow();
 			}
 		);
 
@@ -140,7 +168,7 @@ export class VaultExporterSettingsTab extends PluginSettingTab {
 			undefined,
 			async (newList) => {
 				this.plugin.settings.excludedPrefixes = newList;
-				await this.plugin.saveSettings();
+				await this.saveNow();
 			}
 		);
 
@@ -155,7 +183,7 @@ export class VaultExporterSettingsTab extends PluginSettingTab {
 				toggle.setValue(this.plugin.settings.useExternalOutputFolder);
 				toggle.onChange(async (value) => {
 					this.plugin.settings.useExternalOutputFolder = value;
-					await this.plugin.saveSettings();
+					await this.saveNow();
 					if (value && !isAbsoluteOutputPath(this.plugin.settings.externalOutputFolder)) {
 						const picked = await this.pickExternalOutputFolder();
 						if (!picked) {
@@ -175,9 +203,9 @@ export class VaultExporterSettingsTab extends PluginSettingTab {
 			text.setValue(this.plugin.settings.externalOutputFolder);
 			text.setPlaceholder('C:\\Exports or /Users/you/Exports');
 			text.inputEl.style.width = '100%';
-			text.onChange(async (value) => {
+			text.onChange((value) => {
 				this.plugin.settings.externalOutputFolder = value.trim();
-				await this.plugin.saveSettings();
+				this.scheduleSave();
 				this.refreshExternalFolderDescription(externalFolderSetting);
 			});
 		});
@@ -209,9 +237,9 @@ export class VaultExporterSettingsTab extends PluginSettingTab {
 		this.createSetting(outputSection, 'NotebookLM Consolidated Output', 'Vault-relative path, or an absolute file path on desktop, for the NotebookLM text file.')
 			.addText((text) => {
 				text.setValue(this.plugin.settings.notebooklmOutputPath);
-				text.onChange(async (val) => {
+				text.onChange((val) => {
 					this.plugin.settings.notebooklmOutputPath = val.trim();
-					await this.plugin.saveSettings();
+					this.scheduleSave();
 				});
 				new VaultPathSuggest(this.app, text.inputEl, () => this.plugin.gateway.getAllFiles());
 			});
@@ -219,9 +247,9 @@ export class VaultExporterSettingsTab extends PluginSettingTab {
 		this.createSetting(outputSection, 'HTML Consolidated Output', 'Vault-relative path, or an absolute file path on desktop, for the HTML document.')
 			.addText((text) => {
 				text.setValue(this.plugin.settings.htmlOutputPath);
-				text.onChange(async (val) => {
+				text.onChange((val) => {
 					this.plugin.settings.htmlOutputPath = val.trim();
-					await this.plugin.saveSettings();
+					this.scheduleSave();
 				});
 				new VaultPathSuggest(this.app, text.inputEl, () => this.plugin.gateway.getAllFiles());
 			});
@@ -229,9 +257,9 @@ export class VaultExporterSettingsTab extends PluginSettingTab {
 		this.createSetting(outputSection, 'Markdown Consolidated Output', 'Vault-relative path, or an absolute file path on desktop, for the consolidated Markdown document.')
 			.addText((text) => {
 				text.setValue(this.plugin.settings.markdownOutputPath);
-				text.onChange(async (val) => {
+				text.onChange((val) => {
 					this.plugin.settings.markdownOutputPath = val.trim();
-					await this.plugin.saveSettings();
+					this.scheduleSave();
 				});
 				new VaultPathSuggest(this.app, text.inputEl, () => this.plugin.gateway.getAllFiles());
 			});
@@ -239,9 +267,9 @@ export class VaultExporterSettingsTab extends PluginSettingTab {
 		this.createSetting(outputSection, 'ZIP Bundle Output', 'Where the ZIP bundle (all consolidated formats + split files) is written. Vault-relative or absolute path.')
 			.addText((text) => {
 				text.setValue(this.plugin.settings.zipOutputPath);
-				text.onChange(async (val) => {
+				text.onChange((val) => {
 					this.plugin.settings.zipOutputPath = val.trim();
-					await this.plugin.saveSettings();
+					this.scheduleSave();
 				});
 				new VaultPathSuggest(this.app, text.inputEl, () => this.plugin.gateway.getAllFiles());
 			});
@@ -254,7 +282,7 @@ export class VaultExporterSettingsTab extends PluginSettingTab {
 				drop.onChange(async (val) => {
 					if (val === 'folder-grouped' || val === 'individual-files') {
 						this.plugin.settings.splitMode = val;
-						await this.plugin.saveSettings();
+						await this.saveNow();
 					}
 				});
 			});
@@ -262,9 +290,9 @@ export class VaultExporterSettingsTab extends PluginSettingTab {
 		this.createSetting(outputSection, 'Split Group Folder', 'Folder-grouped mode: each direct subfolder of this folder becomes one file. Empty = scope root.')
 			.addText((text) => {
 				text.setValue(this.plugin.settings.splitGroupFolder);
-				text.onChange(async (val) => {
+				text.onChange((val) => {
 					this.plugin.settings.splitGroupFolder = val.trim();
-					await this.plugin.saveSettings();
+					this.scheduleSave();
 				});
 				new VaultPathSuggest(this.app, text.inputEl, () => this.plugin.gateway.getAllFolders());
 			});
@@ -273,9 +301,9 @@ export class VaultExporterSettingsTab extends PluginSettingTab {
 			.addText((text) => {
 				text.setValue(this.plugin.settings.splitOutputFolder);
 				text.inputEl.style.width = '100%';
-				text.onChange(async (val) => {
+				text.onChange((val) => {
 					this.plugin.settings.splitOutputFolder = val.trim();
-					await this.plugin.saveSettings();
+					this.scheduleSave();
 				});
 				new VaultPathSuggest(this.app, text.inputEl, () => this.plugin.gateway.getAllFolders());
 			});
@@ -287,7 +315,7 @@ export class VaultExporterSettingsTab extends PluginSettingTab {
 				toggle.setValue(this.plugin.settings.includeCanvas);
 				toggle.onChange(async (val) => {
 					this.plugin.settings.includeCanvas = val;
-					await this.plugin.saveSettings();
+					await this.saveNow();
 				});
 			});
 
@@ -296,7 +324,7 @@ export class VaultExporterSettingsTab extends PluginSettingTab {
 				toggle.setValue(this.plugin.settings.stripFrontmatter);
 				toggle.onChange(async (val) => {
 					this.plugin.settings.stripFrontmatter = val;
-					await this.plugin.saveSettings();
+					await this.saveNow();
 				});
 			});
 
@@ -305,7 +333,7 @@ export class VaultExporterSettingsTab extends PluginSettingTab {
 				toggle.setValue(this.plugin.settings.renderDataview);
 				toggle.onChange(async (val) => {
 					this.plugin.settings.renderDataview = val;
-					await this.plugin.saveSettings();
+					await this.saveNow();
 				});
 			});
 
@@ -319,7 +347,7 @@ export class VaultExporterSettingsTab extends PluginSettingTab {
 				drop.onChange(async (val) => {
 					if (val === 'canonical-alias' || val === 'clean-text' || val === 'keep-wikilink' || val === 'markdown') {
 						this.plugin.settings.wikilinkFormat = val;
-						await this.plugin.saveSettings();
+						await this.saveNow();
 					}
 				});
 			});
@@ -332,7 +360,7 @@ export class VaultExporterSettingsTab extends PluginSettingTab {
 			() => this.plugin.gateway.getAllFrontmatterKeys(),
 			async (newList) => {
 				this.plugin.settings.ignoredProperties = newList;
-				await this.plugin.saveSettings();
+				await this.saveNow();
 			},
 			true
 		);
@@ -349,7 +377,7 @@ export class VaultExporterSettingsTab extends PluginSettingTab {
 					if (val === 'system' || val === 'light' || val === 'dark') {
 						this.plugin.settings.htmlTheme = val;
 						this.updateHtmlPreview();
-						await this.plugin.saveSettings();
+						await this.saveNow();
 					}
 				});
 			});
@@ -361,7 +389,7 @@ export class VaultExporterSettingsTab extends PluginSettingTab {
 					if (/^#[0-9a-f]{6}$/i.test(value)) {
 						this.plugin.settings.htmlAccentColor = value.toLowerCase();
 						this.updateHtmlPreview();
-						await this.plugin.saveSettings();
+						await this.saveNow();
 					}
 				});
 			});
@@ -376,7 +404,7 @@ export class VaultExporterSettingsTab extends PluginSettingTab {
 					if (val === 'system' || val === 'serif' || val === 'monospace') {
 						this.plugin.settings.htmlFont = val;
 						this.updateHtmlPreview();
-						await this.plugin.saveSettings();
+						await this.saveNow();
 					}
 				});
 			});
@@ -393,7 +421,7 @@ export class VaultExporterSettingsTab extends PluginSettingTab {
 				this.plugin.settings.htmlContentWidth = width;
 				widthSetting.setDesc(widthDescription + width + ' px.');
 				this.updateHtmlPreview();
-				await this.plugin.saveSettings();
+				await this.saveNow();
 			});
 		});
 
@@ -406,9 +434,9 @@ export class VaultExporterSettingsTab extends PluginSettingTab {
 			.addText((text) => {
 				text.setValue(this.plugin.settings.htmlFooterText);
 				text.setPlaceholder('e.g. Research team');
-				text.onChange(async (value) => {
+				text.onChange((value) => {
 					this.plugin.settings.htmlFooterText = value.slice(0, 200);
-					await this.plugin.saveSettings();
+					this.scheduleSave();
 				});
 			});
 
@@ -435,9 +463,9 @@ export class VaultExporterSettingsTab extends PluginSettingTab {
 				area.setPlaceholder(':root { --ve-accent: #c0392b; }');
 				area.inputEl.rows = 6;
 				area.inputEl.style.width = '100%';
-				area.onChange(async (val) => {
+				area.onChange((val) => {
 					this.plugin.settings.customCss = val;
-					await this.plugin.saveSettings();
+					this.scheduleSave();
 				});
 			});
 
@@ -445,10 +473,10 @@ export class VaultExporterSettingsTab extends PluginSettingTab {
 			.addText((text) => {
 				text.setValue(String(this.plugin.settings.yieldEvery));
 				text.setPlaceholder('25');
-				text.onChange(async (val) => {
+				text.onChange((val) => {
 					const n = parseInt(val, 10);
 					this.plugin.settings.yieldEvery = Number.isFinite(n) && n > 0 ? n : 25;
-					await this.plugin.saveSettings();
+					this.scheduleSave();
 				});
 			});
 	}
@@ -482,7 +510,7 @@ export class VaultExporterSettingsTab extends PluginSettingTab {
 			return null;
 		}
 		this.plugin.settings.externalOutputFolder = picked;
-		await this.plugin.saveSettings();
+		await this.saveNow();
 		this.display();
 		new Notice('External export folder: ' + picked);
 		return picked;
@@ -509,7 +537,7 @@ export class VaultExporterSettingsTab extends PluginSettingTab {
 			toggle.setValue(this.plugin.settings[key]);
 			toggle.onChange(async (value) => {
 				this.plugin.settings[key] = value;
-				await this.plugin.saveSettings();
+				await this.saveNow();
 			});
 		});
 	}

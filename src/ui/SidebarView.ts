@@ -321,7 +321,7 @@ export class ExporterSidebarView extends ItemView {
 		main.createSpan({ cls: 've-history__label', text: entry.label });
 		main.createSpan({
 			cls: 've-history__meta',
-			text: relativeTime(entry.startedAt) + ' · ' + formatDuration(entry.durationMs) + ' · ' + entry.files.length + ' files · ' + formatBytes(totalBytes(entry.files)),
+			text: relativeTime(entry.startedAt) + ' · ' + formatDuration(entry.durationMs) + ' · ' + (entry.fileCount ?? entry.files.length) + ' files · ' + formatBytes(entry.totalBytes ?? totalBytes(entry.files)),
 		});
 		const firstOutput = entry.files[0];
 		if (firstOutput) {

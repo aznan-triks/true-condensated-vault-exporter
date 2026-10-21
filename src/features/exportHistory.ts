@@ -10,12 +10,21 @@ export interface ExportHistoryEntry {
 	startedAt: number;
 	durationMs: number;
 	outcome: 'success' | 'cancelled' | 'error';
+	/** Exact aggregates, always filled by normalization; optional for legacy producers. */
+	fileCount?: number;
+	totalBytes?: number;
+	/** First paths for UI/reveal only, not the complete export result. */
 	files: { path: string; bytes: number }[];
 }
 
 export const HISTORY_LIMIT = 5;
+export const HISTORY_FILE_SAMPLE = 20;
 
-/** Coerces unknown persisted data into a valid history list (max HISTORY_LIMIT entries). */
+function isMetric(value: unknown): value is number {
+	return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+}
+
+/** Validates legacy/current history, retaining bounded samples and exact aggregates. */
 export function sanitizeHistory(loaded: unknown): ExportHistoryEntry[] {
 	if (!Array.isArray(loaded)) return [];
 	const out: ExportHistoryEntry[] = [];
@@ -24,12 +33,17 @@ export function sanitizeHistory(loaded: unknown): ExportHistoryEntry[] {
 		const r = raw as Record<string, unknown>;
 		if (typeof r.id !== 'string' || typeof r.label !== 'string') continue;
 		const files: { path: string; bytes: number }[] = [];
+		let knownFileCount = 0;
+		let knownBytes = 0;
 		if (Array.isArray(r.files)) {
 			for (const f of r.files) {
 				if (f && typeof f === 'object') {
 					const fr = f as Record<string, unknown>;
 					if (typeof fr.path === 'string') {
-						files.push({ path: fr.path, bytes: typeof fr.bytes === 'number' ? fr.bytes : 0 });
+						const bytes = isMetric(fr.bytes) ? fr.bytes : 0;
+						knownFileCount++;
+						knownBytes = Math.min(Number.MAX_SAFE_INTEGER, knownBytes + bytes);
+						if (files.length < HISTORY_FILE_SAMPLE) files.push({ path: fr.path, bytes });
 					}
 				}
 			}
@@ -40,6 +54,8 @@ export function sanitizeHistory(loaded: unknown): ExportHistoryEntry[] {
 			startedAt: typeof r.startedAt === 'number' ? r.startedAt : Date.now(),
 			durationMs: typeof r.durationMs === 'number' ? r.durationMs : 0,
 			outcome: r.outcome === 'cancelled' || r.outcome === 'error' ? r.outcome : 'success',
+			fileCount: isMetric(r.fileCount) && r.fileCount >= knownFileCount ? r.fileCount : knownFileCount,
+			totalBytes: isMetric(r.totalBytes) && r.totalBytes >= knownBytes ? r.totalBytes : knownBytes,
 			files,
 		});
 		if (out.length >= HISTORY_LIMIT) break;
@@ -49,7 +65,7 @@ export function sanitizeHistory(loaded: unknown): ExportHistoryEntry[] {
 
 /** Prepends a new entry, keeping at most HISTORY_LIMIT (newest first). */
 export function pushHistory(history: ExportHistoryEntry[], entry: ExportHistoryEntry): ExportHistoryEntry[] {
-	return [entry, ...history].slice(0, HISTORY_LIMIT);
+	return sanitizeHistory([entry, ...history]);
 }
 
 export function formatBytes(n: number): string {

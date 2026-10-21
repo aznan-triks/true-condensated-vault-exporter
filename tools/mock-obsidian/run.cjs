@@ -400,9 +400,35 @@ const has = (rel) => fs.existsSync(path.join(VAULT, rel));
 	if (outputsInput) {
 		outputsInput.value = 'Out/notebooklm.txt';
 		outputsInput.dispatchEvent(new window.Event('change', { bubbles: true }));
-		await sleep(30);
+		await sleep(350);
 		record('edited text setting is saved', plugin._data?.settings?.notebooklmOutputPath === 'Out/notebooklm.txt', plugin._data?.settings?.notebooklmOutputPath);
 	}
+	console.log('\n--- typing burst (VE-017) ---');
+	const titleForBurst = settingByLabel('Document Title')?.querySelector('input');
+	const titleBeforeBurst = plugin.settings.documentTitle;
+	const saveDataBeforeBurst = plugin.saveData;
+	let typingWrites = 0;
+	plugin.saveData = async function (data) {
+		typingWrites++;
+		await saveDataBeforeBurst.call(this, structuredClone(data));
+	};
+	for (let i = 0; i < 10; i++) {
+		if (titleForBurst) {
+			titleForBurst.value = 'Typing ' + i;
+			titleForBurst.dispatchEvent(new window.Event('change', { bubbles: true }));
+		}
+	}
+	record('typing updates live settings immediately', plugin.settings.documentTitle === 'Typing 9');
+	record('typing defers disk persistence during the burst', typingWrites === 0, typingWrites);
+	await sleep(350);
+	record('ten keystrokes persist exactly once with the final value', typingWrites === 1 && plugin._data?.settings?.documentTitle === 'Typing 9', typingWrites);
+	if (titleForBurst) {
+		titleForBurst.value = titleBeforeBurst;
+		titleForBurst.dispatchEvent(new window.Event('change', { bubbles: true }));
+		await sleep(350);
+	}
+	plugin.saveData = saveDataBeforeBurst;
+
 	const themeSelect = settingByLabel('HTML Color Theme')?.querySelector('select');
 	if (themeSelect) {
 		themeSelect.value = 'dark';
@@ -437,6 +463,24 @@ const has = (rel) => fs.existsSync(path.join(VAULT, rel));
 		await sleep(30);
 	}
 	record('no console errors in settings', consoleErrors.length === 0, consoleErrors.join(' | '));
+
+	console.log('\n--- bounded history (VE-017) ---');
+	const historyBeforeBounded = plugin.history;
+	plugin.setHistory([{
+		id: 'sample', label: 'Sampled history', startedAt: Date.now(), durationMs: 100,
+		outcome: 'success', files: Array.from({ length: 100 }, (_, i) => ({ path: i === 0 ? 'Vault export.md' : 'Out/sample-' + i + '.md', bytes: 1024 })),
+	}]);
+	await sleep(30);
+	record('persisted history keeps twenty paths with exact totals', plugin._data?.history?.[0]?.files?.length === 20 && plugin.history[0]?.fileCount === 100 && plugin.history[0]?.totalBytes === 102400);
+	const boundedMeta = view.containerEl.querySelector('.ve-history__meta')?.textContent ?? '';
+	record('sampled history displays the full count and bytes', boundedMeta.includes('100 files') && boundedMeta.includes('100.0 KB'), boundedMeta);
+	const boundedHistoryRevealState = require('./obsidian-mock.cjs').__state;
+	boundedHistoryRevealState.revealCalls.length = 0;
+	view.containerEl.querySelector('.ve-history__reveal')?.click();
+	await sleep(20);
+	record('sampled history still reveals its first actual output', boundedHistoryRevealState.revealCalls.length === 1 && boundedHistoryRevealState.revealCalls[0] === path.join(VAULT, 'Vault export.md'));
+	plugin.setHistory(historyBeforeBounded);
+	await sleep(30);
 
 	console.log('\n--- command palette targets ---');
 	plugin.settings = { ...plugin.settings, notebooklmOutputPath: 'Vault export - NotebookLM.txt' };

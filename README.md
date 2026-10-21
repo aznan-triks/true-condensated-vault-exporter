@@ -30,6 +30,8 @@ An Obsidian desktop plugin for turning a vault, folder, or tagged subset into fi
 
 The sidebar also shows a scope preview and the five most recent runs, including each run’s duration. It remembers your selected export targets by default; turn this off in **Settings → General** to start with all targets instead. Use a history row’s folder button to reveal its first output, or clear the history without deleting exported files. When a tag filter is active, the preview is path-based and the sidebar says so; Canvas files are not included in tag-scoped exports. The sidebar and progress panel adapt to narrower and shorter windows, with larger touch targets.
 
+History keeps exact file counts and byte totals, plus the first 20 output paths per run for display/reveal, rather than retaining every path. This never deletes or truncates exported files.
+
 ### Scope and content
 
 Use **Scope Root** to limit exports to a vault folder and **Scope Tag** to include notes with a matching frontmatter or inline tag. Excluded folders, files, and folder prefixes apply to both. Previous exporter outputs are automatically excluded, so repeat runs do not ingest their own files.
@@ -51,6 +53,8 @@ Then reload Obsidian and enable **Vault Exporter** in **Settings → Community p
 ## Settings worth knowing
 
 The settings page is grouped and searchable: type a setting name or description to narrow the list.
+
+Text edits take effect in memory immediately and are saved after a 300 ms pause. Leaving the settings tab or unloading the plugin requests a flush; discrete controls save immediately. A forced shutdown before a pending write completes can still lose the last unsaved edit.
 
 - **Scope Root / Scope Tag** and exclusion lists control what is read.
 - Each consolidated format, the ZIP, and split files have configurable output paths. Use vault-relative paths or absolute paths on desktop; a blank split destination means the vault root.

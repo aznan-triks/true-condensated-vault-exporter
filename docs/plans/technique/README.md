@@ -20,7 +20,7 @@ Implementation of the dated [2026-10-20 audit](../../audits/bugs-et-performance.
 | [VE-014](tasks/VE-014-progress-panel-timer.md) | P3 | fait | `ea8a2d2` | 6 new tests + 5 smoke; check PASS (235 / 112); two live timers 2 → 1 | One live interval; unload and late callbacks leave no DOM or timers |
 | [VE-015](tasks/VE-015-release-sans-tests.md) | P3 | fait | `d6d5d4b` | 9 new tests; check PASS (244 / 112); mocked shell publishing blocked on check/asset failures | Tagged full check and explicit overwrite guards pass; remote YAML read matches; no release run |
 | [VE-016](tasks/VE-016-dataview-dans-fence.md) | P3 | fait | `f20c2a4` | 16 new tests + 1 smoke; check PASS (260 / 113); 10k scan 3.35 → 26.20 ms | Nested examples byte-preserved; real top-level queries execute; source regex removed |
-| [VE-017](tasks/VE-017-settings-frappe.md) | P3 | bloqué | — (no implementation) | Baseline PASS (260 / 113); 5 × 32k JSON 7,625,960 B | Approval required: migrate 30 ms text-persistence smoke to planned 300 ms debounce without weakening value assertions |
+| [VE-017](tasks/VE-017-settings-frappe.md) | P3 | en cours | Implementation hash pending | 27 new tests + 6 smoke; check PASS (287 / 119); JSON 7,625,960 → 6,160 B; ten keys → one save | All gates pass; ordered snapshots, close/unload flush and exact sampled-history totals; hash pending |
 
 ## Baseline and working rules
 

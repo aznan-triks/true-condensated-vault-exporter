@@ -793,6 +793,47 @@ describe('export history', () => {
 		expect(sanitizeHistory([{ id: 1, label: 'x' }, { id: '2' }])).toEqual([]);
 	});
 
+	describe('bounded persistence (VE-017)', () => {
+		const many = (count: number) => Array.from({ length: count }, (_, i) => ({ path: 'Exports/Notes/N' + i + '.md', bytes: 1024 }));
+		it('samples pushed files without changing the original full result or totals', () => {
+			const files = many(10000);
+			const result = pushHistory([], { ...entry('1'), files })[0];
+			expect(result?.fileCount).toBe(10000);
+			expect(result?.totalBytes).toBe(10240000);
+			expect(result?.files).toEqual(files.slice(0, 20));
+			expect(files).toHaveLength(10000);
+		});
+		it('migrates a legacy one-file entry with the same display/reveal information', () => {
+			const result = sanitizeHistory([entry('1')])[0];
+			expect(result).toMatchObject({ fileCount: 1, totalBytes: 100, files: [{ path: 'Vault export.md', bytes: 100 }] });
+		});
+		it('counts a giant legacy list before retaining only twenty samples', () => {
+			const result = sanitizeHistory([{ ...entry('1'), files: many(10000) }])[0];
+			expect(result?.fileCount).toBe(10000);
+			expect(result?.totalBytes).toBe(10240000);
+			expect(result?.files).toHaveLength(20);
+			expect(result?.files[0]?.path).toBe('Exports/Notes/N0.md');
+		});
+		it('retains exact summary totals across serialization, load and another push', () => {
+			const history = pushHistory([], { ...entry('1'), files: many(10000) });
+			const loaded = sanitizeHistory(JSON.parse(JSON.stringify(history)));
+			const result = pushHistory([], loaded[0]!)[0];
+			expect(result?.fileCount).toBe(10000);
+			expect(result?.totalBytes).toBe(10240000);
+			expect(result?.files).toHaveLength(20);
+		});
+		it('falls back to known file totals for malformed summary fields', () => {
+			const result = sanitizeHistory([{ ...entry('1'), fileCount: -4, totalBytes: NaN }])[0];
+			expect(result).toMatchObject({ fileCount: 1, totalBytes: 100 });
+		});
+		it('keeps five 32k-file exports below 200 kB in plugin data', () => {
+			let history: ExportHistoryEntry[] = [];
+			for (let i = 0; i < 5; i++) history = pushHistory(history, { ...entry(String(i)), files: many(32000) });
+			expect(Buffer.byteLength(JSON.stringify({ settings: DEFAULT_SETTINGS, history }), 'utf8')).toBeLessThan(200000);
+			expect(history.map((item) => item.fileCount)).toEqual([32000, 32000, 32000, 32000, 32000]);
+		});
+	});
+
 	it('caps history at the limit, newest first', () => {
 		let h: ExportHistoryEntry[] = [];
 		for (let i = 1; i <= 8; i++) h = pushHistory(h, entry(String(i)));
