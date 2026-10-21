@@ -114,7 +114,7 @@ Le premier test échoue avant correctif.
 
 ## Journal d'exécution
 
-### 2026-10-21 — implementation hash pending
+### 2026-10-21 — `f20c2a4`; documentation follow-up
 
 - Baseline pull/check PASS (244 tests / 112 smoke); read the full plan, complete block renderer, shared prose/fence scanner, pipeline order and existing fallback tests.
 - Tests first: **7 failed / 7 passed**. Nested four-/three-backtick and tilde examples were executed; valid long openings were not; adjacent fences and full-pipeline protection failed. Triple top-level, inline, unclosed, dataviewjs, four-space and unsupported controls already passed. New production-bundle smoke also failed on the nested example.
@@ -123,4 +123,4 @@ Le premier test échoue avant correctif.
 - All **16 new tests** and the smoke pass, including the required four scenarios, adjacent fences, long/indented openings, minimum-length closers, unsupported/CRLF fallback, mixed endings and full cleaning. `npm run check` PASS: **260/260 tests across 6 files, 113/113 smoke**, typecheck/build.
 - Nonblocking isolated scan measurement: 10,000 ordinary prose/inline-code bodies, one identical before/after sweep, **3.35 → 26.20 ms** (about +22.85 ms total); every result remained identical. This is the extra Dataview classification stage, not a new end-to-end VE-003 throughput claim. Disposable script/bundle/measurement JSON removed. No dependency/configuration changes or DataviewJS execution.
 
-- Remaining: record the green implementation hash and final tracker status.
+- Implementation `f20c2a4` pushed; tracker marked `fait`. All acceptance criteria met; remaining: none.
