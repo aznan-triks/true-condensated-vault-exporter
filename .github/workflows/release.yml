@@ -18,6 +18,11 @@ on:
         description: "Release tag to attach the assets to (e.g. v2.0.1)"
         required: true
         type: string
+      overwrite:
+        description: "Replace existing release assets (explicit opt-in)"
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -45,11 +50,14 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
           cache: npm
 
       - name: Install
         run: npm ci
+
+      - name: Verify
+        run: npm run check
 
       - name: Build
         run: npm run build
@@ -66,10 +74,23 @@ jobs:
       - name: Upload assets to release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.tag.outputs.tag }}
+          OVERWRITE: ${{ inputs.overwrite || false }}
         run: |
-          TAG="${{ steps.tag.outputs.tag }}"
           if ! gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --title "$TAG" --generate-notes
+          elif [ "$OVERWRITE" != "true" ]; then
+            EXISTING_ASSETS=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name')
+            for ASSET in main.js manifest.json styles.css; do
+              if grep -Fxq "$ASSET" <<< "$EXISTING_ASSETS"; then
+                echo "::error::asset already exists: $ASSET; re-run with overwrite=true"
+                exit 1
+              fi
+            done
+          fi
+          UPLOAD_ARGS=()
+          if [ "$OVERWRITE" = "true" ]; then
+            UPLOAD_ARGS+=(--clobber)
           fi
           gh release upload "$TAG" main.js manifest.json styles.css \
-            --repo "$GITHUB_REPOSITORY" --clobber
+            --repo "$GITHUB_REPOSITORY" "${UPLOAD_ARGS[@]}"

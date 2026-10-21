@@ -87,3 +87,16 @@ Le pipeline local `npm run check` (typecheck + tests + build + smoke, 7,7 s mesu
 
 - Le workflow tourne avec Node 22 désormais : si une dépendance de build n'y fonctionne pas, la release échoue. C'est préférable à publier un bundle non testé ; un test local `npm ci && npm run check` sur Node 22 (déjà fait dans l'audit) couvre ce point.
 - Le nouveau comportement « échouer si l'asset existe » peut surprendre lors d'un republish : le message doit indiquer l'option `overwrite`.
+
+## Journal d'exécution
+
+### 2026-10-21 — implementation hash pending
+
+- Baseline pull/check PASS (235 tests / 112 smoke); read the full plan, entire release workflow, package scripts and development/release documentation. No dependency, package-script or bundler configuration changes.
+- Tests first: **7 failed / 2 passed**. A failed full-check status was never observed, existing assets were clobbered, nominal/unrelated-asset paths always clobbered, and an asset-list error did not fail closed. Explicit overwrite and final upload-error propagation were already valid controls.
+- Added Verify (`npm run check`) after Install, before Build/publication on the existing tag checkout; aligned setup-node to 22. Kept the optional first-checkout cleanup out of scope. Added boolean manual `overwrite` input, default false; only explicit true passes `--clobber`. Exact target-asset conflicts fail with the asset name and `overwrite=true` guidance. Metadata-listing failures stop before upload; unrelated assets are not modified.
+- Nine dependency-free Node/Bash regressions execute the workflow's **own extracted run blocks** with temporary `npm`/`gh` stubs, never the real publisher. They prove configured check failures stop all GH calls, default duplicate assets fail explicitly, opt-in overwrite/nominal creation work, missing target assets are allowed and API/upload failures propagate. Static checks lock tagged checkout/order/Node/default input. No lint/test configuration change or third-party YAML parser was added.
+- `npm run check` PASS: **244/244 tests across 6 files, 112/112 smoke**, typecheck/build. README and changelog document the maintainer-visible policy.
+- No tag, release, workflow_dispatch, merge or asset modification was performed. The plan's live prerelease experiment is prohibited by the standing no-release instruction; local stub execution is the safe proof used here, not a claim that a live GitHub publication was exercised. Next: read the pushed workflow through `gh workflow view Release --ref <session branch> --yaml` and record its result before completion.
+
+- Remaining: record the green implementation hash and final tracker status.

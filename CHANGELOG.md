@@ -3,6 +3,7 @@
 ## Unreleased
 
 ### Fixed
+- The release workflow runs the complete check on the tagged commit under Node 22 before publication. Existing install assets now fail explicitly unless a manual run opts into overwrite; missing assets can still be attached without touching unrelated files.
 - Replacing or unloading an export progress panel now releases its elapsed/auto-close timers and DOM. Late progress/completion callbacks on destroyed panels do nothing; failed/cancelled panels retain their existing visible-until-closed behavior.
 - Exports render outputs on demand, write plain files before the ZIP, and reuse compressed records instead of re-rendering selected outputs for the archive, reducing simultaneous uncompressed copies. Files and archive contents are unchanged. Failures during later ZIP construction/write retain exact completed-file information; completed outputs are never rolled back. Whole archive ArrayBuffers are reused at the vault boundary, while subviews/shared buffers remain safely copied. The large-vault time target is met in the harness, but the peak-memory target remains unmet; further VE-013 memory work is explicitly deferred by user decision.
 - HTML exports recognize tilde and long fences, require matching fence markers/lengths, and render four-space/tab-indented code without turning it into headings. Code headings are also excluded from note navigation. Language-less blocks no longer emit an empty language class; existing list/table/quote rendering is retained.

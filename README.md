@@ -64,6 +64,8 @@ Markdown links point to vault-root-relative paths, not paths relative to each ex
 
 ## Development
 
+The **Release** workflow checks the tagged commit with `npm run check` on Node 22 before building/publishing assets. Existing `main.js`, `manifest.json` or `styles.css` assets cause an explicit failure by default. Reattaching/replacing them requires a manual workflow run for the tag with **overwrite** set to `true`; unrelated assets are left alone.
+
 ```bash
 npm ci
 npm run check    # TypeScript, unit tests, production build, mock-Obsidian smoke test
