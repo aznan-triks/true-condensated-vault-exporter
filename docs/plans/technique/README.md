@@ -17,7 +17,7 @@ Implementation of the dated [2026-10-20 audit](../../audits/bugs-et-performance.
 | [VE-004](tasks/VE-004-collisions-noms-sortie.md) | P3 | fait | `82f8652` | 11 new tests; check PASS (203 / 107) | Safe corpus unchanged; strict named collision guard before text/ZIP writes |
 | [VE-011](tasks/VE-011-html-fences.md) | P3 | fait | `b71ba3e` | 7 new tests; check PASS (210 / 107) | All required code assertions pass; HTML and note TOC agree |
 | [VE-013](tasks/VE-013-memoire-sorties.md) | P3 | reporté | `0ad656c`, `94be0a2`, `d581bed` | 19 new tests; check PASS (229 / 107); RSS 2,371.90 → 1,349.44 MB (FAIL); time 12,545.17 → 11,820.33 ms (PASS) | Written user decision 2026-10-21: defer remaining RSS work; retain green improvement, do not claim memory gate met |
-| [VE-014](tasks/VE-014-progress-panel-timer.md) | P3 | en cours | Implementation hash pending | 6 new tests + 5 smoke; check PASS (235 / 112); two live timers 2 → 1 | One current owner; synchronous unload cleanup; no late DOM/timer activity |
+| [VE-014](tasks/VE-014-progress-panel-timer.md) | P3 | fait | `ea8a2d2` | 6 new tests + 5 smoke; check PASS (235 / 112); two live timers 2 → 1 | One live interval; unload and late callbacks leave no DOM or timers |
 | [VE-015](tasks/VE-015-release-sans-tests.md) | P3 | à faire | — | — | Validate before publication; explicit overwrite |
 | [VE-016](tasks/VE-016-dataview-dans-fence.md) | P3 | à faire | — | — | Leave nested Dataview examples untouched |
 | [VE-017](tasks/VE-017-settings-frappe.md) | P3 | à faire | — | — | Bound persisted history and debounce typing |

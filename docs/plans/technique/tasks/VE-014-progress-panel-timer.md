@@ -109,7 +109,7 @@ Et dans le smoke : provoquer un export en erreur puis un export réussi, vérifi
 
 ## Journal d'exécution
 
-### 2026-10-21 — implementation hash pending
+### 2026-10-21 — `ea8a2d2`; documentation follow-up
 
 - Baseline pull/check PASS (229 tests / 107 smoke); read the full plan, all ProgressPanel entry points and constructor consumers, command closure and plugin unload.
 - Tests first: **4 failed / 2 passed**. Replacement did not clear the old interval, destroyed instances still mutated detached DOM/created a footer/timer, cleanup ownership was absent, and an evicted success timeout survived. Error/cancelled panels already stopped ticking and stayed visible. New smoke first failed both unload/late-callback DOM assertions.
@@ -118,4 +118,4 @@ Et dans le smoke : provoquer un export en erreur puis un export réussi, vérifi
 - Six jsdom unit tests pass: two live panels leave **one** interval (previously two), late callbacks change neither attached nor detached DOM and create no timers, replacement cancels old auto-close, and errors/cancellation remain visible. Five new smoke assertions track real window intervals through failure/success and synchronous unload of a live export, including late cancellation callbacks: panel/interval **1 → 0**.
 - `npm run check` PASS: **235/235 tests across 5 files, 112/112 smoke**, typecheck/build. No visual/accessibility/auto-close policy, dependency or configuration changes; this is mock-Obsidian/jsdom evidence, not live Electron profiling.
 
-- Remaining: record the green implementation hash and final tracker status.
+- Implementation `ea8a2d2` pushed; tracker marked `fait`. All acceptance criteria met; remaining: none.
