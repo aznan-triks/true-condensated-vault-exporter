@@ -50,6 +50,19 @@ global.requestAnimationFrame = (cb) => setTimeout(() => cb(Date.now()), 16);
 global.cancelAnimationFrame = (id) => clearTimeout(id);
 require('./dom-helpers.cjs').install(window);
 
+// Track the panel's real elapsed timers across failure/replacement/unload.
+const panelIntervals = new Set();
+let peakPanelIntervals = 0;
+const realSetInterval = window.setInterval.bind(window);
+const realClearInterval = window.clearInterval.bind(window);
+window.setInterval = (...args) => {
+	const id = realSetInterval(...args);
+	panelIntervals.add(id);
+	peakPanelIntervals = Math.max(peakPanelIntervals, panelIntervals.size);
+	return id;
+};
+window.clearInterval = (id) => { panelIntervals.delete(id); realClearInterval(id); };
+
 const obsidianMock = require('./obsidian-mock.cjs');
 
 // Obsidian's renderer provides CommonJS `require` on the window; the plugin's
@@ -477,6 +490,7 @@ const has = (rel) => fs.existsSync(path.join(VAULT, rel));
 	record('expected write failure is logged', expectedFailureLog >= 0);
 	if (expectedFailureLog >= 0) consoleErrors.splice(expectedFailureLog, 1);
 	plugin.gateway.writeFile = originalWrite;
+	record('failed panel releases its elapsed interval (VE-014)', panelIntervals.size === 0);
 
 	console.log('\n--- cancellation ---');
 	let cancelClicked = false;
@@ -498,6 +512,7 @@ const has = (rel) => fs.existsSync(path.join(VAULT, rel));
 	console.log('\n--- reveal shortcut ---');
 	// Fresh, deterministic run: the reveal button appears after a successful export.
 	record('export-markdown finishes again', (await runCommand('export-markdown')) === 'Done');
+	record('success after failure keeps one panel without timer accumulation (VE-014)', document.querySelectorAll('.ve-panel').length === 1 && panelIntervals.size === 0 && peakPanelIntervals === 1);
 	const revealState = require('./obsidian-mock.cjs').__state;
 	revealState.revealCalls.length = 0;
 	const revealBtn = window.document.querySelector('.ve-panel__reveal');
@@ -564,6 +579,14 @@ const has = (rel) => fs.existsSync(path.join(VAULT, rel));
 	plugin.gateway.revealOutput = () => null;
 	record('reveal returns false when no OS path', plugin.gateway.revealInFileManager('Vault export.md') === false);
 	delete plugin.gateway.revealOutput;
+
+	console.log('\n--- progress panel unload (VE-014) ---');
+	const unloadExport = plugin._commands.find((command) => command.id === 'export-all')?.callback();
+	record('unload fixture has one running panel interval', panelIntervals.size === 1);
+	plugin.onunload();
+	record('unload removes panel and interval immediately', document.querySelectorAll('.ve-panel').length === 0 && panelIntervals.size === 0);
+	await unloadExport;
+	record('late cancelled callbacks after unload recreate nothing', document.querySelectorAll('.ve-panel').length === 0 && panelIntervals.size === 0);
 
 	console.error = realError;
 	console.warn = realWarn;

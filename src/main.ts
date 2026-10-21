@@ -16,6 +16,7 @@ import { ExportHistoryEntry, sanitizeHistory } from './features/exportHistory';
 import { openSettingsTab, withSettingsTabId } from './obsidian/appSetting';
 import { ExporterSidebarView, VIEW_TYPE_EXPORTER_SIDEBAR } from './ui/SidebarView';
 import { VaultExporterSettingsTab } from './settings/SettingsTab';
+import { ProgressPanel } from './ui/ProgressPanel';
 
 /** Persisted plugin data: settings + recent export history (legacy data = settings only). */
 interface PluginData {
@@ -128,6 +129,7 @@ export default class VaultExporterPlugin extends Plugin {
 
 	override onunload(): void {
 		cancelRunningExport();
+		ProgressPanel.destroyCurrent();
 	}
 
 	async loadSettings(): Promise<void> {

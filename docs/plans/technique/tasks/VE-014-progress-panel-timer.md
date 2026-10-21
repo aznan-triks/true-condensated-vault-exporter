@@ -106,3 +106,16 @@ Et dans le smoke : provoquer un export en erreur puis un export réussi, vérifi
 
 - Un test qui crée plusieurs panneaux pour vérifier l'indépendance casserait : aucun test de ce type aujourd'hui.
 - `destroy()` appelé deux fois doit rester idempotent (le code actuel retire `root`, ce qui est sans effet la seconde fois ; les timers sont déjà à `null`).
+
+## Journal d'exécution
+
+### 2026-10-21 — implementation hash pending
+
+- Baseline pull/check PASS (229 tests / 107 smoke); read the full plan, all ProgressPanel entry points and constructor consumers, command closure and plugin unload.
+- Tests first: **4 failed / 2 passed**. Replacement did not clear the old interval, destroyed instances still mutated detached DOM/created a footer/timer, cleanup ownership was absent, and an evicted success timeout survived. Error/cancelled panels already stopped ticking and stayed visible. New smoke first failed both unload/late-callback DOM assertions.
+- Diagnostic correction: the current `finish()` clears the elapsed interval for **every outcome**, not only success as the plan's historical narrative suggests. Therefore failure→next-run is a positive no-leak control; the reproduced leak is replacement of a **live** instance plus its pending auto-close timer, and missing unload destruction. The planned ownership/lifecycle fix and all acceptance criteria still apply; no UX policy change is needed.
+- Added one static current owner, idempotent destruction and explicit unload cleanup. Late `update`, `log`, `finish` and queued elapsed refreshes are no-ops. There is no `setStage` method in the actual API; guarded every real relevant entry point instead. Destroying a stale instance cannot release the newer owner.
+- Six jsdom unit tests pass: two live panels leave **one** interval (previously two), late callbacks change neither attached nor detached DOM and create no timers, replacement cancels old auto-close, and errors/cancellation remain visible. Five new smoke assertions track real window intervals through failure/success and synchronous unload of a live export, including late cancellation callbacks: panel/interval **1 → 0**.
+- `npm run check` PASS: **235/235 tests across 5 files, 112/112 smoke**, typecheck/build. No visual/accessibility/auto-close policy, dependency or configuration changes; this is mock-Obsidian/jsdom evidence, not live Electron profiling.
+
+- Remaining: record the green implementation hash and final tracker status.
