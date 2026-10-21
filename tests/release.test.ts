@@ -6,6 +6,8 @@ import { join } from 'node:path';
 
 const workflow = readFileSync(new URL('../.github/workflows/release.yml', import.meta.url), 'utf8');
 const temporary: string[] = [];
+// The production workflow executes Ubuntu Bash; static policy checks stay cross-platform.
+const shellIt = it.skipIf(process.platform === 'win32');
 afterEach(() => { for (const dir of temporary.splice(0)) rmSync(dir, { recursive: true, force: true }); });
 
 /** Extract the workflow's own shell, not a second implementation of the guard. */
@@ -46,9 +48,10 @@ esac
 	chmodSync(npm, 0o755);
 	chmodSync(gh, 0o755);
 	const shell = ['Verify', 'Build', 'Upload assets to release'].map(stepRun).filter(Boolean).join('\n').replaceAll('${{ steps.tag.outputs.tag }}', 'v-test');
-	const result = spawnSync('bash', ['-e', '-o', 'pipefail', '-c', shell], {
+	const isolated = '[[ "$(command -v npm)" == "$MOCK_BIN/npm" && "$(command -v gh)" == "$MOCK_BIN/gh" ]] || exit 91\n' + shell;
+	const result = spawnSync('bash', ['-e', '-o', 'pipefail', '-c', isolated], {
 		cwd: dir, encoding: 'utf8',
-		env: { ...process.env, PATH: dir + ':' + process.env.PATH, TAG: 'v-test', GITHUB_REPOSITORY: 'example/test', OVERWRITE: String(options.overwrite ?? false), MOCK_CALLS: calls, MOCK_CHECK_EXIT: String(options.checkExit ?? 0), MOCK_EXISTS: String(options.exists ?? true), MOCK_ASSETS: options.assets ?? '', MOCK_LIST_EXIT: String(options.listExit ?? 0), MOCK_UPLOAD_EXIT: String(options.uploadExit ?? 0) },
+		env: { ...process.env, PATH: dir + ':' + process.env.PATH, TAG: 'v-test', GITHUB_REPOSITORY: 'example/test', OVERWRITE: String(options.overwrite ?? false), MOCK_CALLS: calls, MOCK_BIN: dir, MOCK_CHECK_EXIT: String(options.checkExit ?? 0), MOCK_EXISTS: String(options.exists ?? true), MOCK_ASSETS: options.assets ?? '', MOCK_LIST_EXIT: String(options.listExit ?? 0), MOCK_UPLOAD_EXIT: String(options.uploadExit ?? 0) },
 	});
 	return { ...result, calls: readFileSync(calls, 'utf8') };
 }
@@ -61,43 +64,43 @@ describe('release gate (VE-015)', () => {
 		expect(workflow).toContain('node-version: "22"');
 		expect(workflow).toMatch(/overwrite:\n\s+description:.*\n\s+required: false\n\s+type: boolean\n\s+default: false/);
 	});
-	it.each([1, 7])('never reaches publishing after a failed check (%s)', (checkExit) => {
+	shellIt.each([1, 7])('never reaches publishing after a failed check (%s)', (checkExit) => {
 		const result = execute({ checkExit });
 		expect(result.status).toBe(checkExit);
 		expect(result.calls).toContain('npm run check');
 		expect(result.calls).not.toContain('gh release');
 	});
-	it('fails explicitly instead of overwriting an existing target asset by default', () => {
+	shellIt('fails explicitly instead of overwriting an existing target asset by default', () => {
 		const result = execute({ assets: 'main.js\nmanifest.json\nstyles.css' });
 		expect(result.status).not.toBe(0);
 		expect(result.stdout).toContain('asset already exists');
 		expect(result.stdout).toContain('overwrite=true');
 		expect(result.calls).not.toContain('gh release upload');
 	});
-	it('allows clobber only with the explicit overwrite input', () => {
+	shellIt('allows clobber only with the explicit overwrite input', () => {
 		const result = execute({ assets: 'main.js', overwrite: true });
 		expect(result.status).toBe(0);
 		expect(result.calls).toMatch(/gh release upload .*--clobber/);
 	});
-	it('creates a new release and uploads without clobber when no release exists', () => {
+	shellIt('creates a new release and uploads without clobber when no release exists', () => {
 		const result = execute({ exists: false });
 		expect(result.status).toBe(0);
 		expect(result.calls).toContain('gh release create');
 		expect(result.calls).toContain('gh release upload');
 		expect(result.calls).not.toContain('--clobber');
 	});
-	it('allows missing target assets without overwriting unrelated assets', () => {
+	shellIt('allows missing target assets without overwriting unrelated assets', () => {
 		const result = execute({ assets: 'notes.txt' });
 		expect(result.status).toBe(0);
 		expect(result.calls).toContain('gh release upload');
 		expect(result.calls).not.toContain('--clobber');
 	});
-	it('fails closed when existing asset listing fails', () => {
+	shellIt('fails closed when existing asset listing fails', () => {
 		const result = execute({ listExit: 23 });
 		expect(result.status).toBe(23);
 		expect(result.calls).not.toContain('gh release upload');
 	});
-	it('does not mask an upload failure', () => {
+	shellIt('does not mask an upload failure', () => {
 		expect(execute({ uploadExit: 9 }).status).toBe(9);
 	});
 });

@@ -90,7 +90,7 @@ Le pipeline local `npm run check` (typecheck + tests + build + smoke, 7,7 s mesu
 
 ## Journal d'exécution
 
-### 2026-10-21 — implementation hash pending
+### 2026-10-21 — `d6d5d4b`; documentation follow-up
 
 - Baseline pull/check PASS (235 tests / 112 smoke); read the full plan, entire release workflow, package scripts and development/release documentation. No dependency, package-script or bundler configuration changes.
 - Tests first: **7 failed / 2 passed**. A failed full-check status was never observed, existing assets were clobbered, nominal/unrelated-asset paths always clobbered, and an asset-list error did not fail closed. Explicit overwrite and final upload-error propagation were already valid controls.
@@ -99,4 +99,6 @@ Le pipeline local `npm run check` (typecheck + tests + build + smoke, 7,7 s mesu
 - `npm run check` PASS: **244/244 tests across 6 files, 112/112 smoke**, typecheck/build. README and changelog document the maintainer-visible policy.
 - No tag, release, workflow_dispatch, merge or asset modification was performed. The plan's live prerelease experiment is prohibited by the standing no-release instruction; local stub execution is the safe proof used here, not a claim that a live GitHub publication was exercised. Next: read the pushed workflow through `gh workflow view Release --ref <session branch> --yaml` and record its result before completion.
 
-- Remaining: record the green implementation hash and final tracker status.
+- Implementation `d6d5d4b` pushed; tracker marked `fait`. All acceptance criteria met; remaining: none.
+
+- Read-only remote validation succeeded: `gh workflow view Release --ref arena/87cf4c66-true-condensated-vault-exporte --yaml`; returned YAML byte-matches the local workflow. No run was dispatched. Bash fixtures assert that both executable paths resolve to their temporary stubs before any command runs; shell tests target POSIX/Ubuntu (skipped on Windows), while static policy checks remain cross-platform. This prevents a developer host from accidentally invoking a real publisher.
