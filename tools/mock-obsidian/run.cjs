@@ -119,6 +119,7 @@ function writeFixture(root) {
 	write('Dataview/Projects.md', [
 		'```dataview', 'TABLE status FROM "Projects" WHERE status = "done" SORT file.name ASC', '```', '',
 		'```dataviewjs', 'const x = 1;', '```', '',
+		'````markdown', '```dataview', 'TABLE status FROM "Projects"', '```', '````', '',
 	].join('\n'));
 	write('Knowledge Base/Note.md', '# Note\n\nA note in a folder with a space.\n');
 	write('.hidden/Secret.md', '# Secret\n\nHidden folder.\n');
@@ -281,6 +282,7 @@ const has = (rel) => fs.existsSync(path.join(VAULT, rel));
 		record('markdown: note embed kept as text', md.includes('Embedded note: Beta') && !md.includes('![[Beta]]'));
 		record('markdown: attachment embed kept as its file name', md.includes('Embedded image: pic.png'));
 		record('markdown: dataviewjs left as a code block', md.includes('dataviewjs'));
+		record('markdown: nested Dataview example stays literal (VE-016)', md.includes('````markdown\n```dataview\nTABLE status FROM "Projects"\n```\n````'));
 		record('markdown: hidden folder excluded', !md.includes('Secret'));
 	}
 	if (has('Vault export.html')) {

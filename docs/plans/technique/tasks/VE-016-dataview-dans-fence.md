@@ -111,3 +111,16 @@ Le premier test échoue avant correctif.
 
 - Une fence dont la ligne de fermeture contient des espaces après les backticks est acceptée (`[ \t]*$`) : conforme à `splitContentSegments`, qui fait de même.
 - Un bloc Dataview collé à un autre fence (sans ligne vide) peut être classé différemment : couvrir par un test avant de considérer le correctif terminé.
+
+## Journal d'exécution
+
+### 2026-10-21 — implementation hash pending
+
+- Baseline pull/check PASS (244 tests / 112 smoke); read the full plan, complete block renderer, shared prose/fence scanner, pipeline order and existing fallback tests.
+- Tests first: **7 failed / 7 passed**. Nested four-/three-backtick and tilde examples were executed; valid long openings were not; adjacent fences and full-pipeline protection failed. Triple top-level, inline, unclosed, dataviewjs, four-space and unsupported controls already passed. New production-bundle smoke also failed on the nested example.
+- Replaced the global block regex with `splitContentSegments` classification, executing only a closed top-level Dataview backtick fence. Removed `DATAVIEW_BLOCK_REGEX`. Existing parse/evaluation fallback and unexpected-error behavior are unchanged; no `applyToProse` misuse, pipeline reordering or HTML/scanner refactor.
+- Two necessary implementation clarifications are covered rather than copied from the pseudocode: the closing run must be at least the opening length (a final triple does not close an unterminated quadruple), and the shared scanner assumes LF closers. A new CRLF-followed-by-prose regression failed against the naïve reuse. A local LF projection maps bounds back to original bytes, preserving CRLF/mixed literal/unsupported segments without changing the shared cleaner or normalizing fallback output.
+- All **16 new tests** and the smoke pass, including the required four scenarios, adjacent fences, long/indented openings, minimum-length closers, unsupported/CRLF fallback, mixed endings and full cleaning. `npm run check` PASS: **260/260 tests across 6 files, 113/113 smoke**, typecheck/build.
+- Nonblocking isolated scan measurement: 10,000 ordinary prose/inline-code bodies, one identical before/after sweep, **3.35 → 26.20 ms** (about +22.85 ms total); every result remained identical. This is the extra Dataview classification stage, not a new end-to-end VE-003 throughput claim. Disposable script/bundle/measurement JSON removed. No dependency/configuration changes or DataviewJS execution.
+
+- Remaining: record the green implementation hash and final tracker status.

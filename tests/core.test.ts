@@ -420,6 +420,55 @@ describe('dataviewEngine', () => {
 		expect(result).not.toContain('World');
 	});
 
+	describe('top-level Dataview fences (VE-016)', () => {
+		const query = 'TABLE ordre FROM "Knowledge Base/80_History/Events"';
+		const top = '```dataview\n' + query + '\n```';
+		it.each(['````markdown', '```markdown', '~~~markdown'])('preserves nested query examples under %s', (opening) => {
+			const marker = opening.startsWith('~') ? '~~~' : opening.replace('markdown', '');
+			const body = opening + '\n' + top + '\n' + marker;
+			expect(renderDataviewBlocks(body, parsed)).toBe(body);
+		});
+		it('still executes a real triple-backtick top-level query', () => {
+			expect(renderDataviewBlocks(top, parsed)).toBe(evaluateDataviewQuery(parseDataviewQuery(query)!, parsed));
+		});
+		it.each(['````dataview', '   ```` DATAVIEW   '])('executes the long top-level opening %s with its matching closer', (opening) => {
+			const body = opening + '\n' + query + '\n````  \t';
+			expect(renderDataviewBlocks(body, parsed)).toBe(evaluateDataviewQuery(parseDataviewQuery(query)!, parsed));
+		});
+		it.each([
+			'Use ` ```dataview ` in a note.',
+			'```dataview\n' + query,
+			'````dataview\n' + query + '\n```',
+			'```dataviewjs\n' + query + '\n```',
+			'    ```dataview\n' + query + '\n    ```',
+		])('leaves inline/unclosed/other-language/indented code literal: %s', (body) => {
+			expect(renderDataviewBlocks(body, parsed)).toBe(body);
+		});
+		it('handles adjacent literal and real fences without a blank separator', () => {
+			const literal = '````markdown\n' + top + '\n````';
+			expect(renderDataviewBlocks(literal + '\n' + top, parsed)).toBe(literal + '\n' + evaluateDataviewQuery(parseDataviewQuery(query)!, parsed));
+		});
+		it('executes a CRLF query before following prose without changing the remaining line endings', () => {
+			const body = top.replace(/\n/g, '\r\n') + '\r\nAfter';
+			expect(renderDataviewBlocks(body, parsed)).toBe(evaluateDataviewQuery(parseDataviewQuery(query)!, parsed) + '\r\nAfter');
+		});
+		it('preserves mixed-line-ending literal examples and unsupported queries byte-for-byte', () => {
+			const body = 'Intro\r\n````markdown\r\n' + top.replace(/\n/g, '\r\n') + '\r\n````\r\n```dataview\nTABLE title FROM [[Unsupported]]\n```\nAfter';
+			expect(renderDataviewBlocks(body, parsed)).toBe(body);
+		});
+		it('preserves unsupported long-fence queries with CRLF verbatim', () => {
+			const body = '````dataview\r\nTABLE title FROM [[Unsupported]]\r\n````';
+			expect(renderDataviewBlocks(body, parsed)).toBe(body);
+		});
+		it('preserves nested examples through the complete cleaning pipeline', () => {
+			const literal = '````markdown\n' + top + '\n````';
+			const file = { path: 'Guide.md', name: 'Guide.md', content: literal + '\n\n' + top };
+			const result = cleanNote(file, createExportContext([...sampleFiles, file], DEFAULT_SETTINGS));
+			expect(result.body).toContain(literal);
+			expect(result.body.match(/\| File \| ordre \|/g)).toHaveLength(1);
+		});
+	});
+
 	describe('faithful queries (VE-007)', () => {
 		it.each(['"WITHOUT ID"', "'WITHOUT ID'", '"a \\"WITHOUT ID\\" value"'])('preserves literal %s and does not hide the ID column', (literal) => {
 			const query = parseDataviewQuery('TABLE title\nWHERE title = ' + literal);

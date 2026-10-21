@@ -23,6 +23,7 @@
  */
 
 import { ParsedFile } from './types';
+import { splitContentSegments } from './markdownClean';
 
 export interface ParsedDataviewQuery {
 	type: 'TABLE' | 'LIST';
@@ -700,17 +701,37 @@ export function evaluateDataviewQuery(query: ParsedDataviewQuery, files: ParsedF
 	return [headerLine, separatorLine, ...rows].join('\n') + '\n';
 }
 
-const DATAVIEW_BLOCK_REGEX = /^ {0,3}```dataview\r?\n([\s\S]*?)^ {0,3}```/gm;
-
 export function renderDataviewBlocks(content: string, files: ParsedFile[]): string {
-	return content.replace(DATAVIEW_BLOCK_REGEX, (fullMatch, queryText: string) => {
-		const parsed = parseDataviewQuery(queryText);
-		if (!parsed) return fullMatch;
+	// The shared scanner expects LF closers. Project CRLF for classification only,
+	// mapping segment bounds back so literal/malformed blocks keep their exact bytes.
+	const crlfPositions: number[] = [];
+	const normalized = content.replace(/\r\n/g, (_newline: string, offset: number) => {
+		crlfPositions.push(offset - crlfPositions.length);
+		return '\n';
+	});
+	let normalizedEnd = 0;
+	let removed = 0;
+	let rawStart = 0;
+	return splitContentSegments(normalized).map((segment) => {
+		normalizedEnd += segment.text.length;
+		while ((crlfPositions[removed] ?? Infinity) < normalizedEnd) removed++;
+		const rawEnd = normalizedEnd + removed;
+		const originalText = content.slice(rawStart, rawEnd);
+		rawStart = rawEnd;
+		if (!segment.code) return originalText;
+		const lines = segment.text.split(/\r?\n/);
+		const marker = /^ {0,3}(`{3,})[ \t]*dataview[ \t]*$/i.exec(lines[0] ?? '')?.[1];
+		if (!marker || lines.length < 3) return originalText;
+		// A shorter final fence must not turn an unterminated long block executable.
+		const closer = new RegExp('^ {0,3}`{' + marker.length + ',}[ \\t]*$');
+		if (!closer.test(lines[lines.length - 1] ?? '')) return originalText;
+		const parsed = parseDataviewQuery(lines.slice(1, -1).join('\n'));
+		if (!parsed) return originalText;
 		try {
 			return evaluateDataviewQuery(parsed, files);
 		} catch (error: unknown) {
-			if (error instanceof DataviewQueryError) return fullMatch;
+			if (error instanceof DataviewQueryError) return originalText;
 			throw error;
 		}
-	});
+	}).join('');
 }
