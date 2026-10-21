@@ -149,7 +149,7 @@ Sur un corpus de 40 Mo (cas courant), le gain attendu est de ~500 Mo de RSS — 
 
 - Green intermediate implementation `94be0a2` pushed; tracker deliberately remains `bloqué`.
 
-### 2026-10-21 — approved compressed-record extension; RSS gate still blocked
+### 2026-10-21 — `d581bed`, approved compressed-record extension; RSS gate still blocked
 
 - The user selected **“Valider l’extension ciblée”** (not deferral). Resumed pull/check **PASS: 223 tests / 107 smoke**. Implemented only the approved prepare-once/assemble-last extension; thresholds and corpus remain unchanged.
 - Tests first: **4 failed / 1 passed**. Full, HTML-only, Markdown-only and split-only selections plus ZIP re-rendered selected outputs twice; the canonical-order equality control was already correct. These now all render each unique output once. Added a separate red regression for a later lazy formatter dropping already-written results: laziness introduced by this plan requires that same partial-result guarantee, not only gateway/ZIP failures.
@@ -161,3 +161,5 @@ Sur un corpus de 40 Mo (cas courant), le gain attendu est de ~500 Mo de RSS — 
 - Stopped again on the first full-size RSS failure. Scripts/bundles/measurement data removed after recording evidence. No work on VE-014–017.
 - **Next bounded proposal, awaiting approval:** replace the remaining whole-output UTF-8 allocation in the orchestrator’s ZIP preparation (HTML alone is 173,508,002 bytes) with bounded string-chunk encoding and in-memory incremental zlib compression. Keep the existing synchronous public `buildZip` API and its bytes/checks; share ZIP-record construction rather than fork its format. Preserve UTF-16 surrogate pairs at chunk boundaries, streamed CRC/byte counts, backpressure/errors/cancellation, ZIP-last ordering and exact partial results. This is **compression in memory only**, not ZIP/disk streaming, no workers/dependency/configuration changes. Add allocation/Unicode/failure regressions first, then the same strict measurements; no guaranteed pass is claimed.
 - Status remains **bloqué on RSS**. Remaining: written approval for this further bounded encoding/compression extension (or explicit P3 deferral), peak <1,200 MB with duration still ≤12,700 ms, final green check and completion documentation.
+
+- Green compressed-record implementation `d581bed` pushed; tracker remains `bloqué`, awaiting the next decision.
