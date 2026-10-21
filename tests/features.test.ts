@@ -5,6 +5,7 @@ import { crc32, buildZip, zipEntryName } from '../src/core/zip';
 import * as zipModule from '../src/core/zip';
 import { CONSOLIDATED_FORMATS } from '../src/features/formats';
 import { buildSplitFiles } from '../src/features/exportSplit';
+import * as splitModule from '../src/features/exportSplit';
 import { cleanNote, createExportContext } from '../src/core/pipeline';
 import { runExports, ExportCancelledError, ExportFailedError, utf8ByteLength } from '../src/features/exportOrchestrator';
 import {
@@ -148,6 +149,21 @@ describe('zip writer', () => {
 			expect([...written]).toEqual(expected.map((out) => [out.path, out.content]));
 			expect(readZip(actual)).toEqual(readZip(expectedZip));
 			expect(actual).toEqual(expectedZip);
+		} finally { vi.useRealTimers(); }
+	});
+
+	it('keeps canonical ZIP entry order when HTML is prepared first (VE-013 compressed records)', async () => {
+		vi.useFakeTimers({ toFake: ['Date'] });
+		vi.setSystemTime(new Date('2026-10-21T10:00:00Z'));
+		try {
+			const first = fakeGateway(manyFiles.slice(0, 1));
+			await runExports(first.gateway, DEFAULT_SETTINGS, ['zip'], () => {});
+			const second = fakeGateway(manyFiles.slice(0, 1));
+			await runExports(second.gateway, DEFAULT_SETTINGS, ['html', 'zip'], () => {});
+			expect([...second.written.keys()]).toEqual(['Vault export.html']);
+			const actual = second.writtenBinary.get(DEFAULT_SETTINGS.zipOutputPath)!;
+			expect(readZip(actual).map((entry) => entry.name)).toEqual(['Vault export - NotebookLM.txt', 'Vault export.html', 'Vault export.md', 'Vault export - split/A.txt']);
+			expect(actual).toEqual(first.writtenBinary.get(DEFAULT_SETTINGS.zipOutputPath));
 		} finally { vi.useRealTimers(); }
 	});
 
@@ -601,6 +617,26 @@ describe('orchestrator', () => {
 	});
 
 	describe('output retention and write order (VE-013)', () => {
+		it.each([
+			{ targets: ['all', 'zip'] as const },
+			{ targets: ['html', 'zip'] as const },
+			{ targets: ['zip', 'markdown'] as const },
+			{ targets: ['split', 'zip'] as const },
+		])('renders each output only once for $targets (VE-013 compressed records)', async ({ targets }) => {
+			const formatSpies = Object.values(CONSOLIDATED_FORMATS).map((format) => vi.spyOn(format, 'render'));
+			let splitRenders = 0;
+			const plan = splitModule.planSplitFiles;
+			const splitSpy = vi.spyOn(splitModule, 'planSplitFiles').mockImplementation((...args) => plan(...args).map((out) => ({
+				...out, render: () => { splitRenders++; return out.render(); },
+			})));
+			try {
+				const { gateway } = fakeGateway(manyFiles.slice(0, 1));
+				await runExports(gateway, DEFAULT_SETTINGS, [...targets], () => {});
+				for (const spy of formatSpies) expect(spy).toHaveBeenCalledTimes(1);
+				expect(splitRenders).toBe(1);
+			} finally { for (const spy of formatSpies) spy.mockRestore(); splitSpy.mockRestore(); }
+		});
+
 		it('counts UTF-8 bytes without allocating encoded output copies', () => {
 			const values = ['ascii', 'é漢😀', '\uD800', 'a\uDC00b'];
 			const expected = values.map((text) => new TextEncoder().encode(text).length);
@@ -645,9 +681,21 @@ describe('orchestrator', () => {
 			expect(error).toMatchObject({ name: 'ExportFailedError', failedPath: 'Vault export.md', partialResult: { written: [], totalBytes: 0 } });
 			expect(writtenBinary.size).toBe(0);
 		});
+		it('retains completed outputs if a later lazy formatter fails (VE-013 compressed records)', async () => {
+			const cause = new Error('formatter failed');
+			const spy = vi.spyOn(CONSOLIDATED_FORMATS.html, 'render').mockImplementation(() => { throw cause; });
+			try {
+				const { gateway, written } = fakeGateway(manyFiles.slice(0, 1));
+				const error: unknown = await runExports(gateway, DEFAULT_SETTINGS, ['all'], () => {}).catch((failure: unknown) => failure);
+				const completed = [...written].map(([path, content]) => ({ path, bytes: new TextEncoder().encode(content).length }));
+				expect(completed.map((file) => file.path)).toEqual(['Vault export - NotebookLM.txt']);
+				expect(error).toMatchObject({ name: 'ExportFailedError', failedPath: 'Vault export.html', cause, partialResult: { written: completed, totalBytes: completed.reduce((sum, file) => sum + file.bytes, 0) } });
+			} finally { spy.mockRestore(); }
+		});
+
 		it('retains exact completed files if deferred ZIP construction fails', async () => {
 			const cause = new Error('compressor failed');
-			const spy = vi.spyOn(zipModule, 'buildZip').mockImplementation(() => { throw cause; });
+			const spy = vi.spyOn(zipModule, 'buildPreparedZip').mockImplementation(() => { throw cause; });
 			try {
 				const { gateway, written, writtenBinary } = fakeGateway(manyFiles.slice(0, 1));
 				const error: unknown = await runExports(gateway, DEFAULT_SETTINGS, ['markdown', 'zip'], () => {}).catch((failure: unknown) => failure);
@@ -659,7 +707,7 @@ describe('orchestrator', () => {
 		});
 		it('keeps pre-write ZIP construction failures bare', async () => {
 			const cause = new Error('entry generator failed');
-			const spy = vi.spyOn(zipModule, 'buildZip').mockImplementation(() => { throw cause; });
+			const spy = vi.spyOn(zipModule, 'buildPreparedZip').mockImplementation(() => { throw cause; });
 			try {
 				const { gateway, written, writtenBinary } = fakeGateway(manyFiles.slice(0, 1));
 				const error: unknown = await runExports(gateway, DEFAULT_SETTINGS, ['zip'], () => {}).catch((failure: unknown) => failure);

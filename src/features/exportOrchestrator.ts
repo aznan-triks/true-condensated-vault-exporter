@@ -13,7 +13,7 @@ import { ExportGateway, ExporterSettings, ProgressCallback, RememberedExportTarg
 import { CleanedNote, cleanNote, createExportContext } from '../core/pipeline';
 import { CONSOLIDATED_FORMATS, ConsolidatedFormatId } from './formats';
 import { OutputPlan, planSplitFiles } from './exportSplit';
-import { buildZip, zipEntryName, ZipEntry, validateZipEntryNames } from '../core/zip';
+import { buildPreparedZip, prepareZipEntry, PreparedZipEntry, zipEntryName, validateZipEntryNames } from '../core/zip';
 import { canonicalOutputPath, externalFolderBase, resolveOutputSettings, usesExternalOutputFolder, vaultRelativeOutputPath } from '../core/outputTarget';
 
 export type ExportTarget = RememberedExportTarget;
@@ -177,10 +177,14 @@ function zipOutputs(consolidated: Map<ConsolidatedFormatId, OutputPlan>, split: 
 	return outputs;
 }
 
-/** Encode/compress one re-rendered output at a time, using the same exportedAt. */
-function* zipEntries(outputs: NamedOutput[]): Generator<ZipEntry> {
+/** Reuse prepared records and render only ZIP-only outputs, in canonical order. */
+function* zipRecords(outputs: NamedOutput[], prepared: Map<OutputPlan, PreparedZipEntry>, modifiedAt: Date): Generator<PreparedZipEntry> {
 	const encoder = new TextEncoder();
-	for (const { name, out } of outputs) yield { name, data: encoder.encode(out.render()) };
+	for (const { name, out } of outputs) {
+		const record = prepared.get(out) ?? prepareZipEntry({ name, data: encoder.encode(out.render()) }, modifiedAt);
+		prepared.delete(out);
+		yield record;
+	}
 }
 
 /** Written files are never rolled back: cancellation and write failures report what was kept. */
@@ -342,6 +346,11 @@ export async function runExports(
 		}
 	};
 
+	const prepared = new Map<OutputPlan, PreparedZipEntry>();
+	const archiveNames = new Map(archiveOutputs.map(({ name, out }) => [out, name]));
+	const zipModifiedAt = new Date();
+	const encoder = new TextEncoder();
+
 	for (const [i, item] of plainOutputs.entries()) {
 		checkCancelled(signal, snapshot);
 		onProgress({
@@ -351,9 +360,25 @@ export async function runExports(
 			currentFile: item.out.path,
 			log: 'Writing ' + item.out.path,
 		});
-		let content = item.out.render();
+		let content: string;
+		try {
+			content = item.out.render();
+		} catch (error: unknown) {
+			if (error instanceof ExportCancelledError || written.length === 0) throw error;
+			throw failure(item.out.path, error);
+		}
 		await writeOutput(item.out.path, () => gateway.writeFile(item.out.path, content));
 		written.push({ path: item.out.path, bytes: utf8ByteLength(content) });
+		const archiveName = archiveNames.get(item.out);
+		if (archiveName !== undefined) {
+			checkCancelled(signal, snapshot);
+			try {
+				prepared.set(item.out, prepareZipEntry({ name: archiveName, data: encoder.encode(content) }, zipModifiedAt));
+			} catch (error: unknown) {
+				if (error instanceof ExportCancelledError) throw error;
+				throw failure(zipPath, error);
+			}
+		}
 		content = ''; // Do not retain a large string across the UI yield/next render.
 		if ((i + 1) % every === 0 || i + 1 === plainOutputs.length) await yieldToUi();
 		checkCancelled(signal, snapshot);
@@ -367,7 +392,7 @@ export async function runExports(
 		await yieldToUi();
 		let archive: Uint8Array;
 		try {
-			archive = buildZip(zipEntries(archiveOutputs));
+			archive = buildPreparedZip(zipRecords(archiveOutputs, prepared, zipModifiedAt));
 		} catch (error: unknown) {
 			if (error instanceof ExportCancelledError || written.length === 0) throw error;
 			throw failure(zipPath, error);

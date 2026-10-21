@@ -92,74 +92,91 @@ export function validateZipEntryNames(entryNames: Iterable<string>): void {
 	for (const name of entryNames) checkedZipName(name, names, encoder);
 }
 
-/** Builds a complete ZIP archive (local headers + central directory + EOCD). */
-export function buildZip(entries: Iterable<ZipEntry>, modifiedAt: Date = new Date()): Uint8Array {
-	const { time, date } = dosDateTime(modifiedAt);
-	const encoder = new TextEncoder();
+const PREPARED_ZIP_RECORD = Symbol('prepared ZIP record');
 
+/** Opaque, validated records: raw input/renderer strings are never retained. */
+export interface PreparedZipEntry {
+	readonly name: string;
+	readonly [PREPARED_ZIP_RECORD]: { readonly local: Uint8Array; readonly central: Uint8Array };
+}
+
+/** Compress once; only exact-size ZIP records survive (stored when deflate expands). */
+export function prepareZipEntry(entry: ZipEntry, modifiedAt: Date = new Date()): PreparedZipEntry {
+	const { time, date } = dosDateTime(modifiedAt);
+	const { safeName, nameBytes } = checkedZipName(entry.name, new Set<string>(), new TextEncoder());
+	const raw = entry.data;
+	if (raw.length > MAX_ZIP32_VALUE) throw new Error('ZIP entry is too large for ZIP32: ' + safeName);
+	const crc = crc32(raw);
+
+	let compressed: Uint8Array;
+	let method: number;
+	if (raw.length > STORE_THRESHOLD) {
+		// zlib accepts the view directly; do not clone a whole uncompressed entry.
+		const deflated = deflateRawSync(raw, { level: 6 });
+		method = deflated.length < raw.length ? 8 : 0;
+		compressed = method === 8 ? deflated : raw;
+	} else {
+		method = 0;
+		compressed = raw;
+	}
+	if (compressed.length > MAX_ZIP32_VALUE) throw new Error('Compressed ZIP entry is too large for ZIP32: ' + safeName);
+
+	const local = concat([
+		u32(0x04034b50),
+		u16(20), // version needed
+		u16(0x0800), // flags: UTF-8 name
+		u16(method),
+		u16(time),
+		u16(date),
+		u32(crc),
+		u32(compressed.length),
+		u32(raw.length),
+		u16(nameBytes.length),
+		u16(0), // extra length
+		nameBytes,
+		compressed,
+	]);
+
+	const central = concat([
+		u32(0x02014b50),
+		u16(20), // version made by
+		u16(20), // version needed
+		u16(0x0800),
+		u16(method),
+		u16(time),
+		u16(date),
+		u32(crc),
+		u32(compressed.length),
+		u32(raw.length),
+		u16(nameBytes.length),
+		u16(0), // extra
+		u16(0), // comment
+		u16(0), // disk
+		u16(0), // internal attrs
+		u32(0), // external attrs
+		u32(0),
+		nameBytes, // name follows the fixed 46-byte header
+	]);
+	return { name: safeName, [PREPARED_ZIP_RECORD]: { local, central } };
+}
+
+/** Assemble prepared entries in canonical order, independent of preparation order. */
+export function buildPreparedZip(entries: Iterable<PreparedZipEntry>): Uint8Array {
 	const localParts: Uint8Array[] = [];
 	const centralParts: Uint8Array[] = [];
 	const names = new Set<string>();
+	const encoder = new TextEncoder();
 	let localOffset = 0;
-
 	for (const entry of entries) {
-		const { safeName, nameBytes } = checkedZipName(entry.name, names, encoder);
-		const raw = entry.data;
-		if (raw.length > MAX_ZIP32_VALUE) throw new Error('ZIP entry is too large for ZIP32: ' + safeName);
-		const crc = crc32(raw);
-
-		let compressed: Uint8Array;
-		let method: number;
-		if (raw.length > STORE_THRESHOLD) {
-			// zlib accepts the view directly; do not clone a whole uncompressed entry.
-			const deflated = deflateRawSync(raw, { level: 6 });
-			method = deflated.length < raw.length ? 8 : 0;
-			compressed = method === 8 ? deflated : raw;
-		} else {
-			method = 0;
-			compressed = raw;
-		}
-		if (compressed.length > MAX_ZIP32_VALUE) throw new Error('Compressed ZIP entry is too large for ZIP32: ' + safeName);
-
-		const local = concat([
-			u32(0x04034b50),
-			u16(20), // version needed
-			u16(0x0800), // flags: UTF-8 name
-			u16(method),
-			u16(time),
-			u16(date),
-			u32(crc),
-			u32(compressed.length),
-			u32(raw.length),
-			u16(nameBytes.length),
-			u16(0), // extra length
-			nameBytes,
-			compressed,
-		]);
-
-		centralParts.push(concat([
-			u32(0x02014b50),
-			u16(20), // version made by
-			u16(20), // version needed
-			u16(0x0800),
-			u16(method),
-			u16(time),
-			u16(date),
-			u32(crc),
-			u32(compressed.length),
-			u32(raw.length),
-			u16(nameBytes.length),
-			u16(0), // extra
-			u16(0), // comment
-			u16(0), // disk
-			u16(0), // internal attrs
-			u32(0), // external attrs
-			u32(localOffset),
-			nameBytes, // name follows the fixed 46-byte header
-		]));
-
-		localParts.push(local);
-		localOffset += local.length;
+		checkedZipName(entry.name, names, encoder);
+		const record = entry[PREPARED_ZIP_RECORD];
+		if (!record) throw new Error('ZIP entry was not prepared: ' + entry.name);
+		// Never mutate reusable prepared metadata when filling this archive's offsets.
+		const central = record.central.slice();
+		new DataView(central.buffer, central.byteOffset, central.byteLength).setUint32(42, localOffset, true);
+		centralParts.push(central);
+		localParts.push(record.local);
+		localOffset += record.local.length;
 		if (localOffset > MAX_ZIP32_VALUE) throw new Error('ZIP archive exceeds the ZIP32 size limit.');
 	}
 
@@ -177,6 +194,14 @@ export function buildZip(entries: Iterable<ZipEntry>, modifiedAt: Date = new Dat
 	]);
 
 	return concat([...localParts, centralDir, eocd]);
+}
+
+/** Existing public API, still consuming its input in a single pass. */
+export function buildZip(entries: Iterable<ZipEntry>, modifiedAt: Date = new Date()): Uint8Array {
+	function* prepared(): Generator<PreparedZipEntry> {
+		for (const entry of entries) yield prepareZipEntry(entry, modifiedAt);
+	}
+	return buildPreparedZip(prepared());
 }
 
 /**
