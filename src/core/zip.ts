@@ -71,9 +71,29 @@ function concat(parts: Uint8Array[]): Uint8Array {
 const STORE_THRESHOLD = 256;
 const MAX_ZIP32_VALUE = 0xffffffff;
 
+/** Common metadata checks for preflight and single-pass archive construction. */
+function checkedZipName(name: string, names: Set<string>, encoder: TextEncoder): { safeName: string; nameBytes: Uint8Array } {
+	const safeName = name.replace(/\\/g, '/');
+	if (!safeName || safeName.startsWith('/') || /^[a-z]:\//i.test(safeName) || safeName.split('/').includes('..')) {
+		throw new Error('Unsafe ZIP entry path: ' + name);
+	}
+	if (names.has(safeName)) throw new Error('Duplicate ZIP entry path: ' + safeName);
+	if (names.size >= 0xffff) throw new Error('This ZIP writer does not support more than 65,535 entries.');
+	const nameBytes = encoder.encode(safeName);
+	if (nameBytes.length > 0xffff) throw new Error('ZIP entry name is too long: ' + safeName);
+	names.add(safeName);
+	return { safeName, nameBytes };
+}
+
+/** Validates predictable metadata errors before any output file is written. */
+export function validateZipEntryNames(entryNames: Iterable<string>): void {
+	const names = new Set<string>();
+	const encoder = new TextEncoder();
+	for (const name of entryNames) checkedZipName(name, names, encoder);
+}
+
 /** Builds a complete ZIP archive (local headers + central directory + EOCD). */
-export function buildZip(entries: ZipEntry[], modifiedAt: Date = new Date()): Uint8Array {
-	if (entries.length > 0xffff) throw new Error('This ZIP writer does not support more than 65,535 entries.');
+export function buildZip(entries: Iterable<ZipEntry>, modifiedAt: Date = new Date()): Uint8Array {
 	const { time, date } = dosDateTime(modifiedAt);
 	const encoder = new TextEncoder();
 
@@ -83,14 +103,7 @@ export function buildZip(entries: ZipEntry[], modifiedAt: Date = new Date()): Ui
 	let localOffset = 0;
 
 	for (const entry of entries) {
-		const safeName = entry.name.replace(/\\/g, '/');
-		if (!safeName || safeName.startsWith('/') || /^[a-z]:\//i.test(safeName) || safeName.split('/').includes('..')) {
-			throw new Error('Unsafe ZIP entry path: ' + entry.name);
-		}
-		if (names.has(safeName)) throw new Error('Duplicate ZIP entry path: ' + safeName);
-		names.add(safeName);
-		const nameBytes = encoder.encode(safeName);
-		if (nameBytes.length > 0xffff) throw new Error('ZIP entry name is too long: ' + safeName);
+		const { safeName, nameBytes } = checkedZipName(entry.name, names, encoder);
 		const raw = entry.data;
 		if (raw.length > MAX_ZIP32_VALUE) throw new Error('ZIP entry is too large for ZIP32: ' + safeName);
 		const crc = crc32(raw);
@@ -98,7 +111,8 @@ export function buildZip(entries: ZipEntry[], modifiedAt: Date = new Date()): Ui
 		let compressed: Uint8Array;
 		let method: number;
 		if (raw.length > STORE_THRESHOLD) {
-			const deflated = new Uint8Array(deflateRawSync(Buffer.from(raw), { level: 6 } as object));
+			// zlib accepts the view directly; do not clone a whole uncompressed entry.
+			const deflated = deflateRawSync(raw, { level: 6 });
 			method = deflated.length < raw.length ? 8 : 0;
 			compressed = method === 8 ? deflated : raw;
 		} else {
@@ -155,8 +169,8 @@ export function buildZip(entries: ZipEntry[], modifiedAt: Date = new Date()): Ui
 		u32(0x06054b50),
 		u16(0),
 		u16(0),
-		u16(entries.length),
-		u16(entries.length),
+		u16(names.size),
+		u16(names.size),
 		u32(centralDir.length),
 		u32(localOffset),
 		u16(0),

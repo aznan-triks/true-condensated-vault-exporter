@@ -14,6 +14,12 @@ export interface OutputFile {
 	content: string;
 }
 
+/** A validated destination whose content is materialized only when consumed. */
+export interface OutputPlan {
+	path: string;
+	render: () => string;
+}
+
 const RULE = '================================================================================';
 const SEPARATOR = '----------------------------------------';
 const ROOT_GROUP = 'Root';
@@ -37,17 +43,17 @@ function safeSegment(segment: string): string {
 	return /^(?:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\.|$)/i.test(safe) ? '_' + safe : safe;
 }
 
-export function buildSplitFiles(notes: CleanedNote[], settings: ExporterSettings): OutputFile[] {
+export function planSplitFiles(notes: CleanedNote[], settings: ExporterSettings): OutputPlan[] {
 	const base = settings.splitOutputFolder;
 	const destinations = new Map<string, { path: string; source: string }>();
-	const output = (path: string, content: string, source: string): OutputFile => {
+	const output = (path: string, render: () => string, source: string): OutputPlan => {
 		const key = canonicalOutputPath(path).toLowerCase();
 		const previous = destinations.get(key);
 		if (previous) {
 			throw new Error('Two split outputs would be written to "' + path + '": ' + previous.source + ' and ' + source + '. Rename one note or folder, or use another split mode.');
 		}
 		destinations.set(key, { path, source });
-		return { path, content };
+		return { path, render };
 	};
 
 	if (settings.splitMode === 'individual-files') {
@@ -57,7 +63,7 @@ export function buildSplitFiles(notes: CleanedNote[], settings: ExporterSettings
 				: '';
 			const rel = (relativeToFolder(note.path, settings.scopeRoot) ?? note.path)
 				.replace(/\.canvas$/i, '.md').split('/').map(safeSegment).join('/');
-			return output(joinPath(base, rel), frontmatter + note.body, '"' + note.path + '"');
+			return output(joinPath(base, rel), () => frontmatter + note.body, '"' + note.path + '"');
 		});
 	}
 
@@ -73,11 +79,18 @@ export function buildSplitFiles(notes: CleanedNote[], settings: ExporterSettings
 	}
 
 	return [...groups.entries()].map(([group, groupNotes]) => {
-		const lines = [RULE, 'Folder: ' + group, 'Documents: ' + groupNotes.length, RULE, ''];
-		for (const note of groupNotes) {
-			lines.push('', SEPARATOR, note.title + ' (' + note.path + ')', SEPARATOR, '', note.body, '');
-		}
 		const safeName = safeSegment(group) + '.txt';
-		return output(joinPath(base, safeName), lines.join('\n'), 'folder "' + group + '"');
+		return output(joinPath(base, safeName), () => {
+			const lines = [RULE, 'Folder: ' + group, 'Documents: ' + groupNotes.length, RULE, ''];
+			for (const note of groupNotes) {
+				lines.push('', SEPARATOR, note.title + ' (' + note.path + ')', SEPARATOR, '', note.body, '');
+			}
+			return lines.join('\n');
+		}, 'folder "' + group + '"');
 	});
+}
+
+/** Existing eager API for callers that need all split contents at once. */
+export function buildSplitFiles(notes: CleanedNote[], settings: ExporterSettings): OutputFile[] {
+	return planSplitFiles(notes, settings).map((out) => ({ path: out.path, content: out.render() }));
 }

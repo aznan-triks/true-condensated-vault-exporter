@@ -3,6 +3,7 @@
 ## Unreleased
 
 ### Fixed
+- Exports render outputs on demand, write plain files before the ZIP, and encode ZIP entries one at a time, reducing simultaneous uncompressed copies. Files and archive contents are unchanged. Failures during later ZIP construction/write retain exact completed-file information; completed outputs are never rolled back. Whole archive ArrayBuffers are reused at the vault boundary, while subviews/shared buffers remain safely copied. The large-vault memory/time targets are still under investigation (VE-013 is not complete).
 - HTML exports recognize tilde and long fences, require matching fence markers/lengths, and render four-space/tab-indented code without turning it into headings. Code headings are also excluded from note navigation. Language-less blocks no longer emit an empty language class; existing list/table/quote rendering is retained.
 - Split filenames now sanitize Windows-forbidden/control characters and trailing dots/spaces in generated segments, and prefix reserved device names such as CON. Ambiguous split destinations fail before any output is written, naming both source notes/folders and the target—including case-only or equal-content collisions. Rename a source or choose another split mode; no automatic numbered renaming is performed.
 - Consolidated Markdown escapes brackets and backslashes in table-of-contents labels and source hints, so special-character titles keep valid links. Section titles and existing anchor generation remain unchanged.

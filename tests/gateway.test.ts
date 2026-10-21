@@ -311,6 +311,30 @@ describe('ObsidianVaultGateway', () => {
 		expect([...fs.readFileSync(path.join(vaultDir, 'Out/nested/bundle.zip'))]).toEqual([1, 2, 3]);
 	});
 
+	it('passes a whole ArrayBuffer directly to the vault API (VE-013)', async () => {
+		const app = makeApp();
+		const spy = vi.spyOn(app.vault, 'createBinary');
+		const data = new Uint8Array([1, 2, 3]);
+		await gatewayWith(app).writeBinary('out/whole.zip', data);
+		expect(spy.mock.calls[0]?.[1]).toBe(data.buffer);
+		expect([...fs.readFileSync(path.join(vaultDir, 'out/whole.zip'))]).toEqual([1, 2, 3]);
+	});
+
+	it('copies only the selected bytes for subviews and SharedArrayBuffers (VE-013)', async () => {
+		const app = makeApp();
+		const spy = vi.spyOn(app.vault, 'createBinary');
+		const parent = new Uint8Array([9, 1, 2, 9]);
+		await gatewayWith(app).writeBinary('out/view.zip', parent.subarray(1, 3));
+		expect(spy.mock.calls[0]?.[1]).not.toBe(parent.buffer);
+		expect([...fs.readFileSync(path.join(vaultDir, 'out/view.zip'))]).toEqual([1, 2]);
+		const shared = new Uint8Array(new SharedArrayBuffer(3));
+		shared.set([3, 4, 5]);
+		await gatewayWith(app).writeBinary('out/shared.zip', shared);
+		expect(spy.mock.calls[1]?.[1]).toBeInstanceOf(ArrayBuffer);
+		expect(spy.mock.calls[1]?.[1]).not.toBe(shared.buffer);
+		expect([...fs.readFileSync(path.join(vaultDir, 'out/shared.zip'))]).toEqual([3, 4, 5]);
+	});
+
 	it('rejects vault-escaping output paths', async () => {
 		const gateway = gatewayWith(makeApp());
 		await expect(gateway.writeFile('../outside.md', 'x')).rejects.toThrow(/\.\./);

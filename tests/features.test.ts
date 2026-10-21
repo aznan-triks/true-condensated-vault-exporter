@@ -2,7 +2,11 @@ import { describe, it, expect, vi } from 'vitest';
 import * as outputTarget from '../src/core/outputTarget';
 import { inflateRawSync } from 'zlib';
 import { crc32, buildZip, zipEntryName } from '../src/core/zip';
-import { runExports, ExportCancelledError, ExportFailedError } from '../src/features/exportOrchestrator';
+import * as zipModule from '../src/core/zip';
+import { CONSOLIDATED_FORMATS } from '../src/features/formats';
+import { buildSplitFiles } from '../src/features/exportSplit';
+import { cleanNote, createExportContext } from '../src/core/pipeline';
+import { runExports, ExportCancelledError, ExportFailedError, utf8ByteLength } from '../src/features/exportOrchestrator';
 import {
 	ExportHistoryEntry,
 	sanitizeHistory,
@@ -102,6 +106,49 @@ describe('zip writer', () => {
 		const recovered = e.method === 8 ? inflateRawSync(Buffer.from(e.data)).toString('utf8') : new TextDecoder().decode(e.data);
 		expect(recovered).toBe(content);
 		expect(crc32(encoder.encode(content))).toBe(read[0]!.crc);
+	});
+
+	it('counts single-pass iterable entries and preserves the complete archive (VE-013)', () => {
+		const entries = [{ name: 'a.txt', data: new TextEncoder().encode('a') }, { name: 'b.txt', data: new TextEncoder().encode('b'.repeat(800)) }];
+		const date = new Date('2026-10-21T10:00:00Z');
+		function* once() { yield* entries; }
+		const archive = buildZip(once(), date);
+		expect(readZip(archive).map((entry) => entry.name)).toEqual(['a.txt', 'b.txt']);
+		expect(archive).toEqual(buildZip(entries, date));
+	});
+
+	it('propagates a mid-iteration error without returning a partial archive (VE-013)', () => {
+		const cause = new Error('entry failed');
+		function* entries() { yield { name: 'a.txt', data: new Uint8Array([1]) }; throw cause; }
+		expect(() => buildZip(entries())).toThrow(cause);
+	});
+
+	it('keeps the ZIP32 entry-count limit for iterables (VE-013)', () => {
+		function* entries() {
+			for (let i = 0; i < 65536; i++) yield { name: i + '.txt', data: new Uint8Array() };
+		}
+		expect(() => buildZip(entries())).toThrow('65,535 entries');
+	});
+
+	it('keeps all plain bytes, ZIP names/sizes/CRCs and archive bytes equal (VE-013)', async () => {
+		vi.useFakeTimers({ toFake: ['Date'] });
+		vi.setSystemTime(new Date('2026-10-21T10:00:00Z'));
+		try {
+			const files = [{ path: 'A/é.md', name: 'é.md', content: '---\ntags: [one, two]\n---\n# Body\n' + 'naïve '.repeat(100) }];
+			const ctx = createExportContext(files, DEFAULT_SETTINGS);
+			const notes = files.map((file) => cleanNote(file, ctx));
+			const expected = [
+				...Object.values(CONSOLIDATED_FORMATS).map((format) => ({ path: format.outputPath(DEFAULT_SETTINGS), content: format.render(notes, DEFAULT_SETTINGS, new Date().toISOString()) })),
+				...buildSplitFiles(notes, DEFAULT_SETTINGS),
+			];
+			const expectedZip = buildZip(expected.map((out) => ({ name: zipEntryName(out.path), data: new TextEncoder().encode(out.content) })));
+			const { gateway, written, writtenBinary } = fakeGateway(files);
+			await runExports(gateway, DEFAULT_SETTINGS, ['all', 'zip'], () => {});
+			const actual = writtenBinary.get(DEFAULT_SETTINGS.zipOutputPath)!;
+			expect([...written]).toEqual(expected.map((out) => [out.path, out.content]));
+			expect(readZip(actual)).toEqual(readZip(expectedZip));
+			expect(actual).toEqual(expectedZip);
+		} finally { vi.useRealTimers(); }
 	});
 
 	it('maps absolute output paths to portable entry names', () => {
@@ -514,7 +561,7 @@ describe('orchestrator', () => {
 		it('reports an empty partial result when the ZIP write fails', async () => {
 			const { gateway, written, writtenBinary } = fakeGateway(manyFiles);
 			gateway.writeBinary = async () => { throw new Error('archive disk full'); };
-			const error: unknown = await runExports(gateway, DEFAULT_SETTINGS, ['zip', 'all'], () => {}).catch((failure: unknown) => failure);
+			const error: unknown = await runExports(gateway, DEFAULT_SETTINGS, ['zip'], () => {}).catch((failure: unknown) => failure);
 			expect(error).toMatchObject({
 				name: 'ExportFailedError', failedPath: 'Vault export.zip',
 				partialResult: { written: [], skippedFiles: [], totalBytes: 0 },
@@ -523,16 +570,18 @@ describe('orchestrator', () => {
 			expect(writtenBinary.size).toBe(0);
 		});
 
-		it('retains a successful ZIP in the partial result when a later plain write fails', async () => {
-			const { gateway, writtenBinary } = fakeGateway(manyFiles);
-			gateway.writeFile = async () => { throw new Error('plain disk full'); };
+		it('retains successful plain files when the later ZIP write fails (VE-013 approved migration)', async () => {
+			const { gateway, written, writtenBinary } = fakeGateway(manyFiles);
+			const cause = new Error('archive disk full');
+			gateway.writeBinary = async () => { throw cause; };
 			const error: unknown = await runExports(gateway, DEFAULT_SETTINGS, ['zip', 'markdown'], () => {}).catch((failure: unknown) => failure);
-			const bytes = writtenBinary.get(DEFAULT_SETTINGS.zipOutputPath)?.length ?? 0;
+			const completed = [...written].map(([path, content]) => ({ path, bytes: new TextEncoder().encode(content).length }));
+			expect(completed.map((file) => file.path)).toEqual(['Vault export.md']);
 			expect(error).toMatchObject({
-				name: 'ExportFailedError', failedPath: 'Vault export.md',
-				partialResult: { written: [{ path: 'Vault export.zip', bytes }], totalBytes: bytes },
+				name: 'ExportFailedError', failedPath: 'Vault export.zip', cause,
+				partialResult: { written: completed, totalBytes: completed.reduce((sum, file) => sum + file.bytes, 0) },
 			});
-			expect(bytes).toBeGreaterThan(0);
+			expect(writtenBinary.size).toBe(0);
 		});
 	});
 
@@ -549,6 +598,80 @@ describe('orchestrator', () => {
 		for (const path of paths) expect(error instanceof Error ? error.message : '').toContain(splitMode === 'folder-grouped' ? path.split('/')[0] : path);
 		expect(written.size).toBe(0);
 		expect(writtenBinary.size).toBe(0);
+	});
+
+	describe('output retention and write order (VE-013)', () => {
+		it('counts UTF-8 bytes without allocating encoded output copies', () => {
+			const values = ['ascii', 'é漢😀', '\uD800', 'a\uDC00b'];
+			const expected = values.map((text) => new TextEncoder().encode(text).length);
+			const spy = vi.spyOn(TextEncoder.prototype, 'encode');
+			try {
+				expect(values.map(utf8ByteLength)).toEqual(expected);
+				expect(spy).not.toHaveBeenCalled();
+			} finally { spy.mockRestore(); }
+		});
+
+		it('renders only the next consolidated output before each plain write', async () => {
+			const events: string[] = [];
+			const spies = Object.values(CONSOLIDATED_FORMATS).map((format) => {
+				const render = format.render;
+				return vi.spyOn(format, 'render').mockImplementation((...args) => { events.push('render ' + format.label); return render(...args); });
+			});
+			try {
+				const { gateway } = fakeGateway(manyFiles.slice(0, 1));
+				gateway.writeFile = async (path) => { events.push('write ' + path); };
+				await runExports(gateway, DEFAULT_SETTINGS, ['all'], () => {});
+				expect(events).toEqual([
+					'render NotebookLM', 'write Vault export - NotebookLM.txt',
+					'render HTML', 'write Vault export.html',
+					'render Markdown', 'write Vault export.md',
+					'write Vault export - split/A.txt',
+				]);
+			} finally { for (const spy of spies) spy.mockRestore(); }
+		});
+		it('writes every selected plain file before the ZIP', async () => {
+			const events: string[] = [];
+			const { gateway } = fakeGateway(manyFiles.slice(0, 1));
+			gateway.writeFile = async (path) => { events.push(path); };
+			gateway.writeBinary = async (path) => { events.push(path); };
+			const result = await runExports(gateway, DEFAULT_SETTINGS, ['zip', 'all'], () => {});
+			expect(events).toEqual(['Vault export - NotebookLM.txt', 'Vault export.html', 'Vault export.md', 'Vault export - split/A.txt', 'Vault export.zip']);
+			expect(result.written.map((file) => file.path)).toEqual(events);
+		});
+		it('reports no ZIP or completed file if the first plain write fails', async () => {
+			const { gateway, writtenBinary } = fakeGateway(manyFiles.slice(0, 1));
+			gateway.writeFile = async () => { throw new Error('plain disk full'); };
+			const error: unknown = await runExports(gateway, DEFAULT_SETTINGS, ['zip', 'markdown'], () => {}).catch((failure: unknown) => failure);
+			expect(error).toMatchObject({ name: 'ExportFailedError', failedPath: 'Vault export.md', partialResult: { written: [], totalBytes: 0 } });
+			expect(writtenBinary.size).toBe(0);
+		});
+		it('retains exact completed files if deferred ZIP construction fails', async () => {
+			const cause = new Error('compressor failed');
+			const spy = vi.spyOn(zipModule, 'buildZip').mockImplementation(() => { throw cause; });
+			try {
+				const { gateway, written, writtenBinary } = fakeGateway(manyFiles.slice(0, 1));
+				const error: unknown = await runExports(gateway, DEFAULT_SETTINGS, ['markdown', 'zip'], () => {}).catch((failure: unknown) => failure);
+				const completed = [...written].map(([path, content]) => ({ path, bytes: new TextEncoder().encode(content).length }));
+				expect(completed.map((file) => file.path)).toEqual(['Vault export.md']);
+				expect(error).toMatchObject({ name: 'ExportFailedError', failedPath: 'Vault export.zip', cause, partialResult: { written: completed, totalBytes: completed.reduce((sum, file) => sum + file.bytes, 0) } });
+				expect(writtenBinary.size).toBe(0);
+			} finally { spy.mockRestore(); }
+		});
+		it('keeps pre-write ZIP construction failures bare', async () => {
+			const cause = new Error('entry generator failed');
+			const spy = vi.spyOn(zipModule, 'buildZip').mockImplementation(() => { throw cause; });
+			try {
+				const { gateway, written, writtenBinary } = fakeGateway(manyFiles.slice(0, 1));
+				const error: unknown = await runExports(gateway, DEFAULT_SETTINGS, ['zip'], () => {}).catch((failure: unknown) => failure);
+				expect(error).toBe(cause);
+				expect(written.size + writtenBinary.size).toBe(0);
+			} finally { spy.mockRestore(); }
+		});
+		it('rejects predictable ZIP-name conflicts before writing any file', async () => {
+			const { gateway, written, writtenBinary } = fakeGateway(manyFiles.slice(0, 1));
+			await expect(runExports(gateway, { ...DEFAULT_SETTINGS, notebooklmOutputPath: '/a/shared/export.txt', markdownOutputPath: '/b/shared/export.txt' }, ['all', 'zip'], () => {})).rejects.toThrow('ZIP entry name conflict: shared/export.txt.');
+			expect(written.size + writtenBinary.size).toBe(0);
+		});
 	});
 
 	it('rejects an empty target list', async () => {
