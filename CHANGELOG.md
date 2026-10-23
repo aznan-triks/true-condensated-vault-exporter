@@ -1,6 +1,20 @@
 # Changelog
 
+> Release notes since **2.3.0** include both **Plain** (everyday summary) and **Technical** (engineering details) notes — use the **Plain / Technical / All** switch in **Settings → Changelog** to read the level of detail you prefer.
+
 ## Unreleased
+
+## [2.3.0] - 2026-10-23
+
+### Added
+- **Plain:** You can now export files using **any file extension you want** (`.md`, `.txt`, `.markdown`, `.mdx`, `.html`, `.org`, `.rst`, `.adoc`, `.tex`, `.json`, `.xml`, compound extensions such as `.llm.txt`, or any custom `.ext`) directly from the **Vault Exporter sidebar** or **Settings → Output Paths & Split Options**. Both consolidated exports, split exports, ZIP archive entries, and single-note clean exports respect your chosen extension automatically.
+- **Technical:** Added pure extension helpers in `src/core/extension.ts` (`normalizeExtension`, `replaceFileExtension`, `appendFileStemSuffix`, `effectiveSplitExtension`) and persisted settings `outputExtension` and `splitFileExtension` in `src/core/types.ts`. Integrated deterministic stem collision disambiguation into `resolveConsolidatedExtensionPaths` / `resolveOutputSettings` (`src/core/outputTarget.ts`), extended `reservedOutputPaths` and `isCleanExportArtifact` (`src/core/filter.ts`) to prevent feedback-loop re-ingestion regardless of extension, and wired split naming/planning (`src/features/exportSplit.ts`), active-note clean export (`src/main.ts`), and sidebar controls (`src/ui/SidebarView.ts`).
+- **Plain:** Added an interactive **Changelog** tab right inside **Settings → Changelog** where you can browse release history offline, refresh directly from GitHub, switch between **All / Plain / Technical** views, filter by category (**Added**, **Improved**, **Changed**, **Fixed**, **Removed**, **Security**), pick version ranges, and search across releases.
+- **Technical:** Added pure changelog parser, voice filter, category/range slicer, and HTML-escaped card builder in `src/core/changelog.ts`, backed by `scripts/sync-changelog.mjs` generating `src/core/bundledChangelog.ts` during builds and `requestUrl` live sync in `src/settings/SettingsTab.ts`.
+
+### Improved
+- **Plain:** Redesigned the **Settings** experience inspired by `trello-vault-sync`: a header bar displays live status badges (**Output destination**, **Scope**, **Extensions**, **Split preset**), every modified setting shows a crisp accent border with its default value and a one-click **Reset to default** button, category tabs display modified-setting counters, a summary bar offers **Show only changed** filtering plus **Reset all to defaults**, and dependent sub-options stay tidy until needed.
+- **Technical:** Added deep value comparison and dot-path mutation helpers in `src/core/settingValue.ts`, scroll-position preservation across `display()` rebuilds, per-section `"In tab: … — go there →"` search navigation, conditional `.ve-settings__dependent` groups, collapsible `<details>` expert controls, and expanded coverage to **313 Vitest unit tests** and **137 mock-Obsidian smoke assertions**.
 
 ## [2.2.1] - 2026-10-23
 

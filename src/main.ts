@@ -4,6 +4,7 @@
 
 import { Notice, Plugin, WorkspaceLeaf } from 'obsidian';
 import { ExporterSettings, mergeSettings } from './core/types';
+import { normalizeExtension } from './core/extension';
 import { ObsidianVaultGateway } from './obsidian/vaultGateway';
 import {
 	EXPORT_COMMANDS,
@@ -94,13 +95,15 @@ export default class VaultExporterPlugin extends Plugin {
 					return;
 				}
 				const dir = file.parent?.path ?? '';
-				const outPath = (dir ? dir + '/' : '') + file.name.replace(/\.md$/i, '') + ' (clean export).md';
+				const ext = normalizeExtension(this.settings.outputExtension) || '.md';
+				const outPath = (dir ? dir + '/' : '') + file.name.replace(/\.md$/i, '') + ' (clean export)' + ext;
 				await executeTargets(this.getUiContext(), ['markdown'], {
 					settingsOverride: {
 						scopeRoot: '',
 						scopeTag: '',
 						onlyFile: file.path,
 						markdownOutputPath: outPath,
+						outputExtension: '',
 					},
 					label: 'Clean export: ' + file.name,
 				});

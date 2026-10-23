@@ -1,6 +1,6 @@
 # Project context: Vault Exporter
 
-> Last updated: 2026-10-23 (v2.2.1 release preparation). Keep this file in English.
+> Last updated: 2026-10-23 (v2.3.0 release preparation). Keep this file in English.
 
 ## Product
 
@@ -21,7 +21,7 @@ npm run dev      # esbuild watch mode
 
 | Area | Responsibility |
 |---|---|
-| `src/core/` | Pure data transforms: settings/types, output destinations (`outputTarget.ts`), filters, frontmatter, cleaning pipeline, wikilinks, Dataview, Canvas, HTML/Markdown/NotebookLM formatters, ZIP records. |
+| `src/core/` | Pure data transforms: settings/types, custom extension normalization (`extension.ts`), deep setting value helpers (`settingValue.ts`), changelog parser/filter (`changelog.ts`, synced into `bundledChangelog.ts` via `scripts/sync-changelog.mjs`), output destinations (`outputTarget.ts`), filters, frontmatter, cleaning pipeline, wikilinks, Dataview, Canvas, HTML/Markdown/NotebookLM formatters, ZIP records. |
 | `src/obsidian/` | Obsidian and Node boundary: vault reads/writes, tag and file metadata, binary output, reveal-in-file-manager and OS folder picker (`electronBridge.ts`), local declarations for Obsidian internal APIs (`appSetting.ts`). |
 | `src/features/` | Export orchestration, consolidated format registry, split exports, history. |
 | `src/commands/registry.ts` | Single command registry used by the Command Palette and sidebar; owns run/cancel orchestration. |

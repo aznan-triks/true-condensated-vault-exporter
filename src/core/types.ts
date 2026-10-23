@@ -3,6 +3,8 @@
  * Pure TypeScript — no Obsidian imports allowed.
  */
 
+import { normalizeExtension } from './extension';
+
 export interface VaultFile {
 	/** Relative path from vault root, e.g. 'Notes/Topic/Doc.md' or 'index.md' */
 	path: string;
@@ -88,8 +90,12 @@ export interface ExporterSettings {
 	markdownOutputPath: string;
 	/** Output path for the ZIP bundle of all formats (vault-relative or absolute) */
 	zipOutputPath: string;
+	/** Optional custom file extension override applied across text/document & split exports (e.g. '.md', '.txt', '.mdx'; '' = per-format default) */
+	outputExtension: string;
 	/** Split mode: 'folder-grouped' (.txt per top folder under scope) or 'individual-files' (1-to-1 .md) */
 	splitMode: 'folder-grouped' | 'individual-files';
+	/** Optional file extension override specifically for split files (e.g. '.md', '.txt', '.mdx'; '' = follow outputExtension or mode default) */
+	splitFileExtension: string;
 	/** Folder whose direct subfolders become split groups (empty = scope root) */
 	splitGroupFolder: string;
 	/** Subfolders that also split their own subfolders into one .txt file per folder */
@@ -159,7 +165,9 @@ export const DEFAULT_SETTINGS: ExporterSettings = {
 	htmlOutputPath: 'Vault export.html',
 	markdownOutputPath: 'Vault export.md',
 	zipOutputPath: 'Vault export.zip',
+	outputExtension: '',
 	splitMode: 'folder-grouped',
+	splitFileExtension: '',
 	splitGroupFolder: '',
 	splitSubfolders: [],
 	splitSubfolderDepth: 'direct',
@@ -193,6 +201,8 @@ const STRING_SETTING_KEYS = [
 	'htmlOutputPath',
 	'markdownOutputPath',
 	'zipOutputPath',
+	'outputExtension',
+	'splitFileExtension',
 	'splitGroupFolder',
 	'splitOutputFolder',
 	'customCss',
@@ -235,6 +245,8 @@ export function mergeSettings(loaded: unknown): ExporterSettings {
 	}
 	result.htmlFooterText = result.htmlFooterText.slice(0, 200);
 	result.externalOutputFolder = result.externalOutputFolder.trim().slice(0, 400);
+	result.outputExtension = normalizeExtension(result.outputExtension);
+	result.splitFileExtension = normalizeExtension(result.splitFileExtension);
 
 	for (const key of [
 		'rememberTargetSelection', 'useExternalOutputFolder', 'autoRevealOutput', 'stripFrontmatter', 'renderDataview', 'includeCanvas', 'htmlShowToc', 'htmlShowSearch',

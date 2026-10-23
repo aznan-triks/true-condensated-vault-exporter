@@ -10,6 +10,7 @@
  */
 
 import { ExporterSettings } from './types';
+import { appendFileStemSuffix, normalizeExtension, replaceFileExtension } from './extension';
 
 /** The two settings that control external output redirection. */
 export interface ExternalOutputSettings {
@@ -100,18 +101,85 @@ export function resolveOutputPath(settings: ExternalOutputSettings, targetPath: 
 	return joinPath(externalFolderBase(settings.externalOutputFolder), relative);
 }
 
+export interface ExtensionOutputPaths {
+	notebooklmOutputPath: string;
+	htmlOutputPath: string;
+	markdownOutputPath: string;
+	outputExtension?: string;
+}
+
 /**
- * Returns a copy of the settings whose output paths are re-rooted inside the
- * external folder. No-op (same object) when the option is disabled, so paths
- * inside the vault behave exactly as before.
+ * Applies `outputExtension` across consolidated document paths with deterministic
+ * stem collision disambiguation so multiple formats never overwrite one another.
+ */
+export function resolveConsolidatedExtensionPaths(settings: ExtensionOutputPaths): {
+	notebooklmOutputPath: string;
+	htmlOutputPath: string;
+	markdownOutputPath: string;
+} {
+	const ext = normalizeExtension(settings.outputExtension ?? '');
+	if (!ext) {
+		return {
+			notebooklmOutputPath: settings.notebooklmOutputPath,
+			htmlOutputPath: settings.htmlOutputPath,
+			markdownOutputPath: settings.markdownOutputPath,
+		};
+	}
+
+	const entries: Array<{
+		key: 'markdownOutputPath' | 'notebooklmOutputPath' | 'htmlOutputPath';
+		raw: string;
+		suffix: string;
+	}> = [
+		{ key: 'markdownOutputPath', raw: settings.markdownOutputPath, suffix: ' - Markdown' },
+		{ key: 'notebooklmOutputPath', raw: settings.notebooklmOutputPath, suffix: ' - NotebookLM' },
+		{ key: 'htmlOutputPath', raw: settings.htmlOutputPath, suffix: ' - HTML' },
+	];
+
+	const taken = new Set<string>();
+	const out = {
+		notebooklmOutputPath: settings.notebooklmOutputPath,
+		htmlOutputPath: settings.htmlOutputPath,
+		markdownOutputPath: settings.markdownOutputPath,
+	};
+
+	for (const entry of entries) {
+		let candidate = replaceFileExtension(entry.raw, ext);
+		const candidateKey = canonicalOutputPath(candidate).toLowerCase();
+		if (candidateKey && taken.has(candidateKey)) {
+			candidate = appendFileStemSuffix(candidate, entry.suffix);
+		}
+		const finalKey = canonicalOutputPath(candidate).toLowerCase();
+		if (finalKey) taken.add(finalKey);
+		out[entry.key] = candidate;
+	}
+
+	return out;
+}
+
+/**
+ * Returns a copy of the settings whose output paths have `outputExtension` applied
+ * and (when enabled) are re-rooted inside the external folder. No-op (same object)
+ * when both options are inactive, so default paths behave identically.
  */
 export function resolveOutputSettings(settings: ExporterSettings): ExporterSettings {
-	if (!usesExternalOutputFolder(settings)) return settings;
+	const hasExt = Boolean(normalizeExtension(settings.outputExtension));
+	const hasExternal = usesExternalOutputFolder(settings);
+	if (!hasExt && !hasExternal) return settings;
+
+	const extended = resolveConsolidatedExtensionPaths(settings);
+	if (!hasExternal) {
+		return {
+			...settings,
+			...extended,
+		};
+	}
+
 	return {
 		...settings,
-		notebooklmOutputPath: resolveOutputPath(settings, settings.notebooklmOutputPath),
-		htmlOutputPath: resolveOutputPath(settings, settings.htmlOutputPath),
-		markdownOutputPath: resolveOutputPath(settings, settings.markdownOutputPath),
+		notebooklmOutputPath: resolveOutputPath(settings, extended.notebooklmOutputPath),
+		htmlOutputPath: resolveOutputPath(settings, extended.htmlOutputPath),
+		markdownOutputPath: resolveOutputPath(settings, extended.markdownOutputPath),
 		zipOutputPath: resolveOutputPath(settings, settings.zipOutputPath),
 		// A blank split destination means "the output root": inside the vault
 		// that is the vault root, with external output it is the external folder.

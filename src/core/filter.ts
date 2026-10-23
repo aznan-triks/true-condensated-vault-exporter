@@ -4,7 +4,7 @@
  * plus protection against re-exporting previous export outputs.
  */
 
-import { isAbsoluteOutputPath, resolveOutputPath, vaultRelativeOutputPath } from './outputTarget';
+import { isAbsoluteOutputPath, resolveConsolidatedExtensionPaths, resolveOutputPath, vaultRelativeOutputPath } from './outputTarget';
 
 export interface FilterOptions {
 	scopeRoot: string;
@@ -70,9 +70,9 @@ export function isTagScopeMatch(filePath: string, tags: readonly string[], selec
 /** Suffix of the files produced by "Export current note as clean Markdown". */
 export const CLEAN_EXPORT_SUFFIX = ' (clean export).md';
 
-/** True when the file is one of our own clean-export artifacts (never re-exported). */
+/** True when the file is one of our own clean-export artifacts (never re-exported, regardless of extension). */
 export function isCleanExportArtifact(fileName: string): boolean {
-	return fileName.toLowerCase().endsWith(CLEAN_EXPORT_SUFFIX);
+	return / \(clean export\)\.[^/\\]+$/i.test(fileName);
 }
 
 /**
@@ -197,6 +197,7 @@ export function reservedOutputPaths(settings: {
 	markdownOutputPath: string;
 	zipOutputPath: string;
 	splitOutputFolder: string;
+	outputExtension?: string;
 	useExternalOutputFolder?: boolean;
 	externalOutputFolder?: string;
 }, options?: { vaultBasePath?: string | null; alreadyResolved?: boolean }): string[] {
@@ -204,12 +205,19 @@ export function reservedOutputPaths(settings: {
 		useExternalOutputFolder: settings.useExternalOutputFolder === true,
 		externalOutputFolder: settings.externalOutputFolder ?? '',
 	};
+	const consolidated = options?.alreadyResolved
+		? {
+			notebooklmOutputPath: settings.notebooklmOutputPath,
+			htmlOutputPath: settings.htmlOutputPath,
+			markdownOutputPath: settings.markdownOutputPath,
+		}
+		: resolveConsolidatedExtensionPaths(settings);
 	const vaultBasePath = options?.vaultBasePath?.trim() ?? '';
 	const reserved: string[] = [];
 	for (const candidate of [
-		settings.notebooklmOutputPath,
-		settings.htmlOutputPath,
-		settings.markdownOutputPath,
+		consolidated.notebooklmOutputPath,
+		consolidated.htmlOutputPath,
+		consolidated.markdownOutputPath,
 		settings.zipOutputPath,
 		settings.splitOutputFolder,
 	]) {

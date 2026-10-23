@@ -18,6 +18,7 @@ const state = {
 	folderPickerCanceled: false,
 	ribbonIcons: [],
 	iconCalls: [],
+	requestUrlResponse: null,
 };
 
 class Events {
@@ -332,10 +333,20 @@ class WorkspaceLeaf {
 class View extends ItemView {}
 const keymap = {};
 
+async function requestUrl(req) {
+	if (typeof state.requestUrlResponse === 'function') {
+		return state.requestUrlResponse(req);
+	}
+	if (state.requestUrlResponse) {
+		return state.requestUrlResponse;
+	}
+	return { status: 200, headers: {}, text: '', json: null, arrayBuffer: new ArrayBuffer(0) };
+}
+
 const api = {
 	Events, Component, Notice, Plugin, PluginSettingTab, Setting, ItemView, View, WorkspaceLeaf, Vault, MetadataCache, Workspace,
 	Platform, TFile, TFolder, FileSystemAdapter, FileSystemAdapterClass, Modal, SuggestModal, FuzzySuggestModal,
-	normalizePath, setIcon, addIcon, debounce, moment, requireApiVersion, MarkdownRenderer, apiVersion, keymap,
+	normalizePath, setIcon, addIcon, debounce, moment, requireApiVersion, MarkdownRenderer, apiVersion, keymap, requestUrl,
 	AbstractInputSuggest, PopoverSuggest,
 	ValueComponent, TextComponent, TextAreaComponent, SearchComponent, ToggleComponent, DropdownComponent, SliderComponent, ColorComponent, ProgressBarComponent, ButtonComponent, ExtraButtonComponent,
 	__state: state,

@@ -715,6 +715,34 @@ const has = (rel) => fs.existsSync(path.join(VAULT, rel));
 		view.containerEl.querySelector('.ve-card__value')?.textContent);
 	plugin.settings = settingsBeforePreview;
 
+	console.log('\n--- custom file extensions & upgraded settings UX ---');
+	await view.refresh();
+	const sidebarExtInput = view.containerEl.querySelector('.ve-sidebar__extension-input');
+	record('sidebar renders file extension controls', Boolean(sidebarExtInput && view.containerEl.querySelector('.ve-sidebar__extension-select')));
+	if (sidebarExtInput) {
+		sidebarExtInput.value = 'mdx';
+		sidebarExtInput.dispatchEvent(new window.Event('change', { bubbles: true }));
+		await sleep(30);
+	}
+	record('sidebar custom extension normalizes and persists', plugin.settings.outputExtension === '.mdx', plugin.settings.outputExtension);
+	record('export-all with custom .mdx extension finishes', (await runCommand('export-all')) === 'Done');
+	record('consolidated outputs written with .mdx extension and stem disambiguation',
+		has('Vault export.mdx') && has('Vault export - NotebookLM.mdx') && has('Vault export - HTML.mdx'),
+		['Vault export.mdx', 'Vault export - NotebookLM.mdx', 'Vault export - HTML.mdx'].filter(has).join(', '));
+	record('split folder written with .mdx extension',
+		has('Vault export - split/Projects.mdx'),
+		fs.readdirSync(path.join(VAULT, 'Vault export - split')).join(', '));
+	setActiveFile(plugin.app, 'Projects/Alpha.md');
+	record('export-active-note with .mdx extension finishes', (await runCommand('export-active-note')) === 'Done');
+	record('clean export written with custom .mdx extension', has('Projects/Alpha (clean export).mdx'));
+
+	tab.display();
+	record('settings summary bar counts modified settings', /changed from default/.test(tab.containerEl.querySelector('.ve-settings__summary-text')?.textContent || ''));
+	record('settings header badge reflects active extension', (tab.containerEl.querySelector('.ve-settings__badges')?.textContent || '').includes('Extension: .mdx'));
+	record('settings changelog tab renders version cards', tab.containerEl.querySelectorAll('.ve-cl-version-card').length > 0);
+	plugin.settings = { ...plugin.settings, outputExtension: '' };
+	await plugin.saveSettings();
+
 	console.log('\n--- graceful degradation without Electron ---');
 	plugin.gateway.revealOutput = () => null;
 	record('reveal returns false when no OS path', plugin.gateway.revealInFileManager('Vault export.md') === false);
