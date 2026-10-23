@@ -2,7 +2,10 @@
 
 ## Unreleased
 
+## [2.2.1] - 2026-10-23
+
 ### Fixed
+- Preserve the published v2.2.0 split depth, naming, preset, preview and tabbed-settings features while integrating the technical fixes below.
 - Settings text edits now save after a 300 ms pause, with close/unload flushes and visible save-failure feedback. Live settings update immediately; discrete controls remain immediate. Settings/history writes use ordered immutable snapshots instead of overlapping writes.
 - Recent history retains five runs with at most 20 output paths each, while preserving exact file counts and byte totals, including migrated legacy entries. The sidebar still reveals the first output; complete export/partial-failure results and exported files are not truncated.
 - Dataview now executes only closed top-level query fences. Queries shown inside Markdown/tilde code examples remain literal, while valid long backtick query fences render normally. Inline, unterminated, unsupported and DataviewJS examples retain their contents; literal mixed/CRLF line endings are preserved by block classification.
@@ -21,6 +24,19 @@
 - Split exports now index output ancestors instead of comparing every pair of paths, and append grouped notes without copying each group on every note. Output order and overlap errors are preserved. Writing yields to the UI in batches using the existing yield setting, while cancellation is checked between every file. Cancellation snapshots are built only when needed, avoiding growing copies after every file; the measured 16,000-note split run now meets the <2s gate in the Node harness.
 - External split destinations inside the vault are now reserved exactly as resolved for the export, including a blank split destination. Repeated runs no longer re-read their own mirrors, and the sidebar preview uses the same exclusions. Existing nested exports are left untouched; no files are deleted automatically.
 - Exports now reject any destination that would overwrite a loaded source note, before writing any file or building the ZIP. The error names both paths, including absolute destinations inside the vault. Case-only differences are rejected for portable safety, even on case-sensitive systems. Choose a distinct output folder or file name instead.
+
+## [2.2.0] - 2026-10-07
+
+### Added
+- **Split Subfolders, Naming Styles, Depth Modes & Presets.** Folder-grouped split exports can now produce one `.txt` file per subfolder as well:
+  - **Split Subfolder Naming (`splitSubfolderStyle`):** choose between *Flat with parent prefix* (`Parent - Subfolder.txt`, default and recommended for NotebookLM), *Flat with subfolder name only* (`Subfolder.txt`, with automatic disambiguation on collision), *Flat with underscore path* (`Parent_Subfolder.txt`), and *Mirrored subfolder tree* (`Parent/Subfolder.txt`).
+  - **Split Subfolder Depth (`splitSubfolderDepth`) & per-folder overrides:** choose 1-level direct subfolders or recursive nested subfolders for selected folders in `Split Subfolders`, or enable 2-level or full recursive splitting across the entire scope automatically. Each folder in `Split Subfolders` also has a button to cycle between Default, `1 level (/*)`, and `Recursive (/**)`.
+  - **Split Presets (`SPLIT_PRESETS`) & Live Output Preview:** 7 one-click presets in both Settings and the Sidebar (*Top-level only*, *Selected subfolders (NotebookLM)*, *All 2 levels (flat)*, *All subfolders (flat)*, *Short names*, *Folder tree*, and *1 .md per note*), quick-add folder buttons (*Quick add folder* and *+ All parent folders*), and a live preview of the resulting split file paths.
+
+## [2.1.1] - 2026-10-05
+
+### Added
+- **Tabbed settings navigation.** Vault Exporter settings are organized into focused categories, with a global search that lists matching controls. Clicking a result switches to the right category, scrolls to the setting, focuses its control, and briefly highlights it. Category tabs also support keyboard navigation.
 
 ## [2.1.0] - 2026-10-05
 

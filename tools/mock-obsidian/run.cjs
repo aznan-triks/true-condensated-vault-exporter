@@ -252,6 +252,18 @@ const has = (rel) => fs.existsSync(path.join(VAULT, rel));
 	} else {
 		record('HTML sidebar target is available for persistence test', false);
 	}
+	const sidebarSplitPreset = view.containerEl.querySelector('.ve-sidebar__split-preset-select');
+	if (sidebarSplitPreset) {
+		sidebarSplitPreset.value = 'notebooklm-two-levels';
+		sidebarSplitPreset.dispatchEvent(new window.Event('change', { bubbles: true }));
+		await sleep(30);
+		record('sidebar split preset selector updates settings', plugin._data?.settings?.splitSubfolderDepth === 'all-two-levels', plugin._data?.settings?.splitSubfolderDepth);
+		sidebarSplitPreset.value = 'top-level';
+		sidebarSplitPreset.dispatchEvent(new window.Event('change', { bubbles: true }));
+		await sleep(30);
+	} else {
+		record('sidebar split preset selector rendered', false, 'no .ve-sidebar__split-preset-select');
+	}
 	await plugin.activateSidebarView();
 	record('re-opening reuses the existing leaf', plugin.app.workspace.getLeavesOfType('vault-exporter-sidebar').length === 1);
 
@@ -343,7 +355,18 @@ const has = (rel) => fs.existsSync(path.join(VAULT, rel));
 			[...tab.containerEl.querySelectorAll('.ve-settings-row')].filter((row) => !row.hidden).length >= 2
 				&& [...tab.containerEl.querySelectorAll('.ve-settings-section')].filter((section) => !section.hidden).length === 1);
 		searchInput.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-		record('Escape clears settings search', searchInput.value === '' && [...tab.containerEl.querySelectorAll('.ve-settings-section')].every((section) => !section.hidden));
+		record('Escape clears settings search and returns to the active category',
+			searchInput.value === ''
+				&& [...tab.containerEl.querySelectorAll('.ve-settings-section')].filter((section) => !section.hidden).length === 1
+				&& tab.containerEl.querySelector('#ve-settings-section-general')?.hidden === false);
+		searchInput.value = 'accent';
+		searchInput.dispatchEvent(new window.Event('input', { bubbles: true }));
+		const searchResult = tab.containerEl.querySelector('.ve-settings__search-result');
+		searchResult?.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+		record('clicking a search result jumps to its setting',
+			searchInput.value === ''
+				&& tab.containerEl.querySelector('#ve-settings-section-html')?.hidden === false
+				&& tab.containerEl.querySelector('[data-setting-title="HTML Accent Color"]')?.classList.contains('ve-settings-row--targeted'));
 	} else {
 		record('settings search control rendered', false, 'no .ve-settings__search input');
 	}
@@ -461,6 +484,77 @@ const has = (rel) => fs.existsSync(path.join(VAULT, rel));
 		widthSlider.value = '920';
 		widthSlider.dispatchEvent(new window.Event('change', { bubbles: true }));
 		await sleep(30);
+	}
+	const splitPresetPill = tab.containerEl.querySelector('.ve-preset-pill[data-preset-id="folder-tree"]');
+	if (splitPresetPill) {
+		splitPresetPill.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+		await sleep(30);
+		record('split preset pill applies folder-tree preset and updates preview',
+			plugin._data?.settings?.splitSubfolderDepth === 'all-recursive'
+				&& plugin._data?.settings?.splitSubfolderStyle === 'nested'
+				&& (tab.containerEl.querySelector('.ve-split-preview')?.textContent ?? '').includes('Projects/'),
+			JSON.stringify({
+				depth: plugin._data?.settings?.splitSubfolderDepth,
+				style: plugin._data?.settings?.splitSubfolderStyle,
+			}));
+		const topLevelPill = tab.containerEl.querySelector('.ve-preset-pill[data-preset-id="top-level"]');
+		topLevelPill?.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+		await sleep(30);
+	} else {
+		record('split preset pills rendered', false, 'no .ve-preset-pill');
+	}
+	const splitNamingSelect = settingByLabel('Split Subfolder Naming')?.querySelector('select');
+	if (splitNamingSelect) {
+		splitNamingSelect.value = 'flat-leaf';
+		splitNamingSelect.dispatchEvent(new window.Event('change', { bubbles: true }));
+		await sleep(30);
+		record('split subfolder naming preference is saved', plugin._data?.settings?.splitSubfolderStyle === 'flat-leaf', plugin._data?.settings?.splitSubfolderStyle);
+		const refreshedNamingSelect = settingByLabel('Split Subfolder Naming')?.querySelector('select');
+		if (refreshedNamingSelect) {
+			refreshedNamingSelect.value = 'flat-prefixed';
+			refreshedNamingSelect.dispatchEvent(new window.Event('change', { bubbles: true }));
+			await sleep(30);
+		}
+	} else {
+		record('split subfolder naming preference rendered', false, 'no select control');
+	}
+	const splitDepthSelect = settingByLabel('Split Subfolder Depth')?.querySelector('select');
+	if (splitDepthSelect) {
+		splitDepthSelect.value = 'recursive';
+		splitDepthSelect.dispatchEvent(new window.Event('change', { bubbles: true }));
+		await sleep(30);
+		record('split subfolder depth preference is saved', plugin._data?.settings?.splitSubfolderDepth === 'recursive', plugin._data?.settings?.splitSubfolderDepth);
+		const refreshedDepthSelect = settingByLabel('Split Subfolder Depth')?.querySelector('select');
+		if (refreshedDepthSelect) {
+			refreshedDepthSelect.value = 'direct';
+			refreshedDepthSelect.dispatchEvent(new window.Event('change', { bubbles: true }));
+			await sleep(30);
+		}
+	} else {
+		record('split subfolder depth preference rendered', false, 'no select control');
+	}
+	const splitSubfoldersRow = settingByLabel('Split Subfolders')?.closest('.ve-settings-row');
+	const splitSubfolderInput = splitSubfoldersRow?.querySelector('input[type="text"]');
+	const splitSubfolderAdd = splitSubfoldersRow?.querySelector('button.mod-cta');
+	if (splitSubfolderInput && splitSubfolderAdd) {
+		splitSubfolderInput.value = 'Projects';
+		splitSubfolderInput.dispatchEvent(new window.Event('change', { bubbles: true }));
+		splitSubfolderAdd.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+		await sleep(30);
+		record('split subfolder can be added in settings', JSON.stringify(plugin._data?.settings?.splitSubfolders) === '["Projects"]', JSON.stringify(plugin._data?.settings?.splitSubfolders));
+		const modeBtn = settingByLabel('Split Subfolders')?.closest('.ve-settings-row')?.querySelector('.ve-list-item__mode');
+		modeBtn?.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+		await sleep(30);
+		const modeBtnAfterDirect = settingByLabel('Split Subfolders')?.closest('.ve-settings-row')?.querySelector('.ve-list-item__mode');
+		modeBtnAfterDirect?.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+		await sleep(30);
+		record('split subfolder depth mode cycles per folder', JSON.stringify(plugin._data?.settings?.splitSubfolders) === '["Projects/**"]', JSON.stringify(plugin._data?.settings?.splitSubfolders));
+		const delBtn = settingByLabel('Split Subfolders')?.closest('.ve-settings-row')?.querySelector('.ve-list-item__del');
+		delBtn?.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+		await sleep(30);
+		record('split subfolder can be removed in settings', JSON.stringify(plugin._data?.settings?.splitSubfolders) === '[]', JSON.stringify(plugin._data?.settings?.splitSubfolders));
+	} else {
+		record('split subfolders setting rendered', false, 'missing input or add button');
 	}
 	record('no console errors in settings', consoleErrors.length === 0, consoleErrors.join(' | '));
 

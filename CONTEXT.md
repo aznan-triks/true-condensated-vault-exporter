@@ -1,6 +1,6 @@
 # Project context: Vault Exporter
 
-> Last updated: 2026-10-05 (v2.1.0). Keep this file in English.
+> Last updated: 2026-10-23 (v2.2.1 release preparation). Keep this file in English.
 
 ## Product
 
@@ -47,6 +47,7 @@ npm run dev      # esbuild watch mode
 
 ## Important behavior and limitations
 
+- Published split subfolder depth/naming/preset options and searchable category tabs are retained alongside the audit fixes. History stores at most 20 sampled paths per run with exact aggregate counts/bytes; text persistence is debounced, snapshotted and serialized.
 - Dataview support is intentionally a subset. Unsupported or malformed blocks remain in the note; do not silently interpret them as matching all files.
 - Tag scoping excludes Canvas files. The sidebar's live count is path-based while a tag filter is active and displays a warning.
 - Markdown wikilinks point to vault-root-relative paths, not paths relative to each exported file. Consolidated outputs in a subfolder and split mirrors may need their links adjusted.

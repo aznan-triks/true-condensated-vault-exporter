@@ -52,14 +52,14 @@ Then reload Obsidian and enable **Vault Exporter** in **Settings → Community p
 
 ## Settings worth knowing
 
-The settings page is grouped and searchable: type a setting name or description to narrow the list.
+The settings page uses searchable category tabs: search by name or description, then jump to a result.
 
 Text edits take effect in memory immediately and are saved after a 300 ms pause. Leaving the settings tab or unloading the plugin requests a flush; discrete controls save immediately. A forced shutdown before a pending write completes can still lose the last unsaved edit.
 
 - **Scope Root / Scope Tag** and exclusion lists control what is read.
 - Each consolidated format, the ZIP, and split files have configurable output paths. Use vault-relative paths or absolute paths on desktop; a blank split destination means the vault root.
 - **External Output Folder** redirects every output outside the vault. Turn it on, pick an absolute folder with the system folder picker, and all consolidated files, ZIP bundles, and split files are written there instead — relative paths keep their subfolders, absolute paths keep only their final name. The section shows where exports currently go, and the sidebar footer and scope preview both link to these settings. Outputs written back inside the vault (for example when the external folder is a vault subfolder) are still protected from re-export.
-- Split mode chooses folder-grouped text files or a one-to-one Markdown mirror.
+- Split mode chooses folder-grouped text files or a one-to-one Markdown mirror. Published v2.2.0 subfolder selection, direct/recursive depth, flat or nested naming styles, presets and live path previews remain available in Settings and the sidebar.
 - Markdown-processing settings control frontmatter, Dataview, Canvas, wikilinks, and ignored properties. **Ignored Frontmatter Properties** hides built-in and custom fields in consolidated metadata (case-insensitive, including common aliases). Individual split files keep the original frontmatter unless **Strip Frontmatter** is enabled; ignored properties do not filter that raw copy.
 - **Export Feedback & Behavior** lets you keep successful progress panels open or choose their auto-close delay. Cancelled and failed panels remain visible for review. You can also reveal the first output automatically in the desktop file manager.
 - **HTML Personalization** lets you choose system/light/dark appearance, accent color, typography, reading width, navigation/search, source paths, metadata badges, and footer attribution. A live preview reflects theme, accent, typography, and width changes. These choices only affect the standalone HTML export. **Advanced** still includes custom HTML CSS and UI yield frequency.
