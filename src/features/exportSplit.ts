@@ -16,6 +16,7 @@ import {
 import { CleanedNote } from '../core/pipeline';
 import { normalizePath, pathKey } from '../core/filter';
 import { canonicalOutputPath } from '../core/outputTarget';
+import { effectiveSplitExtension, normalizeExtension } from '../core/extension';
 
 export interface OutputFile {
 	path: string;
@@ -287,20 +288,33 @@ function resolveNoteGroup(
 }
 
 /**
- * Assigns `.txt` filenames or relative paths for each split group according to
- * `style`, preserving published layouts. The output planner rejects remaining collisions.
+ * Assigns filenames or relative paths for each split group according to `style`
+ * and `extension` (default `.txt`), preserving published layouts.
+ * The output planner rejects remaining collisions.
  */
-export function assignGroupFileNames(groupPaths: readonly string[], style: SplitSubfolderStyle = 'flat-prefixed'): Map<string, string> {
+export function assignGroupFileNames(
+	groupPaths: readonly string[],
+	style: SplitSubfolderStyle = 'flat-prefixed',
+	extension: string = '.txt'
+): Map<string, string> {
+	const ext = normalizeExtension(extension) || '.txt';
+	const lowerExt = ext.toLowerCase();
+	const safeParentSegment = (part: string): string => {
+		const safe = safeSegment(part);
+		return safe.toLowerCase().endsWith(lowerExt)
+			? safe.slice(0, safe.length - ext.length) + '_' + ext.slice(1)
+			: safe;
+	};
 	if (style === 'nested') {
 		return new Map(groupPaths.map((group) => {
 			const segments = group.split('/');
-			const parents = segments.slice(0, -1).map((part) => safeSegment(part).replace(/\.txt$/i, '_txt'));
-			return [group, [...parents, safeSegment(segments[segments.length - 1] ?? ROOT_GROUP) + '.txt'].join('/')];
+			const parents = segments.slice(0, -1).map(safeParentSegment);
+			return [group, [...parents, safeSegment(segments[segments.length - 1] ?? ROOT_GROUP) + ext].join('/')];
 		}));
 	}
 	if (style !== 'flat-leaf') {
 		const separator = style === 'flat-underscored' ? '_' : ' - ';
-		return new Map(groupPaths.map((group) => [group, group.split('/').map(safeSegment).join(separator) + '.txt']));
+		return new Map(groupPaths.map((group) => [group, group.split('/').map(safeSegment).join(separator) + ext]));
 	}
 	// Preserve the published leaf-name style: use parents only for shared raw
 	// leaf names, never add numbered suffixes to hide a sanitization collision.
@@ -328,7 +342,7 @@ export function assignGroupFileNames(groupPaths: readonly string[], style: Split
 		}
 		if (!progressed) break;
 	}
-	return new Map(groupPaths.map((group) => [group, parts(group).map(safeSegment).join(' - ') + '.txt']));
+	return new Map(groupPaths.map((group) => [group, parts(group).map(safeSegment).join(' - ') + ext]));
 }
 
 /**
@@ -361,12 +375,13 @@ export function isCandidateSplitFolder(folderPath: string, settings: ExporterSet
 export function previewSplitFiles(settings: ExporterSettings, vaultFolders?: readonly string[]): string[] {
 	const base = settings.splitOutputFolder.trim() || '(vault root)';
 	const joinPreview = (rel: string): string => (settings.splitOutputFolder.trim() ? joinPath(base, rel) : rel);
+	const ext = effectiveSplitExtension(settings);
 
 	if (settings.splitMode === 'individual-files') {
 		return [
-			joinPreview('Projects/Web/Frontend/Overview.md'),
-			joinPreview('Projects/Mobile/Roadmap.md'),
-			joinPreview('Notes/Research.md'),
+			joinPreview('Projects/Web/Frontend/Overview' + ext),
+			joinPreview('Projects/Mobile/Roadmap' + ext),
+			joinPreview('Notes/Research' + ext),
 		];
 	}
 
@@ -411,12 +426,13 @@ export function previewSplitFiles(settings: ExporterSettings, vaultFolders?: rea
 	for (const notePath of sampleNotePaths) {
 		groups.add(resolveNoteGroup(notePath, groupingRoot, rules, defaultDepth));
 	}
-	const fileNames = assignGroupFileNames([...groups], style);
+	const fileNames = assignGroupFileNames([...groups], style, ext);
 	return [...fileNames.values()].slice(0, 5).map((fileName) => joinPreview(fileName));
 }
 
 export function planSplitFiles(notes: CleanedNote[], settings: ExporterSettings): OutputPlan[] {
 	const base = settings.splitOutputFolder;
+	const ext = effectiveSplitExtension(settings);
 	const destinations = new Map<string, { path: string; source: string }>();
 	const output = (path: string, render: () => string, source: string): OutputPlan => {
 		const key = canonicalOutputPath(path).toLowerCase();
@@ -433,8 +449,11 @@ export function planSplitFiles(notes: CleanedNote[], settings: ExporterSettings)
 			const frontmatter = !settings.stripFrontmatter && note.rawFrontmatter
 				? '---\n' + note.rawFrontmatter + '\n---\n\n'
 				: '';
-			const rel = (relativeToFolder(note.path, settings.scopeRoot) ?? note.path)
-				.replace(/\.canvas$/i, '.md').split('/').map(safeSegment).join('/');
+			const rawRel = relativeToFolder(note.path, settings.scopeRoot) ?? note.path;
+			const parts = rawRel.split('/');
+			const lastIdx = parts.length - 1;
+			const stem = (parts[lastIdx] ?? '').replace(/\.(?:md|canvas)$/i, '');
+			const rel = [...parts.slice(0, lastIdx).map(safeSegment), safeSegment(stem) + ext].join('/');
 			return output(joinPath(base, rel), () => frontmatter + note.body, '"' + note.path + '"');
 		});
 	}
@@ -451,9 +470,9 @@ export function planSplitFiles(notes: CleanedNote[], settings: ExporterSettings)
 		else groups.set(group, [note]);
 	}
 
-	const fileNames = assignGroupFileNames([...groups.keys()], style);
+	const fileNames = assignGroupFileNames([...groups.keys()], style, ext);
 	return [...groups.entries()].map(([group, groupNotes]) => {
-		const safeName = fileNames.get(group) ?? safeSegment(group) + '.txt';
+		const safeName = fileNames.get(group) ?? safeSegment(group) + ext;
 		return output(joinPath(base, safeName), () => {
 			const lines = [RULE, 'Folder: ' + group, 'Documents: ' + groupNotes.length, RULE, ''];
 			for (const note of groupNotes) {

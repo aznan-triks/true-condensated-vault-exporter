@@ -4,9 +4,10 @@ import { inflateRawSync } from 'zlib';
 import { crc32, buildZip, zipEntryName } from '../src/core/zip';
 import * as zipModule from '../src/core/zip';
 import { CONSOLIDATED_FORMATS } from '../src/features/formats';
-import { buildSplitFiles } from '../src/features/exportSplit';
+import { assignGroupFileNames, buildSplitFiles, planSplitFiles, previewSplitFiles } from '../src/features/exportSplit';
 import * as splitModule from '../src/features/exportSplit';
 import { cleanNote, createExportContext } from '../src/core/pipeline';
+import { defaultFileMetadata } from '../src/core/frontmatter';
 import { runExports, ExportCancelledError, ExportFailedError, utf8ByteLength } from '../src/features/exportOrchestrator';
 import {
 	ExportHistoryEntry,
@@ -859,3 +860,88 @@ describe('export history', () => {
 		expect(relativeTime(now - 26 * 3600 * 1000, now)).toBe('yesterday');
 	});
 });
+
+describe('custom extensions in split & full export pipeline', () => {
+	it('applies custom extensions across assignGroupFileNames, previewSplitFiles, and planSplitFiles', () => {
+		const nested = assignGroupFileNames(['Projects.mdx/Backend'], 'nested', '.mdx');
+		expect(nested.get('Projects.mdx/Backend')).toBe('Projects_mdx/Backend.mdx');
+
+		const previewGrouped = previewSplitFiles(
+			{ ...DEFAULT_SETTINGS, splitOutputFolder: 'Out', outputExtension: '.mdx' },
+			['Projects/Web', 'Notes']
+		);
+		expect(previewGrouped.every((p) => p.endsWith('.mdx'))).toBe(true);
+
+		const previewIndividual = previewSplitFiles(
+			{ ...DEFAULT_SETTINGS, splitMode: 'individual-files', splitFileExtension: '.org' }
+		);
+		expect(previewIndividual.every((p) => p.endsWith('.org'))).toBe(true);
+
+		const individualPlans = planSplitFiles(
+			[
+				{
+					title: 'Alpha',
+					path: 'Projects/Alpha.md',
+					metadata: defaultFileMetadata(),
+					body: 'Body A',
+					rawFrontmatter: '',
+					isCanvas: false,
+				},
+				{
+					title: 'Board',
+					path: 'Projects/Board.canvas',
+					metadata: defaultFileMetadata(),
+					body: 'Canvas body',
+					rawFrontmatter: '',
+					isCanvas: true,
+				},
+			],
+			{ ...DEFAULT_SETTINGS, splitMode: 'individual-files', splitFileExtension: '.mdx' }
+		);
+		expect(individualPlans.map((p) => p.path)).toEqual([
+			'Vault export - split/Projects/Alpha.mdx',
+			'Vault export - split/Projects/Board.mdx',
+		]);
+	});
+
+	it('writes consolidated files, split files, and ZIP archive entries using custom extensions', async () => {
+		const writtenText = new Map<string, string>();
+		const writtenBinary = new Map<string, Uint8Array>();
+		const gateway: ExportGateway = {
+			loadVaultFiles: async () => [
+				{ path: 'Projects/Alpha.md', name: 'Alpha.md', content: '# Alpha\nHello world' },
+				{ path: 'Notes/Beta.md', name: 'Beta.md', content: '# Beta\nSecond note' },
+			],
+			writeFile: async (p, c) => { writtenText.set(p, c); },
+			writeBinary: async (p, c) => { writtenBinary.set(p, c); },
+		};
+
+		await runExports(
+			gateway,
+			{
+				...DEFAULT_SETTINGS,
+				outputExtension: '.mdx',
+				splitFileExtension: '.org',
+			},
+			['all', 'zip'],
+			() => {}
+		);
+
+		expect([...writtenText.keys()].sort()).toEqual([
+			'Vault export - HTML.mdx',
+			'Vault export - NotebookLM.mdx',
+			'Vault export - split/Notes.org',
+			'Vault export - split/Projects.org',
+			'Vault export.mdx',
+		]);
+
+		const zipBytes = writtenBinary.get('Vault export.zip');
+		expect(zipBytes).toBeDefined();
+		const rawZip = Buffer.from(zipBytes!);
+		expect(rawZip.includes(Buffer.from('Vault export.mdx'))).toBe(true);
+		expect(rawZip.includes(Buffer.from('Vault export - HTML.mdx'))).toBe(true);
+		expect(rawZip.includes(Buffer.from('Vault export - NotebookLM.mdx'))).toBe(true);
+		expect(rawZip.includes(Buffer.from('Vault export - split/Projects.org'))).toBe(true);
+	});
+});
+

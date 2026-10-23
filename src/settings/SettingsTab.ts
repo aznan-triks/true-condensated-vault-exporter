@@ -1,12 +1,39 @@
 /**
  * Settings Tab for Vault Exporter.
- * Tabbed and searchable settings with HTML export personalization.
+ * Tabbed and searchable settings with status badges, changed-from-default
+ * tracking & per-setting reset, custom export extensions, live HTML & Split
+ * previews, and an interactive Changelog & Version History viewer.
  */
 
-import { App, Notice, PluginSettingTab, Setting } from 'obsidian';
+import { App, Notice, PluginSettingTab, Setting, requestUrl } from 'obsidian';
 import type VaultExporterPlugin from '../main';
-import { PROGRESS_PANEL_AUTO_CLOSE_OPTIONS, SplitPresetId } from '../core/types';
-import { isAbsoluteOutputPath } from '../core/outputTarget';
+import {
+	DEFAULT_SETTINGS,
+	ExporterSettings,
+	PROGRESS_PANEL_AUTO_CLOSE_OPTIONS,
+	SplitPresetId,
+} from '../core/types';
+import {
+	COMMON_EXPORT_EXTENSIONS,
+	effectiveSplitExtension,
+	normalizeExtension,
+	replaceFileExtension,
+} from '../core/extension';
+import {
+	isAbsoluteOutputPath,
+	resolveConsolidatedExtensionPaths,
+	usesExternalOutputFolder,
+} from '../core/outputTarget';
+import { sameSettingValue, setSettingAt, settingAt } from '../core/settingValue';
+import {
+	KNOWN_CHANGELOG_CATEGORIES,
+	buildChangelogVersionCard,
+	filterAndGroupChangelog,
+	parseRawChangelogMarkdown,
+	type ChangelogViewMode,
+	type RawChangelogItem,
+} from '../core/changelog';
+import { BUNDLED_CHANGELOG } from '../core/bundledChangelog';
 import {
 	SPLIT_PRESETS,
 	applySplitPreset,
@@ -16,30 +43,172 @@ import {
 } from '../features/exportSplit';
 import { VaultPathSuggest } from '../ui/VaultPathSuggest';
 
+const CHANGELOG_RAW_URL = 'https://raw.githubusercontent.com/aznan-triks/true-condensated-vault-exporter/main/CHANGELOG.md';
+const CHANGELOG_REPO_URL = 'https://github.com/aznan-triks/true-condensated-vault-exporter/blob/main/CHANGELOG.md';
+
+type SettingsSectionId =
+	| 'general'
+	| 'feedback'
+	| 'scope'
+	| 'destination'
+	| 'output'
+	| 'processing'
+	| 'html'
+	| 'advanced'
+	| 'changelog';
+
 interface SettingsSectionDefinition {
-	id: string;
+	id: SettingsSectionId;
 	title: string;
+	intro?: string;
 }
 
-const SETTINGS_SECTIONS: SettingsSectionDefinition[] = [
-	{ id: 'general', title: 'General' },
-	{ id: 'feedback', title: 'Export Feedback & Behavior' },
-	{ id: 'scope', title: 'Scope & Exclusions' },
-	{ id: 'destination', title: 'External Output Folder' },
-	{ id: 'output', title: 'Output Paths & Split Options' },
-	{ id: 'processing', title: 'Markdown Processing' },
-	{ id: 'html', title: 'HTML Personalization' },
-	{ id: 'advanced', title: 'Advanced' },
+const SETTINGS_SECTIONS: readonly SettingsSectionDefinition[] = [
+	{
+		id: 'general',
+		title: 'General',
+		intro: 'Choose the title written at the top of consolidated documents and whether the sidebar remembers your last selected targets.',
+	},
+	{
+		id: 'feedback',
+		title: 'Export Feedback & Behavior',
+		intro: 'Control what happens right after an export completes: progress panel visibility and automatic folder reveal.',
+	},
+	{
+		id: 'scope',
+		title: 'Scope & Exclusions',
+		intro: 'Choose which part of the vault is exported and which folders, files, or prefixes are always left untouched.',
+	},
+	{
+		id: 'destination',
+		title: 'External Output Folder',
+		intro: 'Redirect every exported file into an OS folder outside the vault while keeping relative subfolders intact.',
+	},
+	{
+		id: 'output',
+		title: 'Output Paths & Split Options',
+		intro: 'Customize file extensions across exports, configure consolidated output paths, and fine-tune how split exports group and name files.',
+	},
+	{
+		id: 'processing',
+		title: 'Markdown Processing',
+		intro: 'Configure how Canvas boards, YAML frontmatter, Dataview queries, and wikilinks are transformed during cleaning.',
+	},
+	{
+		id: 'html',
+		title: 'HTML Personalization',
+		intro: 'Customize the standalone HTML export palette, typography, reading width, navigation, and metadata with a live preview.',
+	},
+	{
+		id: 'advanced',
+		title: 'Advanced',
+		intro: 'Inject custom CSS rules into standalone HTML exports and tune UI yield frequency for large vaults.',
+	},
+	{
+		id: 'changelog',
+		title: 'Changelog',
+	},
+];
+
+const TRACKED_SETTING_KEYS: readonly (keyof ExporterSettings)[] = [
+	'documentTitle',
+	'rememberTargetSelection',
+	'autoRevealOutput',
+	'progressPanelAutoCloseSeconds',
+	'scopeRoot',
+	'scopeTag',
+	'excludedFolders',
+	'excludedFiles',
+	'excludedPrefixes',
+	'useExternalOutputFolder',
+	'externalOutputFolder',
+	'outputExtension',
+	'notebooklmOutputPath',
+	'htmlOutputPath',
+	'markdownOutputPath',
+	'zipOutputPath',
+	'splitMode',
+	'splitFileExtension',
+	'splitGroupFolder',
+	'splitSubfolderNaming' as never,
+].filter((k): k is keyof ExporterSettings => k in DEFAULT_SETTINGS);
+
+const RESETTABLE_KEYS: readonly (keyof ExporterSettings)[] = [
+	'documentTitle',
+	'rememberTargetSelection',
+	'useExternalOutputFolder',
+	'externalOutputFolder',
+	'progressPanelAutoCloseSeconds',
+	'autoRevealOutput',
+	'scopeRoot',
+	'excludedFolders',
+	'excludedFiles',
+	'excludedPrefixes',
+	'scopeTag',
+	'outputExtension',
+	'notebooklmOutputPath',
+	'htmlOutputPath',
+	'markdownOutputPath',
+	'zipOutputPath',
+	'splitMode',
+	'splitFileExtension',
+	'splitGroupFolder',
+	'splitSubfolders',
+	'splitSubfolderDepth',
+	'splitSubfolderStyle',
+	'splitOutputFolder',
+	'stripFrontmatter',
+	'renderDataview',
+	'wikilinkFormat',
+	'ignoredProperties',
+	'includeCanvas',
+	'customCss',
+	'htmlTheme',
+	'htmlAccentColor',
+	'htmlFont',
+	'htmlContentWidth',
+	'htmlShowToc',
+	'htmlShowSearch',
+	'htmlShowPaths',
+	'htmlShowMetadata',
+	'htmlShowFooter',
+	'htmlFooterText',
+	'yieldEvery',
 ];
 
 export class VaultExporterSettingsTab extends PluginSettingTab {
 	private saveTimer: number | null = null;
-	private activeSectionId = SETTINGS_SECTIONS[0]?.id ?? 'general';
+	private activeSectionId: SettingsSectionId = SETTINGS_SECTIONS[0]?.id ?? 'general';
 	private searchQuery = '';
+	private onlyChanged = false;
 	private settingRowIndex = 0;
+
+	private headerBadgesEl: HTMLElement | null = null;
+	private summaryEl: HTMLElement | null = null;
+	private sectionsEl: HTMLElement | null = null;
+	private searchResultsEl: HTMLElement | null = null;
+	private noResultsEl: HTMLElement | null = null;
+	private extPreviewEl: HTMLElement | null = null;
+
+	// Changelog viewer state
+	private changelogRawMarkdown: string = BUNDLED_CHANGELOG;
+	private changelogLoading = false;
+	private changelogFetchedAt: Date | null = null;
+	private clSearchQuery = '';
+	private clSortOrder: 'desc' | 'asc' = 'desc';
+	private clViewMode: ChangelogViewMode = 'all';
+	private clActiveCats = new Set<string>(KNOWN_CHANGELOG_CATEGORIES);
+	private clVersionFrom = 'all';
+	private clVersionTo = 'all';
+	private clContentContainer: HTMLElement | null = null;
+	private clCounterEl: HTMLElement | null = null;
+	private clTimeEl: HTMLElement | null = null;
+	private clVersionFromSelect: HTMLSelectElement | null = null;
+	private clVersionToSelect: HTMLSelectElement | null = null;
 
 	constructor(app: App, private readonly plugin: VaultExporterPlugin) {
 		super(app, plugin);
+		void TRACKED_SETTING_KEYS;
 	}
 
 	private saveNow(): Promise<void> {
@@ -70,35 +239,40 @@ export class VaultExporterSettingsTab extends PluginSettingTab {
 
 	override display(): void {
 		const { containerEl } = this;
+		const scrollTop = containerEl.scrollTop;
 		containerEl.empty();
 		this.settingRowIndex = 0;
 		containerEl.addClass('ve-settings');
 
-		containerEl.createEl('h2', { text: 'Vault Exporter Settings' });
-		containerEl.createEl('p', {
-			cls: 've-settings__intro',
-			text: 'Choose what to export, where it goes, and how the standalone HTML document looks.',
-		});
+		this.renderHeader(containerEl);
 
 		const searchWrap = containerEl.createDiv({ cls: 've-settings__search-wrap' });
 		const search = new Setting(searchWrap)
 			.setName('Find a setting')
 			.setDesc('Search every category by name or description. Click a result to jump to it. Press Escape to clear.')
 			.setClass('ve-settings__search');
+
+		this.renderSummaryBar(containerEl);
+
 		const searchResults = containerEl.createDiv({ cls: 've-settings__search-results' });
 		searchResults.setAttribute('aria-live', 'polite');
 		searchResults.hidden = true;
+		this.searchResultsEl = searchResults;
+
 		const tabBar = containerEl.createDiv({
 			cls: 've-settings__tabs',
 			attr: { role: 'tablist', 'aria-label': 'Settings categories' },
 		});
 		const sections = containerEl.createDiv({ cls: 've-settings__sections' });
-		const noResults = sections.createDiv({ cls: 've-settings__empty', text: 'No settings match your search.' });
+		this.sectionsEl = sections;
+
+		const noResults = sections.createDiv({ cls: 've-settings__empty', text: 'No settings match your current filter.' });
 		noResults.hidden = true;
+		this.noResultsEl = noResults;
 
 		search.addText((text) => {
 			text.setValue(this.searchQuery);
-			text.setPlaceholder('Try “accent”, “folder”, or “frontmatter”…');
+			text.setPlaceholder('Try “extension”, “folder”, or “frontmatter”…');
 			text.inputEl.setAttribute('aria-label', 'Search Vault Exporter settings');
 			text.inputEl.setAttribute('autocomplete', 'off');
 			text.inputEl.addEventListener('input', () => {
@@ -112,23 +286,27 @@ export class VaultExporterSettingsTab extends PluginSettingTab {
 			});
 		});
 
-		const sectionElements = new Map<string, HTMLElement>();
+		const sectionElements = new Map<SettingsSectionId, HTMLElement>();
 		for (const sectionDefinition of SETTINGS_SECTIONS) {
-			const section = this.createSection(sections, sectionDefinition.id, sectionDefinition.title);
+			const section = this.createSection(sections, sectionDefinition);
 			sectionElements.set(sectionDefinition.id, section);
 			this.createSectionTab(tabBar, sectionDefinition);
 		}
 
-		const getSection = (id: string): HTMLElement => sectionElements.get(id)!;
+		const getSection = (id: SettingsSectionId): HTMLElement => sectionElements.get(id)!;
+
+		// SECTION 1: GENERAL
 		const generalSection = getSection('general');
-		this.createSetting(generalSection, 'Document Title', 'Title written at the top of consolidated exports.')
-			.addText((text) => {
-				text.setValue(this.plugin.settings.documentTitle);
-				text.onChange((val) => {
-					this.plugin.settings.documentTitle = val.trim();
-					this.scheduleSave();
-				});
+		const docTitle = this.createSetting(generalSection, 'Document Title', 'Title written at the top of consolidated exports.');
+		docTitle.setting.addText((text) => {
+			text.setValue(this.plugin.settings.documentTitle);
+			text.onChange((val) => {
+				this.plugin.settings.documentTitle = val.trim();
+				this.scheduleSave();
 			});
+		});
+		this.track(docTitle.row, docTitle.setting, 'documentTitle');
+
 		this.renderToggleSetting(
 			generalSection,
 			'Remember Sidebar Targets',
@@ -136,57 +314,68 @@ export class VaultExporterSettingsTab extends PluginSettingTab {
 			'rememberTargetSelection'
 		);
 
-		// SECTION: EXPORT FEEDBACK & BEHAVIOR
+		// SECTION 2: EXPORT FEEDBACK & BEHAVIOR
 		const behaviorSection = getSection('feedback');
 		this.renderToggleSetting(
 			behaviorSection,
 			'Reveal Output After Success',
-			'Automatically open the first exported file’s folder in the desktop file manager when an export succeeds.',
+			'Automatically reveal the first exported file in the desktop file manager when an export succeeds.',
 			'autoRevealOutput'
 		);
-		this.createSetting(behaviorSection, 'Progress Panel Auto-Close', 'Choose how long the panel stays open after a successful export. Cancelled and failed panels remain visible for review. Select Never to keep successful results open until you close them.')
-			.addDropdown((drop) => {
-				for (const seconds of PROGRESS_PANEL_AUTO_CLOSE_OPTIONS) {
-					drop.addOption(String(seconds), seconds === 0 ? 'Never (keep open)' : seconds + ' seconds');
+		const autoClose = this.createSetting(
+			behaviorSection,
+			'Progress Panel Auto-Close',
+			'Choose how long the panel stays visible after a successful export. Cancelled and failed panels remain visible for review. Select Never to keep successful results until closed.'
+		);
+		autoClose.setting.addDropdown((drop) => {
+			for (const seconds of PROGRESS_PANEL_AUTO_CLOSE_OPTIONS) {
+				drop.addOption(String(seconds), seconds === 0 ? 'Never (keep open)' : seconds + ' seconds');
+			}
+			drop.setValue(String(this.plugin.settings.progressPanelAutoCloseSeconds));
+			drop.onChange(async (value) => {
+				const seconds = Number(value);
+				if (PROGRESS_PANEL_AUTO_CLOSE_OPTIONS.some((option) => option === seconds)) {
+					this.plugin.settings.progressPanelAutoCloseSeconds = seconds;
+					await this.saveNow();
+					this.refreshLiveIndicators();
 				}
-				drop.setValue(String(this.plugin.settings.progressPanelAutoCloseSeconds));
-				drop.onChange(async (value) => {
-					const seconds = Number(value);
-					if (PROGRESS_PANEL_AUTO_CLOSE_OPTIONS.some((option) => option === seconds)) {
-						this.plugin.settings.progressPanelAutoCloseSeconds = seconds;
-						await this.saveNow();
-					}
-				});
 			});
+		});
+		this.track(autoClose.row, autoClose.setting, 'progressPanelAutoCloseSeconds');
 
-		// SECTION: SCOPE & EXCLUSIONS
+		// SECTION 3: SCOPE & EXCLUSIONS
 		const scopeSection = getSection('scope');
-		this.createSetting(scopeSection, 'Scope Root', 'Vault-relative root folder to scan. Leave empty to scan the entire vault.')
-			.addText((text) => {
-				text.setValue(this.plugin.settings.scopeRoot);
-				text.setPlaceholder('e.g. Notes or leave blank');
-				text.onChange((val) => {
-					this.plugin.settings.scopeRoot = val.trim();
-					this.scheduleSave();
-				});
-				new VaultPathSuggest(this.app, text.inputEl, () => this.plugin.gateway.getAllFolders());
+		const scopeRoot = this.createSetting(scopeSection, 'Scope Root', 'Vault-relative root folder to scan. Leave empty to scan the entire vault.');
+		scopeRoot.setting.addText((text) => {
+			text.setValue(this.plugin.settings.scopeRoot);
+			text.setPlaceholder('e.g. Notes or leave blank');
+			text.onChange((val) => {
+				this.plugin.settings.scopeRoot = val.trim();
+				this.scheduleSave();
+				this.updateHeaderBadges();
 			});
+			new VaultPathSuggest(this.app, text.inputEl, () => this.plugin.gateway.getAllFolders());
+		});
+		this.track(scopeRoot.row, scopeRoot.setting, 'scopeRoot');
 
-		this.createSetting(scopeSection, 'Scope Tag', 'When set, only notes carrying this tag (body or frontmatter) are exported. Canvas files are excluded while a tag is active.')
-			.addText((text) => {
-				text.setValue(this.plugin.settings.scopeTag);
-				text.setPlaceholder('e.g. #research or research');
-				text.onChange((val) => {
-					this.plugin.settings.scopeTag = val.trim();
-					this.scheduleSave();
-				});
+		const scopeTag = this.createSetting(scopeSection, 'Scope Tag', 'When set, only notes carrying this tag (body or frontmatter) are exported. Canvas files are excluded while a tag is active.');
+		scopeTag.setting.addText((text) => {
+			text.setValue(this.plugin.settings.scopeTag);
+			text.setPlaceholder('e.g. #research or research');
+			text.onChange((val) => {
+				this.plugin.settings.scopeTag = val.trim();
+				this.scheduleSave();
+				this.updateHeaderBadges();
 			});
+		});
+		this.track(scopeTag.row, scopeTag.setting, 'scopeTag');
 
 		this.renderStringListSetting(
 			scopeSection,
 			'Excluded Folders',
 			'Folders completely excluded from exports (with interactive autocomplete).',
 			this.plugin.settings.excludedFolders,
+			'excludedFolders',
 			() => this.plugin.gateway.getAllFolders(),
 			async (newList) => {
 				this.plugin.settings.excludedFolders = newList;
@@ -199,6 +388,7 @@ export class VaultExporterSettingsTab extends PluginSettingTab {
 			'Excluded Files',
 			'Exact filenames or paths to exclude (with interactive autocomplete).',
 			this.plugin.settings.excludedFiles,
+			'excludedFiles',
 			() => this.plugin.gateway.getAllFiles(),
 			async (newList) => {
 				this.plugin.settings.excludedFiles = newList;
@@ -211,6 +401,7 @@ export class VaultExporterSettingsTab extends PluginSettingTab {
 			'Excluded Folder Prefixes',
 			'Prefixes that trigger exclusion on any subfolder (e.g. 00_).',
 			this.plugin.settings.excludedPrefixes,
+			'excludedPrefixes',
 			undefined,
 			async (newList) => {
 				this.plugin.settings.excludedPrefixes = newList;
@@ -218,51 +409,54 @@ export class VaultExporterSettingsTab extends PluginSettingTab {
 			}
 		);
 
-		// SECTION: EXTERNAL OUTPUT FOLDER
+		// SECTION 4: EXTERNAL OUTPUT FOLDER
 		const destinationSection = getSection('destination');
-		this.createSetting(
+		const extToggle = this.createSetting(
 			destinationSection,
 			'Export to an External Folder',
 			'Write every output into a folder outside the vault instead of writing the configured output paths inside it. Relative paths keep their subfolders; absolute paths keep only their file or folder name. Requires an absolute folder path, for example C:\\Exports or /Users/you/Exports.'
-		)
-			.addToggle((toggle) => {
-				toggle.setValue(this.plugin.settings.useExternalOutputFolder);
-				toggle.onChange(async (value) => {
-					this.plugin.settings.useExternalOutputFolder = value;
-					await this.saveNow();
-					if (value && !isAbsoluteOutputPath(this.plugin.settings.externalOutputFolder)) {
-						const picked = await this.pickExternalOutputFolder();
-						if (!picked) {
-							new Notice('No external folder selected — exports keep going into the vault.');
-						}
+		);
+		extToggle.setting.addToggle((toggle) => {
+			toggle.setValue(this.plugin.settings.useExternalOutputFolder);
+			toggle.onChange(async (value) => {
+				this.plugin.settings.useExternalOutputFolder = value;
+				await this.saveNow();
+				if (value && !isAbsoluteOutputPath(this.plugin.settings.externalOutputFolder)) {
+					const picked = await this.pickExternalOutputFolder();
+					if (!picked) {
+						new Notice('No external folder selected — exports keep going into the vault.');
 					}
-					this.refreshExternalFolderDescription(externalFolderSetting);
-				});
+				}
+				this.refreshExternalFolderDescription(externalFolder.setting);
+				this.updateHeaderBadges();
 			});
+		});
+		this.track(extToggle.row, extToggle.setting, 'useExternalOutputFolder');
 
-		const externalFolderSetting = this.createSetting(
+		const externalFolder = this.createSetting(
 			destinationSection,
 			'External Folder',
 			this.describeExternalFolder()
 		);
-		externalFolderSetting.addText((text) => {
+		externalFolder.setting.addText((text) => {
 			text.setValue(this.plugin.settings.externalOutputFolder);
 			text.setPlaceholder('C:\\Exports or /Users/you/Exports');
 			text.inputEl.style.width = '100%';
 			text.onChange((value) => {
 				this.plugin.settings.externalOutputFolder = value.trim();
 				this.scheduleSave();
-				this.refreshExternalFolderDescription(externalFolderSetting);
+				this.refreshExternalFolderDescription(externalFolder.setting);
+				this.updateHeaderBadges();
 			});
 		});
-		externalFolderSetting.addButton((button) => {
+		externalFolder.setting.addButton((button) => {
 			button.setButtonText('Choose folder…');
 			button.setTooltip('Open the system folder picker');
 			button.onClick(async () => {
 				await this.pickExternalOutputFolder();
 			});
 		});
-		externalFolderSetting.addExtraButton((button) => {
+		externalFolder.setting.addExtraButton((button) => {
 			button.setIcon('folder-open');
 			button.setTooltip('Open the external folder in the file manager');
 			button.onClick(async () => {
@@ -276,182 +470,182 @@ export class VaultExporterSettingsTab extends PluginSettingTab {
 				}
 			});
 		});
-		this.refreshExternalFolderDescription(externalFolderSetting);
+		this.track(externalFolder.row, externalFolder.setting, 'externalOutputFolder');
+		this.refreshExternalFolderDescription(externalFolder.setting);
 
-		// SECTION: OUTPUT PATHS & SPLIT MODE
+		// SECTION 5: OUTPUT PATHS & SPLIT MODE
 		const outputSection = getSection('output');
-		this.createSetting(outputSection, 'NotebookLM Consolidated Output', 'Vault-relative path, or an absolute file path on desktop, for the NotebookLM text file.')
-			.addText((text) => {
-				text.setValue(this.plugin.settings.notebooklmOutputPath);
-				text.onChange((val) => {
-					this.plugin.settings.notebooklmOutputPath = val.trim();
-					this.scheduleSave();
-				});
-				new VaultPathSuggest(this.app, text.inputEl, () => this.plugin.gateway.getAllFiles());
-			});
+		new Setting(outputSection).setName('Custom File Extensions & Consolidated Outputs').setHeading();
+		this.renderGlobalExtensionSetting(outputSection);
 
-		this.createSetting(outputSection, 'HTML Consolidated Output', 'Vault-relative path, or an absolute file path on desktop, for the HTML document.')
-			.addText((text) => {
-				text.setValue(this.plugin.settings.htmlOutputPath);
-				text.onChange((val) => {
-					this.plugin.settings.htmlOutputPath = val.trim();
-					this.scheduleSave();
-				});
-				new VaultPathSuggest(this.app, text.inputEl, () => this.plugin.gateway.getAllFiles());
-			});
+		this.renderConsolidatedPathSetting(
+			outputSection,
+			'NotebookLM Consolidated Output',
+			'Vault-relative path, or an absolute file path on desktop, for the NotebookLM text file.',
+			'notebooklmOutputPath'
+		);
+		this.renderConsolidatedPathSetting(
+			outputSection,
+			'HTML Consolidated Output',
+			'Vault-relative path, or an absolute file path on desktop, for the HTML document.',
+			'htmlOutputPath'
+		);
+		this.renderConsolidatedPathSetting(
+			outputSection,
+			'Markdown Consolidated Output',
+			'Vault-relative path, or an absolute file path on desktop, for the consolidated Markdown document.',
+			'markdownOutputPath'
+		);
 
-		this.createSetting(outputSection, 'Markdown Consolidated Output', 'Vault-relative path, or an absolute file path on desktop, for the consolidated Markdown document.')
-			.addText((text) => {
-				text.setValue(this.plugin.settings.markdownOutputPath);
-				text.onChange((val) => {
-					this.plugin.settings.markdownOutputPath = val.trim();
-					this.scheduleSave();
-				});
-				new VaultPathSuggest(this.app, text.inputEl, () => this.plugin.gateway.getAllFiles());
+		const zipOut = this.createSetting(outputSection, 'ZIP Bundle Output', 'Where the ZIP bundle (all consolidated formats + split files) is written. Vault-relative or absolute path.');
+		zipOut.setting.addText((text) => {
+			text.setValue(this.plugin.settings.zipOutputPath);
+			text.onChange((val) => {
+				this.plugin.settings.zipOutputPath = val.trim();
+				this.scheduleSave();
 			});
+			new VaultPathSuggest(this.app, text.inputEl, () => this.plugin.gateway.getAllFiles());
+		});
+		this.track(zipOut.row, zipOut.setting, 'zipOutputPath');
 
-		this.createSetting(outputSection, 'ZIP Bundle Output', 'Where the ZIP bundle (all consolidated formats + split files) is written. Vault-relative or absolute path.')
-			.addText((text) => {
-				text.setValue(this.plugin.settings.zipOutputPath);
-				text.onChange((val) => {
-					this.plugin.settings.zipOutputPath = val.trim();
-					this.scheduleSave();
-				});
-				new VaultPathSuggest(this.app, text.inputEl, () => this.plugin.gateway.getAllFiles());
-			});
-
+		new Setting(outputSection).setName('Split Exports').setHeading();
 		this.renderSplitPresetsSetting(outputSection);
 
-		this.createSetting(outputSection, 'Split Export Mode', 'Choose one text file per folder group, or one cleaned Markdown file for each note.')
-			.addDropdown((drop) => {
-				drop.addOption('folder-grouped', 'Folder-grouped (1 .txt per folder group)');
-				drop.addOption('individual-files', 'Individual notes (1-to-1 markdown files)');
-				drop.setValue(this.plugin.settings.splitMode);
-				drop.onChange(async (val) => {
-					if (val === 'folder-grouped' || val === 'individual-files') {
-						this.plugin.settings.splitMode = val;
-						await this.saveNow();
-						this.display();
-					}
-				});
+		const splitModeSetting = this.createSetting(outputSection, 'Split Export Mode', 'Choose one text file per folder group, or one cleaned Markdown file for each note.');
+		splitModeSetting.setting.addDropdown((drop) => {
+			drop.addOption('folder-grouped', 'Folder-grouped (1 file per folder group)');
+			drop.addOption('individual-files', 'Individual notes (1-to-1 per note)');
+			drop.setValue(this.plugin.settings.splitMode);
+			drop.onChange(async (val) => {
+				if (val === 'folder-grouped' || val === 'individual-files') {
+					this.plugin.settings.splitMode = val;
+					await this.saveNow();
+					this.display();
+				}
 			});
+		});
+		this.track(splitModeSetting.row, splitModeSetting.setting, 'splitMode');
 
-		this.createSetting(outputSection, 'Split Group Folder', 'Folder-grouped mode: each direct subfolder of this folder becomes one file. Empty = scope root.')
-			.addText((text) => {
-				text.setValue(this.plugin.settings.splitGroupFolder);
-				text.onChange((val) => {
-					this.plugin.settings.splitGroupFolder = val.trim();
-					this.scheduleSave();
-					this.updateSplitPreview();
-				});
-				new VaultPathSuggest(this.app, text.inputEl, () => this.plugin.gateway.getAllFolders());
+		this.renderSplitExtensionSetting(outputSection);
+
+		const folderGroupedGroup = this.group(outputSection, this.plugin.settings.splitMode === 'folder-grouped');
+
+		const splitGroup = this.createSetting(folderGroupedGroup, 'Split Group Folder', 'Folder-grouped mode: each direct subfolder of this folder becomes one file. Empty = scope root.');
+		splitGroup.setting.addText((text) => {
+			text.setValue(this.plugin.settings.splitGroupFolder);
+			text.onChange((val) => {
+				this.plugin.settings.splitGroupFolder = val.trim();
+				this.scheduleSave();
+				this.updateSplitPreview();
 			});
+			new VaultPathSuggest(this.app, text.inputEl, () => this.plugin.gateway.getAllFolders());
+		});
+		this.track(splitGroup.row, splitGroup.setting, 'splitGroupFolder');
 
-		this.createSetting(
-			outputSection,
+		const splitNaming = this.createSetting(
+			folderGroupedGroup,
 			'Split Subfolder Naming',
 			'Folder-grouped mode: choose how subfolder split files are named and organized inside the split destination folder.'
-		)
-			.addDropdown((drop) => {
-				drop.addOption('flat-prefixed', 'Flat with parent prefix — Parent - Subfolder.txt (recommended for NotebookLM)');
-				drop.addOption('flat-leaf', 'Flat with subfolder name only — Subfolder.txt (auto-disambiguates on collision)');
-				drop.addOption('flat-underscored', 'Flat with underscore path — Parent_Subfolder.txt');
-				drop.addOption('nested', 'Mirrored subfolder tree — Parent/Subfolder.txt');
-				drop.setValue(this.plugin.settings.splitSubfolderStyle);
-				drop.onChange(async (val) => {
-					if (val === 'flat-prefixed' || val === 'flat-leaf' || val === 'flat-underscored' || val === 'nested') {
-						this.plugin.settings.splitSubfolderStyle = val;
-						await this.saveNow();
-						this.display();
-					}
-				});
+		);
+		splitNaming.setting.addDropdown((drop) => {
+			drop.addOption('flat-prefixed', 'Flat with parent prefix — Parent - Subfolder.txt (recommended for NotebookLM)');
+			drop.addOption('flat-leaf', 'Flat with subfolder name only — Subfolder.txt (auto-disambiguates on collision)');
+			drop.addOption('flat-underscored', 'Flat with underscore path — Parent_Subfolder.txt');
+			drop.addOption('nested', 'Mirrored subfolder tree — Parent/Subfolder.txt');
+			drop.setValue(this.plugin.settings.splitSubfolderStyle);
+			drop.onChange(async (val) => {
+				if (val === 'flat-prefixed' || val === 'flat-leaf' || val === 'flat-underscored' || val === 'nested') {
+					this.plugin.settings.splitSubfolderStyle = val;
+					await this.saveNow();
+					this.display();
+				}
 			});
+		});
+		this.track(splitNaming.row, splitNaming.setting, 'splitSubfolderStyle');
 
-		this.createSetting(
-			outputSection,
+		const splitDepth = this.createSetting(
+			folderGroupedGroup,
 			'Split Subfolder Depth',
 			'Folder-grouped mode: choose whether subfolder splitting applies to selected folders (1 level or recursive) or automatically across the entire scope.'
-		)
-			.addDropdown((drop) => {
-				drop.addOption('direct', 'Selected folders — direct subfolders (1 level per selected folder)');
-				drop.addOption('recursive', 'Selected folders — all nested subfolders (recursive)');
-				drop.addOption('all-two-levels', 'Entire scope — main folders & direct subfolders (2 levels everywhere)');
-				drop.addOption('all-recursive', 'Entire scope — every folder & nested subfolder recursively');
-				drop.setValue(this.plugin.settings.splitSubfolderDepth);
-				drop.onChange(async (val) => {
-					if (val === 'direct' || val === 'recursive' || val === 'all-two-levels' || val === 'all-recursive') {
-						this.plugin.settings.splitSubfolderDepth = val;
-						await this.saveNow();
-						this.display();
-					}
-				});
+		);
+		splitDepth.setting.addDropdown((drop) => {
+			drop.addOption('direct', 'Selected folders — direct subfolders (1 level per selected folder)');
+			drop.addOption('recursive', 'Selected folders — all nested subfolders (recursive)');
+			drop.addOption('all-two-levels', 'Entire scope — main folders & direct subfolders (2 levels everywhere)');
+			drop.addOption('all-recursive', 'Entire scope — every folder & nested subfolder recursively');
+			drop.setValue(this.plugin.settings.splitSubfolderDepth);
+			drop.onChange(async (val) => {
+				if (val === 'direct' || val === 'recursive' || val === 'all-two-levels' || val === 'all-recursive') {
+					this.plugin.settings.splitSubfolderDepth = val;
+					await this.saveNow();
+					this.display();
+				}
 			});
+		});
+		this.track(splitDepth.row, splitDepth.setting, 'splitSubfolderDepth');
 
-		this.renderSplitSubfoldersSetting(outputSection);
+		this.renderSplitSubfoldersSetting(folderGroupedGroup);
+		this.groupHint(outputSection, folderGroupedGroup, 'when Folder-grouped split mode is selected');
 
-		this.createSetting(outputSection, 'Split Files Destination Folder', 'Vault-relative folder or absolute disk path (desktop only) for split files.')
-			.addText((text) => {
-				text.setValue(this.plugin.settings.splitOutputFolder);
-				text.inputEl.style.width = '100%';
-				text.onChange((val) => {
-					this.plugin.settings.splitOutputFolder = val.trim();
-					this.scheduleSave();
-					this.updateSplitPreview();
-				});
-				new VaultPathSuggest(this.app, text.inputEl, () => this.plugin.gateway.getAllFolders());
+		const splitDest = this.createSetting(outputSection, 'Split Files Destination Folder', 'Vault-relative folder or absolute disk path (desktop only) for split files.');
+		splitDest.setting.addText((text) => {
+			text.setValue(this.plugin.settings.splitOutputFolder);
+			text.inputEl.style.width = '100%';
+			text.onChange((val) => {
+				this.plugin.settings.splitOutputFolder = val.trim();
+				this.scheduleSave();
+				this.updateSplitPreview();
 			});
+			new VaultPathSuggest(this.app, text.inputEl, () => this.plugin.gateway.getAllFolders());
+		});
+		this.track(splitDest.row, splitDest.setting, 'splitOutputFolder');
 
 		this.renderSplitPreview(outputSection);
 
-		// SECTION: MARKDOWN PROCESSING
+		// SECTION 6: MARKDOWN PROCESSING
 		const processingSection = getSection('processing');
-		this.createSetting(processingSection, 'Include Obsidian .canvas Files', 'Extract text nodes and note links from .canvas files into clean text (visual reading order, groups as sections).')
-			.addToggle((toggle) => {
-				toggle.setValue(this.plugin.settings.includeCanvas);
-				toggle.onChange(async (val) => {
-					this.plugin.settings.includeCanvas = val;
-					await this.saveNow();
-				});
-			});
+		this.renderToggleSetting(
+			processingSection,
+			'Include Obsidian .canvas Files',
+			'Extract text nodes and note links from .canvas files into clean text (visual reading order, groups as sections).',
+			'includeCanvas'
+		);
+		this.renderToggleSetting(
+			processingSection,
+			'Strip Frontmatter',
+			'Remove YAML frontmatter block from exported document bodies.',
+			'stripFrontmatter'
+		);
+		this.renderToggleSetting(
+			processingSection,
+			'Render In-Memory Dataview Queries',
+			'Evaluate ```dataview blocks into static markdown tables during export. Supports and/or, comparisons (=, !=, >, <, >=, <=), in (…), like "wild*card", contains/startswith/endswith.',
+			'renderDataview'
+		);
 
-		this.createSetting(processingSection, 'Strip Frontmatter', 'Remove YAML frontmatter block from exported document bodies.')
-			.addToggle((toggle) => {
-				toggle.setValue(this.plugin.settings.stripFrontmatter);
-				toggle.onChange(async (val) => {
-					this.plugin.settings.stripFrontmatter = val;
+		const wikilink = this.createSetting(processingSection, 'Wikilink Handling', 'Format for converting [[wikilinks]]. Canonical-alias shows the note title and alias as Title (Alias). Markdown links resolve to real vault paths.');
+		wikilink.setting.addDropdown((drop) => {
+			drop.addOption('canonical-alias', 'Note title and alias: Title (Alias)');
+			drop.addOption('clean-text', 'Clean text (Display alias or note title)');
+			drop.addOption('keep-wikilink', 'Keep raw [[wikilinks]]');
+			drop.addOption('markdown', 'Standard [Markdown](links) — resolved to real paths');
+			drop.setValue(this.plugin.settings.wikilinkFormat);
+			drop.onChange(async (val) => {
+				if (val === 'canonical-alias' || val === 'clean-text' || val === 'keep-wikilink' || val === 'markdown') {
+					this.plugin.settings.wikilinkFormat = val;
 					await this.saveNow();
-				});
+					this.refreshLiveIndicators();
+				}
 			});
-
-		this.createSetting(processingSection, 'Render In-Memory Dataview Queries', 'Evaluate ```dataview blocks into static markdown tables during export. Supports and/or, comparisons (=, !=, >, <, >=, <=), in (…), like "wild*card", contains/startswith/endswith.')
-			.addToggle((toggle) => {
-				toggle.setValue(this.plugin.settings.renderDataview);
-				toggle.onChange(async (val) => {
-					this.plugin.settings.renderDataview = val;
-					await this.saveNow();
-				});
-			});
-
-		this.createSetting(processingSection, 'Wikilink Handling', 'Format for converting [[wikilinks]]. Canonical-alias shows the note title and alias as Title (Alias). Markdown links resolve to real vault paths.')
-			.addDropdown((drop) => {
-				drop.addOption('canonical-alias', 'Note title and alias: Title (Alias)');
-				drop.addOption('clean-text', 'Clean text (Display alias or note title)');
-				drop.addOption('keep-wikilink', 'Keep raw [[wikilinks]]');
-				drop.addOption('markdown', 'Standard [Markdown](links) — resolved to real paths');
-				drop.setValue(this.plugin.settings.wikilinkFormat);
-				drop.onChange(async (val) => {
-					if (val === 'canonical-alias' || val === 'clean-text' || val === 'keep-wikilink' || val === 'markdown') {
-						this.plugin.settings.wikilinkFormat = val;
-						await this.saveNow();
-					}
-				});
-			});
+		});
+		this.track(wikilink.row, wikilink.setting, 'wikilinkFormat');
 
 		this.renderStringListSetting(
 			processingSection,
 			'Ignored Frontmatter Properties',
 			'YAML properties omitted from consolidated export metadata, including category, order, status and tags. Individual split files keep the original frontmatter unless Strip Frontmatter is enabled. Autocomplete detects properties in your vault notes.',
 			this.plugin.settings.ignoredProperties,
+			'ignoredProperties',
 			() => this.plugin.gateway.getAllFrontmatterKeys(),
 			async (newList) => {
 				this.plugin.settings.ignoredProperties = newList;
@@ -460,53 +654,59 @@ export class VaultExporterSettingsTab extends PluginSettingTab {
 			true
 		);
 
-		// SECTION: HTML PERSONALIZATION
+		// SECTION 7: HTML PERSONALIZATION
 		const htmlSection = getSection('html');
-		this.createSetting(htmlSection, 'HTML Color Theme', 'Choose whether the standalone HTML export follows the viewer or always uses a light or dark palette.')
-			.addDropdown((drop) => {
-				drop.addOption('system', 'Follow system preference');
-				drop.addOption('light', 'Light');
-				drop.addOption('dark', 'Dark');
-				drop.setValue(this.plugin.settings.htmlTheme);
-				drop.onChange(async (val) => {
-					if (val === 'system' || val === 'light' || val === 'dark') {
-						this.plugin.settings.htmlTheme = val;
-						this.updateHtmlPreview();
-						await this.saveNow();
-					}
-				});
+		const htmlTheme = this.createSetting(htmlSection, 'HTML Color Theme', 'Choose whether the standalone HTML export follows the viewer or always uses a light or dark palette.');
+		htmlTheme.setting.addDropdown((drop) => {
+			drop.addOption('system', 'Follow system preference');
+			drop.addOption('light', 'Light');
+			drop.addOption('dark', 'Dark');
+			drop.setValue(this.plugin.settings.htmlTheme);
+			drop.onChange(async (val) => {
+				if (val === 'system' || val === 'light' || val === 'dark') {
+					this.plugin.settings.htmlTheme = val;
+					this.updateHtmlPreview();
+					await this.saveNow();
+					this.refreshLiveIndicators();
+				}
 			});
+		});
+		this.track(htmlTheme.row, htmlTheme.setting, 'htmlTheme');
 
-		this.createSetting(htmlSection, 'HTML Accent Color', 'Personalize links, callouts, and focused controls. Custom CSS can still override --ve-accent.')
-			.addColorPicker((picker) => {
-				picker.setValue(this.plugin.settings.htmlAccentColor);
-				picker.onChange(async (value) => {
-					if (/^#[0-9a-f]{6}$/i.test(value)) {
-						this.plugin.settings.htmlAccentColor = value.toLowerCase();
-						this.updateHtmlPreview();
-						await this.saveNow();
-					}
-				});
+		const htmlAccent = this.createSetting(htmlSection, 'HTML Accent Color', 'Personalize links, callouts, and focused controls. Custom CSS can still override --ve-accent.');
+		htmlAccent.setting.addColorPicker((picker) => {
+			picker.setValue(this.plugin.settings.htmlAccentColor);
+			picker.onChange(async (value) => {
+				if (/^#[0-9a-f]{6}$/i.test(value)) {
+					this.plugin.settings.htmlAccentColor = value.toLowerCase();
+					this.updateHtmlPreview();
+					await this.saveNow();
+					this.refreshLiveIndicators();
+				}
 			});
+		});
+		this.track(htmlAccent.row, htmlAccent.setting, 'htmlAccentColor');
 
-		this.createSetting(htmlSection, 'HTML Typography', 'Choose a comfortable system sans-serif, book-style serif, or monospace look for the exported document.')
-			.addDropdown((drop) => {
-				drop.addOption('system', 'System sans-serif');
-				drop.addOption('serif', 'Serif');
-				drop.addOption('monospace', 'Monospace');
-				drop.setValue(this.plugin.settings.htmlFont);
-				drop.onChange(async (val) => {
-					if (val === 'system' || val === 'serif' || val === 'monospace') {
-						this.plugin.settings.htmlFont = val;
-						this.updateHtmlPreview();
-						await this.saveNow();
-					}
-				});
+		const htmlFont = this.createSetting(htmlSection, 'HTML Typography', 'Choose a comfortable system sans-serif, book-style serif, or monospace look for the exported document.');
+		htmlFont.setting.addDropdown((drop) => {
+			drop.addOption('system', 'System sans-serif');
+			drop.addOption('serif', 'Serif');
+			drop.addOption('monospace', 'Monospace');
+			drop.setValue(this.plugin.settings.htmlFont);
+			drop.onChange(async (val) => {
+				if (val === 'system' || val === 'serif' || val === 'monospace') {
+					this.plugin.settings.htmlFont = val;
+					this.updateHtmlPreview();
+					await this.saveNow();
+					this.refreshLiveIndicators();
+				}
 			});
+		});
+		this.track(htmlFont.row, htmlFont.setting, 'htmlFont');
 
 		const widthDescription = 'Maximum reading width for the document column. Current: ';
-		const widthSetting = this.createSetting(htmlSection, 'HTML Reading Width', widthDescription + this.plugin.settings.htmlContentWidth + ' px.');
-		widthSetting.addSlider((slider) => {
+		const widthEntry = this.createSetting(htmlSection, 'HTML Reading Width', widthDescription + this.plugin.settings.htmlContentWidth + ' px.');
+		widthEntry.setting.addSlider((slider) => {
 			slider.setLimits(680, 1400, 20);
 			slider.setValue(this.plugin.settings.htmlContentWidth);
 			slider.setDynamicTooltip();
@@ -514,26 +714,35 @@ export class VaultExporterSettingsTab extends PluginSettingTab {
 			slider.onChange(async (value) => {
 				const width = Math.round(Math.min(1400, Math.max(680, value)) / 20) * 20;
 				this.plugin.settings.htmlContentWidth = width;
-				widthSetting.setDesc(widthDescription + width + ' px.');
+				widthEntry.setting.descEl.firstChild && (widthEntry.setting.descEl.firstChild.nodeValue = widthDescription + width + ' px.');
 				this.updateHtmlPreview();
 				await this.saveNow();
+				this.refreshLiveIndicators();
 			});
 		});
+		this.track(widthEntry.row, widthEntry.setting, 'htmlContentWidth');
 
-		this.renderToggleSetting(htmlSection, 'HTML Table of Contents', 'Include a searchable navigation panel linking to each note and its headings.', 'htmlShowToc');
-		this.renderToggleSetting(htmlSection, 'HTML Document Search', 'Show the document filter in the table of contents.', 'htmlShowSearch');
+		this.renderToggleSetting(htmlSection, 'HTML Table of Contents', 'Include a searchable navigation panel linking to each note and its headings.', 'htmlShowToc', true);
+		const tocGroup = this.group(htmlSection, this.plugin.settings.htmlShowToc);
+		this.renderToggleSetting(tocGroup, 'HTML Document Search', 'Show the document filter in the table of contents.', 'htmlShowSearch');
+		this.groupHint(htmlSection, tocGroup, 'when HTML Table of Contents is enabled');
+
 		this.renderToggleSetting(htmlSection, 'HTML Source Paths', 'Show each note’s vault path in the navigation and document header.', 'htmlShowPaths');
 		this.renderToggleSetting(htmlSection, 'HTML Frontmatter Metadata', 'Show included frontmatter values as badges beneath each note title.', 'htmlShowMetadata');
-		this.renderToggleSetting(htmlSection, 'HTML Export Footer', 'Show the export time, document count, and optional attribution at the bottom.', 'htmlShowFooter');
-		this.createSetting(htmlSection, 'HTML Footer Attribution', 'Optional name or short note shown in the HTML footer. Leave blank for no attribution.')
-			.addText((text) => {
-				text.setValue(this.plugin.settings.htmlFooterText);
-				text.setPlaceholder('e.g. Research team');
-				text.onChange((value) => {
-					this.plugin.settings.htmlFooterText = value.slice(0, 200);
-					this.scheduleSave();
-				});
+
+		this.renderToggleSetting(htmlSection, 'HTML Export Footer', 'Show the export time, document count, and optional attribution at the bottom.', 'htmlShowFooter', true);
+		const footerGroup = this.group(htmlSection, this.plugin.settings.htmlShowFooter);
+		const footerAttr = this.createSetting(footerGroup, 'HTML Footer Attribution', 'Optional name or short note shown in the HTML footer. Leave blank for no attribution.');
+		footerAttr.setting.addText((text) => {
+			text.setValue(this.plugin.settings.htmlFooterText);
+			text.setPlaceholder('e.g. Research team');
+			text.onChange((value) => {
+				this.plugin.settings.htmlFooterText = value.slice(0, 200);
+				this.scheduleSave();
 			});
+		});
+		this.track(footerAttr.row, footerAttr.setting, 'htmlFooterText');
+		this.groupHint(htmlSection, footerGroup, 'when HTML Export Footer is enabled');
 
 		const previewRow = htmlSection.createDiv({ cls: 've-settings-row ve-settings-row--preview' });
 		this.decorateSettingRow(previewRow, 'HTML Live Preview', 'Live preview of theme, accent, typography, and reading width.');
@@ -551,32 +760,402 @@ export class VaultExporterSettingsTab extends PluginSettingTab {
 		previewDoc.createEl('blockquote', { text: 'Callouts use the selected accent color.' });
 		this.updateHtmlPreview();
 
-		// SECTION: ADVANCED
+		// SECTION 8: ADVANCED
 		const advancedSection = getSection('advanced');
-		this.createSetting(advancedSection, 'Custom HTML CSS', 'Extra CSS appended to the HTML export. Use to override the built-in theme (custom properties: --ve-bg, --ve-panel, --ve-text, --ve-accent…).')
-			.addTextArea((area) => {
-				area.setValue(this.plugin.settings.customCss);
-				area.setPlaceholder(':root { --ve-accent: #c0392b; }');
-				area.inputEl.rows = 6;
-				area.inputEl.style.width = '100%';
-				area.onChange((val) => {
-					this.plugin.settings.customCss = val;
-					this.scheduleSave();
-				});
+		const cssEntry = this.createSetting(advancedSection, 'Custom HTML CSS', 'Extra CSS appended to the HTML export. Use to override the built-in theme (custom properties: --ve-bg, --ve-panel, --ve-text, --ve-accent…).');
+		cssEntry.setting.addTextArea((area) => {
+			area.setValue(this.plugin.settings.customCss);
+			area.setPlaceholder(':root { --ve-accent: #c0392b; }');
+			area.inputEl.rows = 6;
+			area.inputEl.style.width = '100%';
+			area.onChange((val) => {
+				this.plugin.settings.customCss = val;
+				this.scheduleSave();
 			});
+		});
+		this.track(cssEntry.row, cssEntry.setting, 'customCss');
 
-		this.createSetting(advancedSection, 'Yield Every N Notes', 'Notes processed between two UI yields. Lower = more responsive UI and snappier cancel, slightly slower overall.')
-			.addText((text) => {
-				text.setValue(String(this.plugin.settings.yieldEvery));
-				text.setPlaceholder('25');
-				text.onChange((val) => {
-					const n = parseInt(val, 10);
-					this.plugin.settings.yieldEvery = Number.isFinite(n) && n > 0 ? n : 25;
-					this.scheduleSave();
-				});
+		const expertDetails = advancedSection.createEl('details', { cls: 've-settings__expert' });
+		expertDetails.open = true;
+		expertDetails.createEl('summary', { text: 'Expert tuning — responsiveness and batching' });
+
+		const yieldEntry = this.createSetting(expertDetails, 'Yield Every N Notes', 'Notes processed between two UI yields. Lower = more responsive UI and snappier cancel, slightly slower overall.');
+		yieldEntry.setting.addText((text) => {
+			text.setValue(String(this.plugin.settings.yieldEvery));
+			text.setPlaceholder('25');
+			text.onChange((val) => {
+				const n = parseInt(val, 10);
+				this.plugin.settings.yieldEvery = Number.isFinite(n) && n > 0 ? n : 25;
+				this.scheduleSave();
 			});
+		});
+		this.track(yieldEntry.row, yieldEntry.setting, 'yieldEvery');
+
+		// SECTION 9: CHANGELOG
+		const changelogSection = getSection('changelog');
+		this.renderChangelog(changelogSection);
 
 		this.filterSettings(sections, searchResults, noResults, this.searchQuery);
+		this.refreshLiveIndicators();
+		containerEl.scrollTop = scrollTop;
+	}
+
+	private renderHeader(root: HTMLElement): void {
+		const header = root.createDiv({ cls: 've-settings__header' });
+		const left = header.createDiv({ cls: 've-settings__header-main' });
+		const titleRow = left.createDiv({ cls: 've-settings__header-title' });
+		titleRow.createEl('h2', { text: 'Vault Exporter' });
+		const ver = this.plugin.manifest?.version;
+		if (ver) {
+			titleRow.createSpan({ cls: 've-badge ve-badge--version', text: 'v' + ver });
+		}
+		left.createEl('p', {
+			cls: 've-settings__intro',
+			text: 'Choose what to export, which file extensions to produce, where files land, and how HTML documents look.',
+		});
+
+		this.headerBadgesEl = header.createDiv({ cls: 've-settings__badges' });
+		this.updateHeaderBadges();
+	}
+
+	private updateHeaderBadges(): void {
+		const badges = this.headerBadgesEl;
+		if (!badges) return;
+		badges.empty();
+		const s = this.plugin.settings;
+
+		// 1. Destination status badge
+		if (usesExternalOutputFolder(s)) {
+			badges.createSpan({ cls: 've-badge ve-badge--ok', text: 'Output: OS folder' });
+		} else if (s.useExternalOutputFolder) {
+			badges.createSpan({ cls: 've-badge ve-badge--warn', text: 'Output folder incomplete' });
+		} else {
+			badges.createSpan({ cls: 've-badge', text: 'Output: Vault' });
+		}
+
+		// 2. Scope status badge
+		const scopeParts: string[] = [];
+		if (s.scopeRoot.trim()) scopeParts.push(s.scopeRoot.trim());
+		if (s.scopeTag.trim()) scopeParts.push('#' + s.scopeTag.trim().replace(/^#+/, ''));
+		if (scopeParts.length > 0) {
+			badges.createSpan({ cls: 've-badge ve-badge--accent', text: 'Scope: ' + scopeParts.join(' · ') });
+		} else {
+			badges.createSpan({ cls: 've-badge', text: 'Scope: Whole vault' });
+		}
+
+		// 3. Extension badge
+		const globalExt = normalizeExtension(s.outputExtension);
+		const splitExt = normalizeExtension(s.splitFileExtension);
+		if (globalExt) {
+			badges.createSpan({ cls: 've-badge ve-badge--accent', text: 'Extension: ' + globalExt });
+		} else if (splitExt) {
+			badges.createSpan({ cls: 've-badge ve-badge--accent', text: 'Split ext: ' + splitExt });
+		} else {
+			badges.createSpan({ cls: 've-badge', text: 'Extensions: Default' });
+		}
+
+		// 4. Split preset badge
+		const activePreset = detectSplitPreset(s);
+		const presetDef = SPLIT_PRESETS.find((preset) => preset.id === activePreset);
+		badges.createSpan({
+			cls: 've-badge',
+			text: 'Split: ' + (presetDef ? presetDef.shortLabel : 'Custom'),
+		});
+	}
+
+	private renderSummaryBar(root: HTMLElement): void {
+		this.summaryEl = root.createDiv({ cls: 've-settings__summary' });
+	}
+
+	private updateSummaryBar(): void {
+		const bar = this.summaryEl;
+		if (!bar) return;
+		const count = this.containerEl.querySelectorAll('.ve-setting--modified').length;
+		bar.empty();
+		bar.createSpan({
+			cls: 've-settings__summary-text',
+			text: count === 0
+				? 'Every setting has its default value.'
+				: `${count} setting${count === 1 ? '' : 's'} changed from default.`,
+		});
+
+		const actions = bar.createDiv({ cls: 've-settings__summary-actions' });
+		if (count > 0 || this.onlyChanged) {
+			const filterBtn = actions.createEl('button', {
+				cls: 've-settings__only-changed-btn' + (this.onlyChanged ? ' is-active' : ''),
+				text: this.onlyChanged ? 'Show all settings' : 'Show only changed',
+				attr: { type: 'button', 'aria-pressed': String(this.onlyChanged) },
+			});
+			filterBtn.addEventListener('click', () => {
+				this.onlyChanged = !this.onlyChanged;
+				if (this.sectionsEl && this.searchResultsEl && this.noResultsEl) {
+					this.filterSettings(this.sectionsEl, this.searchResultsEl, this.noResultsEl, this.searchQuery);
+				}
+				this.updateSummaryBar();
+			});
+		}
+
+		if (count > 0) {
+			const resetAllBtn = actions.createEl('button', {
+				cls: 've-settings__reset-all-btn',
+				text: 'Reset all to defaults',
+				attr: { type: 'button' },
+			});
+			resetAllBtn.addEventListener('click', async () => {
+				const target = this.plugin.settings as unknown as Record<string, unknown>;
+				for (const key of RESETTABLE_KEYS) {
+					setSettingAt(target, key, structuredClone(DEFAULT_SETTINGS[key]));
+				}
+				this.onlyChanged = false;
+				await this.saveNow();
+				this.display();
+			});
+		}
+	}
+
+	private updateTabModifiedCounts(): void {
+		for (const tab of Array.from(this.containerEl.querySelectorAll<HTMLButtonElement>('.ve-settings__tab'))) {
+			const id = tab.dataset.sectionId;
+			if (!id || id === 'changelog') continue;
+			const section = this.containerEl.querySelector<HTMLElement>('#ve-settings-section-' + id);
+			const modCount = section?.querySelectorAll('.ve-setting--modified').length ?? 0;
+			let badge = tab.querySelector<HTMLElement>('.ve-settings__tab-count');
+			if (modCount > 0) {
+				if (!badge) badge = tab.createSpan({ cls: 've-settings__tab-count' });
+				badge.setText(String(modCount));
+			} else if (badge) {
+				badge.remove();
+			}
+		}
+	}
+
+	private refreshLiveIndicators(): void {
+		this.updateHeaderBadges();
+		this.updateSummaryBar();
+		this.updateTabModifiedCounts();
+	}
+
+	private track(row: HTMLElement, setting: Setting, key: keyof ExporterSettings): Setting {
+		const settingsObj = this.plugin.settings as unknown as Record<string, unknown>;
+		const initial = settingAt(DEFAULT_SETTINGS, key);
+		const select = setting.controlEl.querySelector('select');
+		const matchedOption = select
+			? Array.from(select.options).find((candidate) => candidate.value === String(initial))
+			: undefined;
+		const formattedDefault = matchedOption?.text
+			?? (typeof initial === 'boolean'
+				? (initial ? 'on' : 'off')
+				: Array.isArray(initial)
+					? (initial.length === 0 ? 'empty' : initial.join(', '))
+					: initial === ''
+						? 'empty'
+						: String(initial));
+		setting.descEl.createDiv({ cls: 've-setting__default', text: 'Default: ' + formattedDefault });
+
+		let resetEl: HTMLElement | null = null;
+		setting.addExtraButton((button) => {
+			button
+				.setIcon('rotate-ccw')
+				.setTooltip('Reset to default')
+				.onClick(async () => {
+					setSettingAt(settingsObj, key, structuredClone(initial));
+					await this.saveNow();
+					this.display();
+				});
+			resetEl = button.extraSettingsEl;
+		});
+
+		const refresh = (notify = true): void => {
+			const modified = !sameSettingValue(settingAt(settingsObj, key), initial);
+			row.toggleClass('ve-setting--modified', modified);
+			resetEl?.toggleClass('is-hidden', !modified);
+			if (notify) this.refreshLiveIndicators();
+		};
+		for (const evt of ['click', 'input', 'change']) {
+			setting.controlEl.addEventListener(evt, () => refresh());
+		}
+		refresh(false);
+		return setting;
+	}
+
+	private group(root: HTMLElement, active: boolean): HTMLElement {
+		return root.createDiv({ cls: active ? 've-settings__dependent' : 've-settings__dependent is-off' });
+	}
+
+	private groupHint(root: HTMLElement, holder: HTMLElement, conditionText: string): void {
+		if (!holder.hasClass('is-off')) return;
+		const count = holder.querySelectorAll('.ve-settings-row').length;
+		if (count > 0) {
+			root.createDiv({
+				cls: 've-settings__more',
+				text: `${count} more setting${count === 1 ? '' : 's'} ${conditionText}.`,
+			});
+		}
+	}
+
+	private renderGlobalExtensionSetting(containerEl: HTMLElement): void {
+		const entry = this.createSetting(
+			containerEl,
+			'Export File Extension',
+			'Choose any file extension for exported documents and split files (e.g. .md, .txt, .mdx, .org, .llm.txt). Leave empty to keep each format’s own default extension.'
+		);
+		let inputRef: HTMLInputElement | null = null;
+
+		entry.setting.addText((text) => {
+			inputRef = text.inputEl;
+			text.setValue(this.plugin.settings.outputExtension);
+			text.setPlaceholder('Default per format (or type e.g. .md, .txt, .mdx, .ctx)');
+			text.onChange((val) => {
+				this.plugin.settings.outputExtension = normalizeExtension(val);
+				this.scheduleSave();
+				this.updateExtensionPreview();
+				this.updateSplitPreview();
+				this.refreshExtensionPills(pillsRow, this.plugin.settings.outputExtension);
+				this.updateHeaderBadges();
+			});
+		});
+		this.track(entry.row, entry.setting, 'outputExtension');
+
+		const pillsRow = entry.row.createDiv({ cls: 've-ext-pills' });
+		pillsRow.createSpan({ cls: 've-quick-tags__label', text: 'Quick extension:' });
+		const allChoices = ['', ...COMMON_EXPORT_EXTENSIONS];
+		for (const extChoice of allChoices) {
+			const label = extChoice === '' ? 'Auto (default)' : extChoice;
+			const pill = pillsRow.createEl('button', {
+				text: label,
+				cls: 've-ext-pill',
+				attr: {
+					type: 'button',
+					'data-ext': extChoice,
+					'aria-pressed': String(normalizeExtension(this.plugin.settings.outputExtension) === extChoice),
+				},
+			});
+			pill.addEventListener('click', async () => {
+				this.plugin.settings.outputExtension = extChoice;
+				if (inputRef) inputRef.value = extChoice;
+				await this.saveNow();
+				this.display();
+			});
+		}
+		this.refreshExtensionPills(pillsRow, this.plugin.settings.outputExtension);
+
+		this.extPreviewEl = entry.row.createDiv({ cls: 've-ext-preview' });
+		this.updateExtensionPreview();
+	}
+
+	private updateExtensionPreview(): void {
+		const el = this.extPreviewEl;
+		if (!el) return;
+		el.empty();
+		const s = this.plugin.settings;
+		const resolved = resolveConsolidatedExtensionPaths(s);
+		const splitExt = effectiveSplitExtension(s);
+		const cleanExt = normalizeExtension(s.outputExtension) || '.md';
+		el.createSpan({ cls: 've-ext-preview__label', text: 'Effective filenames:' });
+		for (const sample of [
+			resolved.notebooklmOutputPath,
+			resolved.htmlOutputPath,
+			resolved.markdownOutputPath,
+			'Split/*' + splitExt,
+			'Note (clean export)' + cleanExt,
+		]) {
+			el.createEl('code', { cls: 've-ext-preview__chip', text: sample });
+		}
+	}
+
+	private renderSplitExtensionSetting(containerEl: HTMLElement): void {
+		const entry = this.createSetting(
+			containerEl,
+			'Split File Extension',
+			'Custom extension specifically for split exports (both folder-grouped and individual notes). Leave empty to follow Export File Extension or the mode default (.txt / .md).'
+		);
+		let inputRef: HTMLInputElement | null = null;
+
+		entry.setting.addText((text) => {
+			inputRef = text.inputEl;
+			text.setValue(this.plugin.settings.splitFileExtension);
+			text.setPlaceholder('Auto (.txt for folder groups, .md for notes) — or any .ext');
+			text.onChange((val) => {
+				this.plugin.settings.splitFileExtension = normalizeExtension(val);
+				this.scheduleSave();
+				this.updateExtensionPreview();
+				this.updateSplitPreview();
+				this.refreshExtensionPills(pillsRow, this.plugin.settings.splitFileExtension);
+				this.updateHeaderBadges();
+			});
+		});
+		this.track(entry.row, entry.setting, 'splitFileExtension');
+
+		const pillsRow = entry.row.createDiv({ cls: 've-ext-pills' });
+		pillsRow.createSpan({ cls: 've-quick-tags__label', text: 'Quick split extension:' });
+		for (const extChoice of ['', '.txt', '.md', '.markdown', '.mdx', '.org', '.rst', '.adoc', '.html', '.json']) {
+			const pill = pillsRow.createEl('button', {
+				text: extChoice === '' ? 'Auto' : extChoice,
+				cls: 've-ext-pill',
+				attr: {
+					type: 'button',
+					'data-split-ext': extChoice,
+					'aria-pressed': String(normalizeExtension(this.plugin.settings.splitFileExtension) === extChoice),
+				},
+			});
+			pill.addEventListener('click', async () => {
+				this.plugin.settings.splitFileExtension = extChoice;
+				if (inputRef) inputRef.value = extChoice;
+				await this.saveNow();
+				this.display();
+			});
+		}
+		this.refreshExtensionPills(pillsRow, this.plugin.settings.splitFileExtension);
+	}
+
+	private refreshExtensionPills(container: HTMLElement, activeValue: string): void {
+		const norm = normalizeExtension(activeValue);
+		for (const btn of Array.from(container.querySelectorAll<HTMLButtonElement>('.ve-ext-pill'))) {
+			const val = btn.dataset.ext ?? btn.dataset.splitExt ?? '';
+			const isActive = val === norm;
+			btn.toggleClass('is-active', isActive);
+			btn.setAttribute('aria-pressed', String(isActive));
+		}
+	}
+
+	private renderConsolidatedPathSetting(
+		containerEl: HTMLElement,
+		title: string,
+		desc: string,
+		key: 'notebooklmOutputPath' | 'htmlOutputPath' | 'markdownOutputPath'
+	): void {
+		const entry = this.createSetting(containerEl, title, desc);
+		let inputRef: HTMLInputElement | null = null;
+
+		entry.setting.addText((text) => {
+			inputRef = text.inputEl;
+			text.setValue(this.plugin.settings[key]);
+			text.onChange((val) => {
+				this.plugin.settings[key] = val.trim();
+				this.scheduleSave();
+				this.updateExtensionPreview();
+			});
+			new VaultPathSuggest(this.app, text.inputEl, () => this.plugin.gateway.getAllFiles());
+		});
+		this.track(entry.row, entry.setting, key);
+
+		const quickRow = entry.row.createDiv({ cls: 've-ext-pills ve-ext-pills--compact' });
+		quickRow.createSpan({ cls: 've-quick-tags__label', text: 'Set path extension:' });
+		for (const ext of ['.txt', '.md', '.markdown', '.mdx', '.html', '.org']) {
+			const btn = quickRow.createEl('button', {
+				text: ext,
+				cls: 've-ext-pill ve-ext-pill--sm',
+				attr: { type: 'button' },
+			});
+			btn.title = 'Switch ' + title + ' to ' + ext;
+			btn.addEventListener('click', async () => {
+				const updated = replaceFileExtension(this.plugin.settings[key], ext);
+				this.plugin.settings[key] = updated;
+				if (inputRef) inputRef.value = updated;
+				await this.saveNow();
+				this.display();
+			});
+		}
 	}
 
 	/** Description for the external-folder setting, including its current state. */
@@ -597,7 +1176,12 @@ export class VaultExporterSettingsTab extends PluginSettingTab {
 	private refreshExternalFolderDescription(setting: Setting): void {
 		const invalid = this.plugin.settings.useExternalOutputFolder
 			&& !isAbsoluteOutputPath(this.plugin.settings.externalOutputFolder);
-		setting.setDesc(this.describeExternalFolder());
+		const firstText = setting.descEl.childNodes[0];
+		if (firstText && firstText.nodeType === 3) {
+			firstText.nodeValue = this.describeExternalFolder();
+		} else {
+			setting.descEl.prepend(document.createTextNode(this.describeExternalFolder()));
+		}
 		setting.settingEl.toggleClass('ve-settings__invalid', invalid);
 	}
 
@@ -614,24 +1198,45 @@ export class VaultExporterSettingsTab extends PluginSettingTab {
 		return picked;
 	}
 
-	private createSection(parent: HTMLElement, id: string, title: string): HTMLElement {
-		const sectionId = 've-settings-section-' + id;
+	private createSection(parent: HTMLElement, definition: SettingsSectionDefinition): HTMLElement {
+		const sectionId = 've-settings-section-' + definition.id;
 		const section = parent.createDiv({
 			cls: 've-settings-section',
 			attr: {
 				'id': sectionId,
 				'role': 'tabpanel',
-				'aria-labelledby': 've-settings-tab-' + id,
-				'data-section-id': id,
+				'aria-labelledby': 've-settings-tab-' + definition.id,
+				'data-section-id': definition.id,
 			},
 		});
-		section.createEl('h3', { text: title });
+
+		const jumpBtn = section.createEl('button', {
+			cls: 've-settings__search-jump is-hidden',
+			text: `In tab: ${definition.title} — go there →`,
+			attr: { type: 'button' },
+		});
+		jumpBtn.addEventListener('click', () => {
+			this.searchQuery = '';
+			this.onlyChanged = false;
+			this.activeSectionId = definition.id;
+			const searchInput = this.containerEl.querySelector<HTMLInputElement>('.ve-settings__search input');
+			if (searchInput) searchInput.value = '';
+			if (this.sectionsEl && this.searchResultsEl && this.noResultsEl) {
+				this.filterSettings(this.sectionsEl, this.searchResultsEl, this.noResultsEl, '');
+			}
+			this.updateSummaryBar();
+			section.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
+		});
+
+		section.createEl('h3', { text: definition.title });
+		if (definition.intro) {
+			section.createEl('p', { cls: 've-settings__section-intro', text: definition.intro });
+		}
 		return section;
 	}
 
 	private createSectionTab(tabBar: HTMLElement, definition: SettingsSectionDefinition): void {
 		const tab = tabBar.createEl('button', {
-			text: definition.title,
 			cls: 've-settings__tab',
 			attr: {
 				'id': 've-settings-tab-' + definition.id,
@@ -642,6 +1247,7 @@ export class VaultExporterSettingsTab extends PluginSettingTab {
 				'data-section-id': definition.id,
 			},
 		});
+		tab.createSpan({ cls: 've-settings__tab-label', text: definition.title });
 		tab.addEventListener('click', () => this.activateSection(definition.id));
 		tab.addEventListener('keydown', (event) => {
 			if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight' && event.key !== 'Home' && event.key !== 'End') return;
@@ -660,17 +1266,29 @@ export class VaultExporterSettingsTab extends PluginSettingTab {
 		});
 	}
 
-	private activateSection(sectionId: string): void {
+	private activateSection(sectionId: SettingsSectionId): void {
 		if (!SETTINGS_SECTIONS.some((section) => section.id === sectionId)) return;
 		this.activeSectionId = sectionId;
 		this.updateSectionVisibility();
 	}
 
 	private updateSectionVisibility(): void {
-		const hasSearch = this.searchQuery.length > 0;
+		const isFiltering = this.searchQuery.length > 0 || this.onlyChanged;
+		this.containerEl.toggleClass('ve-settings--searching', isFiltering);
+
 		for (const section of Array.from(this.containerEl.querySelectorAll<HTMLElement>('.ve-settings-section'))) {
-			const hasVisibleSetting = Boolean(section.querySelector('.ve-settings-row:not([hidden])'));
-			section.hidden = hasSearch ? !hasVisibleSetting : section.dataset.sectionId !== this.activeSectionId;
+			const id = section.dataset.sectionId;
+			let hasVisible = Boolean(section.querySelector('.ve-settings-row:not([hidden])'));
+			if (
+				isFiltering &&
+				id === 'changelog' &&
+				!this.onlyChanged &&
+				'changelog version history release notes'.includes(this.searchQuery)
+			) {
+				hasVisible = true;
+			}
+			section.hidden = isFiltering ? !hasVisible : id !== this.activeSectionId;
+			section.querySelector('.ve-settings__search-jump')?.toggleClass('is-hidden', !isFiltering || !hasVisible);
 		}
 		for (const tab of Array.from(this.containerEl.querySelectorAll<HTMLButtonElement>('.ve-settings__tab'))) {
 			const selected = tab.dataset.sectionId === this.activeSectionId;
@@ -692,25 +1310,41 @@ export class VaultExporterSettingsTab extends PluginSettingTab {
 		row.dataset.sectionTitle = sectionTitle;
 	}
 
-	private createSetting(containerEl: HTMLElement, title: string, desc: string): Setting {
+	private createSetting(containerEl: HTMLElement, title: string, desc: string): { row: HTMLElement; setting: Setting } {
 		const row = containerEl.createDiv({ cls: 've-settings-row' });
 		this.decorateSettingRow(row, title, desc);
-		return new Setting(row).setName(title).setDesc(desc);
+		const setting = new Setting(row).setName(title).setDesc(desc);
+		return { row, setting };
 	}
 
 	private renderToggleSetting(
 		containerEl: HTMLElement,
 		title: string,
 		desc: string,
-		key: 'rememberTargetSelection' | 'autoRevealOutput' | 'htmlShowToc' | 'htmlShowSearch' | 'htmlShowPaths' | 'htmlShowMetadata' | 'htmlShowFooter'
+		key:
+			| 'rememberTargetSelection'
+			| 'autoRevealOutput'
+			| 'includeCanvas'
+			| 'stripFrontmatter'
+			| 'renderDataview'
+			| 'htmlShowToc'
+			| 'htmlShowSearch'
+			| 'htmlShowPaths'
+			| 'htmlShowMetadata'
+			| 'htmlShowFooter',
+		redrawOnChange = false
 	): void {
-		this.createSetting(containerEl, title, desc).addToggle((toggle) => {
+		const entry = this.createSetting(containerEl, title, desc);
+		entry.setting.addToggle((toggle) => {
 			toggle.setValue(this.plugin.settings[key]);
 			toggle.onChange(async (value) => {
 				this.plugin.settings[key] = value;
 				await this.saveNow();
+				if (redrawOnChange) this.display();
+				else this.refreshLiveIndicators();
 			});
 		});
+		this.track(entry.row, entry.setting, key);
 	}
 
 	private updateHtmlPreview(): void {
@@ -736,20 +1370,33 @@ export class VaultExporterSettingsTab extends PluginSettingTab {
 	private filterSettings(sections: HTMLElement, searchResults: HTMLElement, noResults: HTMLElement, value: string): void {
 		this.searchQuery = value.trim().toLocaleLowerCase();
 		const query = this.searchQuery;
+		const isFiltering = query.length > 0 || this.onlyChanged;
 		const matchingRows: HTMLElement[] = [];
+
 		for (const row of Array.from(sections.querySelectorAll<HTMLElement>('.ve-settings-row'))) {
+			const listValues = Array.from(row.querySelectorAll('.ve-list-item__text')).map((el) => el.textContent ?? '');
 			const searchableText = [
 				row.dataset.settingTitle,
 				row.dataset.settingDescription,
-				row.textContent,
+				...listValues,
 			].filter(Boolean).join(' ').toLocaleLowerCase();
-			const matches = !query || searchableText.includes(query);
+			const matchesQuery = !query || searchableText.includes(query);
+			const matchesChanged = !this.onlyChanged || row.classList.contains('ve-setting--modified');
+			const matches = matchesQuery && matchesChanged;
 			row.hidden = !matches;
-			if (matches && row.dataset.settingTitle) matchingRows.push(row);
+			if (matches && row.dataset.settingTitle) {
+				matchingRows.push(row);
+				const details = row.closest('details');
+				if (details && isFiltering) details.open = true;
+			}
 		}
 
 		this.renderSearchResults(searchResults, matchingRows, query);
-		noResults.hidden = query.length === 0 || matchingRows.length > 0;
+		const changelogMatched =
+			isFiltering &&
+			!this.onlyChanged &&
+			'changelog version history release notes'.includes(query);
+		noResults.hidden = !isFiltering || matchingRows.length > 0 || changelogMatched;
 		this.updateSectionVisibility();
 	}
 
@@ -780,17 +1427,25 @@ export class VaultExporterSettingsTab extends PluginSettingTab {
 	}
 
 	private focusSetting(row: HTMLElement): void {
-		const sectionId = row.dataset.sectionId;
-		if (sectionId) this.activeSectionId = sectionId;
+		const sectionId = row.dataset.sectionId as SettingsSectionId | undefined;
+		if (sectionId && SETTINGS_SECTIONS.some((s) => s.id === sectionId)) {
+			this.activeSectionId = sectionId;
+		}
 		this.searchQuery = '';
+		this.onlyChanged = false;
 		const searchInput = this.containerEl.querySelector<HTMLInputElement>('.ve-settings__search input');
 		if (searchInput) searchInput.value = '';
+		const details = row.closest('details');
+		if (details) details.open = true;
 		for (const candidate of Array.from(this.containerEl.querySelectorAll<HTMLElement>('.ve-settings-row'))) {
 			candidate.hidden = false;
 		}
 		const searchResults = this.containerEl.querySelector<HTMLElement>('.ve-settings__search-results');
 		const noResults = this.containerEl.querySelector<HTMLElement>('.ve-settings__empty');
-		if (searchResults && noResults) this.filterSettings(this.containerEl.querySelector<HTMLElement>('.ve-settings__sections')!, searchResults, noResults, '');
+		if (searchResults && noResults) {
+			this.filterSettings(this.containerEl.querySelector<HTMLElement>('.ve-settings__sections')!, searchResults, noResults, '');
+		}
+		this.updateSummaryBar();
 		this.updateSectionVisibility();
 		if (typeof row.scrollIntoView === 'function') {
 			row.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -874,6 +1529,10 @@ export class VaultExporterSettingsTab extends PluginSettingTab {
 			cls: 've-split-preview__badge',
 			text: presetDef ? 'Preset: ' + presetDef.shortLabel : 'Custom configuration',
 		});
+		header.createSpan({
+			cls: 've-badge',
+			text: 'Extension: ' + effectiveSplitExtension(this.plugin.settings),
+		});
 		const samplePaths = previewSplitFiles(this.plugin.settings, this.plugin.gateway.getAllFolders());
 		const list = preview.createDiv({ cls: 've-split-preview__list' });
 		for (const samplePath of samplePaths) {
@@ -883,7 +1542,7 @@ export class VaultExporterSettingsTab extends PluginSettingTab {
 
 	private renderSplitSubfoldersSetting(containerEl: HTMLElement): void {
 		const title = 'Split Subfolders';
-		const desc = 'Folder-grouped mode: subfolders that also create one .txt file per subfolder. Click an item’s depth button to override 1-level (/*) vs recursive (/**) for that folder.';
+		const desc = 'Folder-grouped mode: subfolders that also create one file per subfolder. Click an item’s depth button to override 1-level (/*) vs recursive (/**) for that folder.';
 		const items = this.plugin.settings.splitSubfolders;
 		const row = containerEl.createDiv({ cls: 've-settings-row ve-settings-row--list' });
 		this.decorateSettingRow(row, title, desc);
@@ -942,7 +1601,6 @@ export class VaultExporterSettingsTab extends PluginSettingTab {
 			});
 		});
 
-		// Quick-add folder suggestions (prioritizing folders that contain subfolders)
 		const allFolders = this.plugin.gateway
 			.getAllFolders()
 			.filter((folder) => isCandidateSplitFolder(folder, this.plugin.settings));
@@ -1038,6 +1696,8 @@ export class VaultExporterSettingsTab extends PluginSettingTab {
 				await addFolder();
 			});
 		});
+
+		this.track(row, setting, 'splitSubfolders');
 	}
 
 	private renderStringListSetting(
@@ -1045,6 +1705,7 @@ export class VaultExporterSettingsTab extends PluginSettingTab {
 		title: string,
 		desc: string,
 		items: string[],
+		settingKey: 'excludedFolders' | 'excludedFiles' | 'excludedPrefixes' | 'ignoredProperties',
 		getCandidates?: () => string[],
 		onSave?: (items: string[]) => Promise<void>,
 		showQuickPills: boolean = false
@@ -1058,7 +1719,7 @@ export class VaultExporterSettingsTab extends PluginSettingTab {
 			const itemRow = listDiv.createDiv({ cls: 've-list-item' });
 			itemRow.createSpan({ text: item, cls: 've-list-item__text' });
 
-			const delBtn = itemRow.createEl('button', { text: '✕', cls: 've-list-item__del' });
+			const delBtn = itemRow.createEl('button', { text: '✕', cls: 've-list-item__del', attr: { type: 'button' } });
 			delBtn.title = 'Remove';
 			delBtn.setAttribute('aria-label', 'Remove ' + item);
 			delBtn.addEventListener('click', async () => {
@@ -1068,7 +1729,6 @@ export class VaultExporterSettingsTab extends PluginSettingTab {
 			});
 		});
 
-		// Quick-add pills for candidates not yet added.
 		if (showQuickPills && getCandidates) {
 			const candidates = getCandidates().filter((candidate) => !items.includes(candidate));
 			if (candidates.length > 0) {
@@ -1088,7 +1748,7 @@ export class VaultExporterSettingsTab extends PluginSettingTab {
 
 		let newText = '';
 		setting.addText((text) => {
-			text.setPlaceholder('Add or search property...');
+			text.setPlaceholder('Add or search...');
 			text.inputEl.setAttribute('aria-label', 'Add to ' + title);
 			text.onChange((value) => {
 				newText = value.trim();
@@ -1117,5 +1777,279 @@ export class VaultExporterSettingsTab extends PluginSettingTab {
 				}
 			});
 		});
+
+		this.track(row, setting, settingKey);
+	}
+
+	private renderChangelog(root: HTMLElement): void {
+		const container = root.createDiv({ cls: 've-cl' });
+
+		// 1) Header card
+		const headerCard = container.createDiv({ cls: 've-cl-header-card' });
+		const info = headerCard.createDiv({ cls: 've-cl-header-card__info' });
+		info.createEl('h4', { text: 'Changelog & Version History' });
+		const subtitle = info.createEl('p');
+		subtitle.createSpan({ text: 'Synced from GitHub repository (' });
+		subtitle.createEl('a', {
+			text: 'aznan-triks/true-condensated-vault-exporter',
+			href: CHANGELOG_REPO_URL,
+			cls: 've-cl-repo-link',
+			attr: { target: '_blank', rel: 'noopener noreferrer' },
+		});
+		subtitle.createSpan({ text: ')' });
+
+		const actions = headerCard.createDiv({ cls: 've-cl-header-card__actions' });
+		this.clTimeEl = actions.createSpan({
+			cls: 've-cl-time',
+			text: this.changelogFetchedAt
+				? `Last Git sync: ${this.changelogFetchedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+				: 'Bundled release notes',
+		});
+
+		const refreshBtn = actions.createEl('button', {
+			cls: 'mod-cta',
+			text: '🔄 Refresh',
+			attr: { type: 'button' },
+		});
+		refreshBtn.addEventListener('click', () => {
+			void this.refreshChangelogFromGitHub(true);
+		});
+
+		// 2) Filter card
+		const filterCard = container.createDiv({ cls: 've-cl-filter-card' });
+
+		const row1 = filterCard.createDiv({ cls: 've-cl-filter-row' });
+		const searchWrap = row1.createDiv({ cls: 've-cl-search-wrap' });
+		const searchInput = searchWrap.createEl('input', {
+			type: 'text',
+			cls: 've-cl-search-input',
+			placeholder: '🔍 Search version, keyword, fix...',
+			value: this.clSearchQuery,
+			attr: { 'aria-label': 'Filter changelog entries' },
+		});
+		searchInput.addEventListener('input', (e) => {
+			this.clSearchQuery = (e.target as HTMLInputElement).value.trim().toLowerCase();
+			this.renderChangelogView();
+		});
+		this.clCounterEl = searchWrap.createSpan({ cls: 've-cl-counter' });
+
+		const controlGroup = row1.createDiv({ cls: 've-cl-control-group' });
+		const segmented = controlGroup.createDiv({ cls: 've-cl-segmented' });
+		const viewModes: Array<{ mode: ChangelogViewMode; label: string }> = [
+			{ mode: 'all', label: '👁️ All' },
+			{ mode: 'plain', label: '👤 Plain' },
+			{ mode: 'tech', label: '💻 Technical' },
+		];
+		for (const vm of viewModes) {
+			const btn = segmented.createEl('button', {
+				cls: `ve-cl-view-btn ${this.clViewMode === vm.mode ? 'is-active' : ''}`,
+				text: vm.label,
+				attr: { type: 'button' },
+			});
+			btn.addEventListener('click', () => {
+				segmented.querySelectorAll('.ve-cl-view-btn').forEach((b) => b.removeClass('is-active'));
+				btn.addClass('is-active');
+				this.clViewMode = vm.mode;
+				this.renderChangelogView();
+			});
+		}
+
+		const sortSelect = controlGroup.createEl('select', {
+			cls: 've-cl-select',
+			attr: { 'aria-label': 'Changelog sort order' },
+		});
+		const optDesc = sortSelect.createEl('option', { value: 'desc', text: '🔽 Newest first' });
+		const optAsc = sortSelect.createEl('option', { value: 'asc', text: '🔼 Oldest first' });
+		if (this.clSortOrder === 'asc') optAsc.selected = true;
+		else optDesc.selected = true;
+		sortSelect.addEventListener('change', (e) => {
+			this.clSortOrder = (e.target as HTMLSelectElement).value as 'desc' | 'asc';
+			this.renderChangelogView();
+		});
+
+		const row2 = filterCard.createDiv({ cls: 've-cl-filter-row ve-cl-filter-row--border' });
+		const catGroup = row2.createDiv({ cls: 've-cl-cat-group' });
+		catGroup.createSpan({ cls: 've-cl-cat-label', text: 'Categories:' });
+		const categories = [
+			{ catName: 'Added', icon: '✨' },
+			{ catName: 'Improved', icon: '🚀' },
+			{ catName: 'Changed', icon: '⚡' },
+			{ catName: 'Fixed', icon: '🐛' },
+			{ catName: 'Removed', icon: '🗑️' },
+			{ catName: 'Security', icon: '🛡️' },
+		];
+		for (const cat of categories) {
+			const chip = catGroup.createEl('button', {
+				cls: `ve-cl-cat-chip ${this.clActiveCats.has(cat.catName) ? 'is-active' : ''}`,
+				text: `${cat.icon} ${cat.catName}`,
+				attr: { type: 'button', 'data-cat': cat.catName },
+			});
+			chip.addEventListener('click', () => {
+				if (this.clActiveCats.has(cat.catName)) {
+					if (this.clActiveCats.size > 1) {
+						this.clActiveCats.delete(cat.catName);
+						chip.removeClass('is-active');
+					}
+				} else {
+					this.clActiveCats.add(cat.catName);
+					chip.addClass('is-active');
+				}
+				this.renderChangelogView();
+			});
+		}
+
+		const rangeGroup = row2.createDiv({ cls: 've-cl-control-group' });
+		rangeGroup.createSpan({ cls: 've-cl-cat-label', text: 'Range:' });
+		this.clVersionFromSelect = rangeGroup.createEl('select', {
+			cls: 've-cl-select',
+			attr: { 'aria-label': 'Changelog start version' },
+		});
+		rangeGroup.createSpan({ text: 'to', cls: 've-cl-range-to' });
+		this.clVersionToSelect = rangeGroup.createEl('select', {
+			cls: 've-cl-select',
+			attr: { 'aria-label': 'Changelog end version' },
+		});
+
+		this.clVersionFromSelect.addEventListener('change', (e) => {
+			this.clVersionFrom = (e.target as HTMLSelectElement).value;
+			this.renderChangelogView();
+		});
+		this.clVersionToSelect.addEventListener('change', (e) => {
+			this.clVersionTo = (e.target as HTMLSelectElement).value;
+			this.renderChangelogView();
+		});
+
+		this.clContentContainer = container.createDiv({ cls: 've-cl-content' });
+		this.renderChangelogView();
+	}
+
+	private appendSafeHtml(container: HTMLElement, html: string): void {
+		const parsed = new window.DOMParser().parseFromString(html, 'text/html');
+		container.append(...Array.from(parsed.body.childNodes));
+	}
+
+	private renderChangelogView(): void {
+		if (!this.clContentContainer) return;
+		const container = this.clContentContainer;
+		container.empty();
+
+		const { introHtml, rawItems } = parseRawChangelogMarkdown(this.changelogRawMarkdown);
+		this.populateVersionSelects(rawItems);
+
+		const result = filterAndGroupChangelog(rawItems, {
+			searchQuery: this.clSearchQuery,
+			viewMode: this.clViewMode,
+			activeCats: this.clActiveCats,
+			sortOrder: this.clSortOrder,
+			versionFrom: this.clVersionFrom,
+			versionTo: this.clVersionTo,
+		});
+
+		if (this.clCounterEl) {
+			this.clCounterEl.setText(
+				`${result.processedItems.length} / ${rawItems.length} version${rawItems.length === 1 ? '' : 's'}`
+			);
+		}
+
+		if (result.processedItems.length === 0) {
+			const empty = container.createDiv({ cls: 've-cl-empty' });
+			empty.createDiv({ cls: 've-cl-empty__icon', text: '🔍' });
+			empty.createDiv({ cls: 've-cl-empty__title', text: 'No matching release notes' });
+			empty.createDiv({ cls: 've-cl-empty__desc', text: 'No versions match your active changelog filters.' });
+			const resetBtn = empty.createEl('button', {
+				cls: 'mod-cta',
+				text: '🔄 Reset filters',
+				attr: { type: 'button' },
+			});
+			resetBtn.addEventListener('click', () => {
+				this.clSearchQuery = '';
+				this.clSortOrder = 'desc';
+				this.clViewMode = 'all';
+				this.clActiveCats = new Set(KNOWN_CHANGELOG_CATEGORIES);
+				this.clVersionFrom = 'all';
+				this.clVersionTo = 'all';
+				this.display();
+			});
+			return;
+		}
+
+		if (introHtml) {
+			const introEl = container.createDiv();
+			this.appendSafeHtml(introEl, introHtml);
+		}
+
+		for (const group of result.dateGroups) {
+			const groupEl = container.createDiv({ cls: 've-cl-date-group' });
+			const headerEl = groupEl.createDiv({ cls: 've-cl-date-header' });
+			headerEl.createSpan({
+				cls: 've-cl-date-header__title',
+				text: '📅 ' + group.date,
+			});
+			headerEl.createSpan({
+				cls: 've-cl-counter',
+				text: `${group.versions.length} version${group.versions.length === 1 ? '' : 's'}`,
+			});
+
+			const listEl = groupEl.createDiv({ cls: 've-cl-versions-list' });
+			for (const item of group.versions) {
+				const cardWrapper = listEl.createDiv();
+				this.appendSafeHtml(cardWrapper, buildChangelogVersionCard(item));
+			}
+		}
+	}
+
+	private populateVersionSelects(rawItems: RawChangelogItem[]): void {
+		if (!this.clVersionFromSelect || !this.clVersionToSelect) return;
+		const uniqueVers = rawItems.map((i) => i.ver).filter((v, idx, a) => Boolean(v) && a.indexOf(v) === idx);
+		const currentFrom = this.clVersionFrom;
+		const currentTo = this.clVersionTo;
+
+		this.clVersionFromSelect.empty();
+		this.clVersionToSelect.empty();
+
+		this.clVersionFromSelect.createEl('option', { value: 'all', text: 'All versions' });
+		this.clVersionToSelect.createEl('option', { value: 'all', text: 'Latest version' });
+
+		for (const ver of uniqueVers) {
+			this.clVersionFromSelect.createEl('option', { value: ver, text: ver });
+			this.clVersionToSelect.createEl('option', { value: ver, text: ver });
+		}
+
+		this.clVersionFromSelect.value = currentFrom;
+		this.clVersionToSelect.value = currentTo;
+	}
+
+	private async refreshChangelogFromGitHub(forceRefresh = false): Promise<void> {
+		if (this.changelogLoading) return;
+		this.changelogLoading = true;
+		this.clTimeEl?.setText('Fetching changelog from GitHub...');
+
+		try {
+			const headers = forceRefresh ? { 'Cache-Control': 'no-cache' } : undefined;
+			const res = await requestUrl({
+				url: CHANGELOG_RAW_URL,
+				method: 'GET',
+				headers,
+				throw: false,
+			});
+			this.changelogLoading = false;
+			if (res.status >= 200 && res.status < 300 && res.text) {
+				this.changelogRawMarkdown = res.text;
+				this.changelogFetchedAt = new Date();
+				this.clTimeEl?.setText(
+					`Last Git sync: ${this.changelogFetchedAt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+				);
+				new Notice('Changelog updated from GitHub.');
+				this.renderChangelogView();
+			} else {
+				this.clTimeEl?.setText('Git sync failed (using bundled changelog)');
+				new Notice(`Could not fetch changelog from GitHub (HTTP ${res.status}).`);
+			}
+		} catch (err: unknown) {
+			this.changelogLoading = false;
+			const msg = err instanceof Error ? err.message : String(err);
+			this.clTimeEl?.setText('Git sync error (using bundled changelog)');
+			new Notice(`Could not fetch changelog from GitHub: ${msg}`);
+		}
 	}
 }

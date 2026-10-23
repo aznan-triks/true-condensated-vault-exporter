@@ -12,11 +12,11 @@ An Obsidian desktop plugin for turning a vault, folder, or tagged subset into fi
 
 | Target | Output |
 |---|---|
-| **NotebookLM** | One structured `.txt` file with clear note boundaries and optional metadata. |
+| **NotebookLM** | One structured `.txt` file (or your custom extension) with clear note boundaries and optional metadata. |
 | **HTML** | A styled document with a searchable table of contents, customizable system/light/dark theme, and print layout. |
-| **Markdown** | One `.md` file with an anchored table of contents. |
-| **Split** | One `.txt` per folder, or one cleaned `.md` file per note. |
-| **ZIP bundle** | A portable archive containing all three consolidated formats and split files. The ZIP is a separate target. |
+| **Markdown** | One `.md` file (or your custom extension) with an anchored table of contents. |
+| **Split** | One file per folder group (`.txt` by default) or one cleaned file per note (`.md` by default), with optional custom split extension override. |
+| **ZIP bundle** | A portable archive containing all three consolidated formats and split files (using their active extensions). The ZIP is a separate target. |
 
 ![Standalone HTML export preview](docs/assets/html-preview.png)
 
@@ -52,10 +52,11 @@ Then reload Obsidian and enable **Vault Exporter** in **Settings → Community p
 
 ## Settings worth knowing
 
-The settings page uses searchable category tabs: search by name or description, then jump to a result.
+The settings page features live status badges at the top (**Output**, **Scope**, **Extension**, **Split preset**), searchable category tabs with quick jump cards, changed-from-default tracking with per-setting **Reset to default** buttons and **Show only changed** filtering, and an integrated **Changelog** viewer that works offline and syncs from GitHub on demand.
 
 Text edits take effect in memory immediately and are saved after a 300 ms pause. Leaving the settings tab or unloading the plugin requests a flush; discrete controls save immediately. A forced shutdown before a pending write completes can still lose the last unsaved edit.
 
+- **Custom File Extensions (`Export File Extension` & `Split File Extension`)** let you export using any extension you choose (`.md`, `.txt`, `.markdown`, `.mdx`, `.html`, `.org`, `.rst`, `.adoc`, `.tex`, `.json`, `.xml`, compound extensions like `.llm.txt`, or any custom `.ext`) directly from the sidebar or Settings. When multiple consolidated targets share the same base stem under a custom extension, stems are automatically disambiguated (`Vault export.txt`, `Vault export - NotebookLM.txt`, `Vault export - HTML.txt`).
 - **Scope Root / Scope Tag** and exclusion lists control what is read.
 - Each consolidated format, the ZIP, and split files have configurable output paths. Use vault-relative paths or absolute paths on desktop; a blank split destination means the vault root.
 - **External Output Folder** redirects every output outside the vault. Turn it on, pick an absolute folder with the system folder picker, and all consolidated files, ZIP bundles, and split files are written there instead — relative paths keep their subfolders, absolute paths keep only their final name. The section shows where exports currently go, and the sidebar footer and scope preview both link to these settings. Outputs written back inside the vault (for example when the external folder is a vault subfolder) are still protected from re-export.

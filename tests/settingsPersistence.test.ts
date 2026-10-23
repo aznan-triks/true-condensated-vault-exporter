@@ -58,15 +58,21 @@ afterEach(async () => {
 describe('settings persistence (VE-017)', () => {
 	it.each([
 		['Document Title', 'documentTitle'], ['Scope Root', 'scopeRoot'], ['Scope Tag', 'scopeTag'],
-		['External Folder', 'externalOutputFolder'], ['NotebookLM Consolidated Output', 'notebooklmOutputPath'],
+		['External Folder', 'externalOutputFolder'], ['Export File Extension', 'outputExtension'],
+		['NotebookLM Consolidated Output', 'notebooklmOutputPath'],
 		['HTML Consolidated Output', 'htmlOutputPath'], ['Markdown Consolidated Output', 'markdownOutputPath'],
-		['ZIP Bundle Output', 'zipOutputPath'], ['Split Group Folder', 'splitGroupFolder'],
+		['ZIP Bundle Output', 'zipOutputPath'], ['Split File Extension', 'splitFileExtension'],
+		['Split Group Folder', 'splitGroupFolder'],
 		['Split Files Destination Folder', 'splitOutputFolder'], ['HTML Footer Attribution', 'htmlFooterText'],
 		['Custom HTML CSS', 'customCss'], ['Yield Every N Notes', 'yieldEvery'],
 	] as const)('coalesces ten changes to %s while updating live settings immediately', async (label, key) => {
 		const { plugin, tab, writes, saveSettings } = fixture();
 		for (let i = 1; i <= 10; i++) type(tab, label, '1234567890'.slice(0, i));
-		const expected = key === 'yieldEvery' ? 1234567890 : '1234567890';
+		const expected = key === 'yieldEvery'
+			? 1234567890
+			: key === 'outputExtension' || key === 'splitFileExtension'
+				? '.1234567890'
+				: '1234567890';
 		expect(plugin.settings[key]).toBe(expected);
 		expect(saveSettings).not.toHaveBeenCalled();
 		await vi.advanceTimersByTimeAsync(299);
@@ -179,4 +185,67 @@ describe('settings persistence (VE-017)', () => {
 		await vi.advanceTimersByTimeAsync(500);
 		expect(save).toHaveBeenCalledTimes(1);
 	});
+
+	it('tracks modified settings, filters changed rows, and supports per-setting & global reset', async () => {
+		const { plugin, tab } = fixture();
+		expect(tab.containerEl.querySelector('.ve-settings__summary-text')?.textContent).toBe('Every setting has its default value.');
+
+		// Quick extension pill sets outputExtension to .mdx
+		const mdxPill = tab.containerEl.querySelector<HTMLButtonElement>('.ve-ext-pill[data-ext=".mdx"]');
+		expect(mdxPill).toBeTruthy();
+		mdxPill?.click();
+		await Promise.resolve();
+
+		expect(plugin.settings.outputExtension).toBe('.mdx');
+		expect(tab.containerEl.querySelector('.ve-settings__summary-text')?.textContent).toBe('1 setting changed from default.');
+		expect(tab.containerEl.querySelector('.ve-settings__badges')?.textContent).toContain('Extension: .mdx');
+
+		// Filter to only changed settings
+		const onlyChangedBtn = tab.containerEl.querySelector<HTMLButtonElement>('.ve-settings__only-changed-btn');
+		expect(onlyChangedBtn?.textContent).toBe('Show only changed');
+		onlyChangedBtn?.click();
+		const visibleRows = Array.from(tab.containerEl.querySelectorAll<HTMLElement>('.ve-settings-row')).filter((el) => !el.hidden);
+		expect(visibleRows.map((r) => r.dataset.settingTitle)).toEqual(['Export File Extension']);
+
+		// Reset all back to defaults
+		const resetAllBtn = tab.containerEl.querySelector<HTMLButtonElement>('.ve-settings__reset-all-btn');
+		expect(resetAllBtn).toBeTruthy();
+		resetAllBtn?.click();
+		await Promise.resolve();
+		expect(plugin.settings.outputExtension).toBe('');
+		expect(tab.containerEl.querySelector('.ve-settings__summary-text')?.textContent).toBe('Every setting has its default value.');
+	});
+
+	it('renders bundled changelog and refreshes from GitHub via requestUrl', async () => {
+		const obsidianMock = require('../tools/mock-obsidian/obsidian-mock.cjs') as { __state: { requestUrlResponse: unknown } };
+		obsidianMock.__state.requestUrlResponse = {
+			status: 200,
+			text: [
+				'# Changelog',
+				'',
+				'## [9.9.9] - 2026-10-23',
+				'',
+				'> Plain: Custom extensions shipped!',
+				'',
+				'### Added',
+				'- Export any file extension directly from Sidebar or Settings.',
+			].join('\n'),
+		};
+
+		const { tab } = fixture();
+		const changelogTab = tab.containerEl.querySelector<HTMLButtonElement>('#ve-settings-tab-changelog');
+		expect(changelogTab).toBeTruthy();
+		changelogTab?.click();
+
+		expect(tab.containerEl.querySelectorAll('.ve-cl-version-card').length).toBeGreaterThan(0);
+
+		const refreshBtn = tab.containerEl.querySelector<HTMLButtonElement>('.ve-cl-header-card__actions button');
+		refreshBtn?.click();
+		await Promise.resolve();
+		await Promise.resolve();
+
+		expect(tab.containerEl.querySelector('.ve-cl-content')?.textContent).toContain('🏷️ 9.9.9');
+		obsidianMock.__state.requestUrlResponse = null;
+	});
 });
+

@@ -1594,3 +1594,171 @@ describe('architecture', () => {
 		}
 	});
 });
+
+import {
+	appendFileStemSuffix,
+	effectiveSplitExtension,
+	normalizeExtension,
+	replaceFileExtension,
+} from '../src/core/extension';
+import { resolveConsolidatedExtensionPaths } from '../src/core/outputTarget';
+import { isCleanExportArtifact } from '../src/core/filter';
+import { sameSettingValue, setSettingAt, settingAt } from '../src/core/settingValue';
+import {
+	KNOWN_CHANGELOG_CATEGORIES,
+	buildChangelogVersionCard,
+	filterAndGroupChangelog,
+	parseRawChangelogMarkdown,
+} from '../src/core/changelog';
+
+describe('custom file extension helpers', () => {
+	it('normalizes user-provided extensions consistently', () => {
+		expect(normalizeExtension('')).toBe('');
+		expect(normalizeExtension('   ')).toBe('');
+		expect(normalizeExtension('txt')).toBe('.txt');
+		expect(normalizeExtension('.MD')).toBe('.md');
+		expect(normalizeExtension('*.mdx ')).toBe('.mdx');
+		expect(normalizeExtension('llm.txt')).toBe('.llm.txt');
+		expect(normalizeExtension('.')).toBe('');
+		expect(normalizeExtension('...')).toBe('');
+		expect(normalizeExtension('sub/dir')).toBe('');
+		expect(normalizeExtension('C:\\ext')).toBe('');
+		expect(normalizeExtension('bad<ext>')).toBe('');
+	});
+
+	it('replaces or appends file extensions across relative, Windows, dotfile, and extensionless paths', () => {
+		expect(replaceFileExtension('Vault export.md', '.mdx')).toBe('Vault export.mdx');
+		expect(replaceFileExtension('Exports/Vault export.html', 'txt')).toBe('Exports/Vault export.txt');
+		expect(replaceFileExtension('C:\\Exports\\Vault export.html', '.org')).toBe('C:\\Exports\\Vault export.org');
+		expect(replaceFileExtension('Exports/Bundle', '.rst')).toBe('Exports/Bundle.rst');
+		expect(replaceFileExtension('.gitignore', '.txt')).toBe('.gitignore.txt');
+		expect(replaceFileExtension('Docs/.notes', '.md')).toBe('Docs/.notes.md');
+		expect(replaceFileExtension('Vault export.md', '')).toBe('Vault export.md');
+	});
+
+	it('appends stem suffixes while preserving simple and compound extensions', () => {
+		expect(appendFileStemSuffix('Vault export.txt', ' - HTML')).toBe('Vault export - HTML.txt');
+		expect(appendFileStemSuffix('Out/Vault export.llm.txt', ' - HTML')).toBe('Out/Vault export - HTML.llm.txt');
+		expect(appendFileStemSuffix('C:\\Out\\Export', ' - Markdown')).toBe('C:\\Out\\Export - Markdown');
+	});
+
+	it('resolves effectiveSplitExtension with splitFileExtension > outputExtension > splitMode precedence', () => {
+		expect(effectiveSplitExtension({ splitMode: 'folder-grouped' })).toBe('.txt');
+		expect(effectiveSplitExtension({ splitMode: 'individual-files' })).toBe('.md');
+		expect(effectiveSplitExtension({ splitMode: 'folder-grouped', outputExtension: '.mdx' })).toBe('.mdx');
+		expect(effectiveSplitExtension({ splitMode: 'individual-files', outputExtension: '.mdx', splitFileExtension: '.org' })).toBe('.org');
+	});
+
+	it('disambiguates colliding consolidated paths when applying a global outputExtension', () => {
+		expect(resolveOutputSettings(DEFAULT_SETTINGS)).toBe(DEFAULT_SETTINGS);
+		const resolvedTxt = resolveConsolidatedExtensionPaths({
+			...DEFAULT_SETTINGS,
+			outputExtension: '.txt',
+		});
+		expect(resolvedTxt).toEqual({
+			markdownOutputPath: 'Vault export.txt',
+			notebooklmOutputPath: 'Vault export - NotebookLM.txt',
+			htmlOutputPath: 'Vault export - HTML.txt',
+		});
+
+		const resolvedExternalMdx = resolveOutputSettings({
+			...DEFAULT_SETTINGS,
+			outputExtension: '.mdx',
+			useExternalOutputFolder: true,
+			externalOutputFolder: '/tmp/Exports',
+		});
+		expect(resolvedExternalMdx.markdownOutputPath).toBe('/tmp/Exports/Vault export.mdx');
+		expect(resolvedExternalMdx.notebooklmOutputPath).toBe('/tmp/Exports/Vault export - NotebookLM.mdx');
+		expect(resolvedExternalMdx.htmlOutputPath).toBe('/tmp/Exports/Vault export - HTML.mdx');
+	});
+
+	it('protects clean export artifacts and extension-rewritten consolidated paths against re-ingestion', () => {
+		expect(isCleanExportArtifact('Alpha (clean export).mdx')).toBe(true);
+		expect(isCleanExportArtifact('Alpha (clean export).txt')).toBe(true);
+		expect(isCleanExportArtifact('Alpha.md')).toBe(false);
+
+		const mdOverride = { ...DEFAULT_SETTINGS, outputExtension: '.md' };
+		const reserved = reservedOutputPaths(mdOverride);
+		expect(reserved).toContain('Vault export - HTML.md');
+		expect(reserved).toContain('Vault export - NotebookLM.md');
+		expect(isFileIncluded('Vault export - HTML.md', { ...mdOverride, reservedPaths: reserved })).toBe(false);
+	});
+});
+
+describe('settingValue helpers', () => {
+	it('compares primitives, arrays, and objects deeply regardless of key insertion order', () => {
+		expect(sameSettingValue(['a', 'b'], ['a', 'b'])).toBe(true);
+		expect(sameSettingValue(['a', 'b'], ['b', 'a'])).toBe(false);
+		expect(sameSettingValue({ a: 1, b: [2, 3] }, { b: [2, 3], a: 1 })).toBe(true);
+		expect(sameSettingValue({ a: 1 }, { a: 1, b: 2 })).toBe(false);
+	});
+
+	it('reads and mutates dot-separated setting paths', () => {
+		const obj: Record<string, unknown> = { nested: { count: 3 } };
+		expect(settingAt(obj, 'nested.count')).toBe(3);
+		setSettingAt(obj, 'nested.count', 9);
+		setSettingAt(obj, 'fresh.leaf', 'ok');
+		expect(settingAt(obj, 'nested.count')).toBe(9);
+		expect(settingAt(obj, 'fresh.leaf')).toBe('ok');
+	});
+});
+
+describe('changelog parser & filter engine', () => {
+	const sampleChangelog = [
+		'# Changelog',
+		'',
+		'> Release notes follow Plain and Technical voices.',
+		'',
+		'## [2.3.0] - 2026-10-23',
+		'',
+		'> Plain: Export in any extension you choose with per-setting reset controls.',
+		'',
+		'> Technical: Added `outputExtension` and `splitFileExtension` normalization in `<script>core</script>`.',
+		'',
+		'### Added',
+		'- **Custom export extensions**: Pick any `.ext` across consolidated and split targets.',
+		'',
+		'### Improved',
+		'- **Settings UX**: Status badges and changed-from-default tracking.',
+		'',
+		'## [2.2.1] - 2026-04-20',
+		'',
+		'### Fixed',
+		'- Fixed duplicate export triggers while busy.',
+	].join('\n');
+
+	it('parses intro banner, versions, voice blocks, and categories accurately', () => {
+		const parsed = parseRawChangelogMarkdown(sampleChangelog);
+		expect(parsed.introHtml).toContain('Plain and Technical voices');
+		expect(parsed.rawItems).toHaveLength(2);
+		expect(parsed.rawItems[0]).toMatchObject({ ver: '2.3.0', date: '2026-10-23' });
+		expect(parsed.rawItems[1]).toMatchObject({ ver: '2.2.1', date: '2026-04-20' });
+	});
+
+	it('filters by Plain/Technical voice without leaking hidden voice matches and escapes unsafe HTML', () => {
+		const { rawItems } = parseRawChangelogMarkdown(sampleChangelog);
+		const plainSearchHiddenTech = filterAndGroupChangelog(rawItems, {
+			searchQuery: 'splitfileextension',
+			viewMode: 'plain',
+			activeCats: new Set(KNOWN_CHANGELOG_CATEGORIES),
+			sortOrder: 'desc',
+			versionFrom: 'all',
+			versionTo: 'all',
+		});
+		expect(plainSearchHiddenTech.processedItems).toHaveLength(0);
+
+		const techOnly = filterAndGroupChangelog(rawItems, {
+			searchQuery: 'splitfileextension',
+			viewMode: 'tech',
+			activeCats: new Set(KNOWN_CHANGELOG_CATEGORIES),
+			sortOrder: 'desc',
+			versionFrom: 'all',
+			versionTo: 'all',
+		});
+		expect(techOnly.processedItems).toHaveLength(1);
+		const html = buildChangelogVersionCard(techOnly.processedItems[0]!);
+		expect(html).toContain('&lt;script&gt;core&lt;/script&gt;');
+		expect(html).not.toContain('<script>');
+	});
+});
+

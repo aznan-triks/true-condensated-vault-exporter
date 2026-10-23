@@ -11,6 +11,7 @@ import { SPLIT_PRESETS, applySplitPreset, detectSplitPreset } from '../features/
 import { ExportHistoryEntry, formatBytes, formatDuration, relativeTime, totalBytes } from '../features/exportHistory';
 import { isFileIncluded, reservedOutputPaths } from '../core/filter';
 import { resolveOutputSettings, usesExternalOutputFolder } from '../core/outputTarget';
+import { COMMON_EXPORT_EXTENSIONS, normalizeExtension } from '../core/extension';
 import { SplitPresetId } from '../core/types';
 
 export const VIEW_TYPE_EXPORTER_SIDEBAR = 'vault-exporter-sidebar';
@@ -253,6 +254,62 @@ export class ExporterSidebarView extends ItemView {
 		});
 
 		const selectionDescription = describeSelection();
+		const extRow = targetsCard.createDiv({ cls: 've-sidebar__extension' });
+		extRow.createSpan({ cls: 've-sidebar__split-preset-label', text: 'File extension' });
+		const extControls = extRow.createDiv({ cls: 've-sidebar__extension-controls' });
+		const extSelect = extControls.createEl('select', {
+			cls: 'dropdown ve-sidebar__extension-select',
+			attr: { 'aria-label': 'Export file extension' },
+		});
+		extSelect.disabled = isExportRunning();
+		extSelect.createEl('option', { value: '', text: 'Default (auto)' });
+		for (const ext of COMMON_EXPORT_EXTENSIONS) {
+			extSelect.createEl('option', { value: ext, text: ext });
+		}
+		extSelect.createEl('option', { value: 'custom', text: 'Custom…' });
+
+		const currentExt = normalizeExtension(ctx.settings.outputExtension);
+		const isPresetExt = (COMMON_EXPORT_EXTENSIONS as readonly string[]).includes(currentExt);
+		extSelect.value = !currentExt ? '' : isPresetExt ? currentExt : 'custom';
+
+		const extInput = extControls.createEl('input', {
+			type: 'text',
+			cls: 've-sidebar__extension-input',
+			placeholder: '.ext',
+			value: currentExt,
+			attr: { 'aria-label': 'Custom export file extension', autocomplete: 'off', spellcheck: 'false' },
+		});
+		extInput.disabled = isExportRunning();
+
+		const persistExtension = (nextRaw: string): void => {
+			const normalized = normalizeExtension(nextRaw);
+			ctx.settings.outputExtension = normalized;
+			extInput.value = normalized;
+			extSelect.value = !normalized
+				? ''
+				: (COMMON_EXPORT_EXTENSIONS as readonly string[]).includes(normalized)
+					? normalized
+					: 'custom';
+			if (ctx.persistSettings) {
+				void ctx.persistSettings().catch((error: unknown) => {
+					console.error('[vault-exporter] Could not save export extension:', error);
+					new Notice('Could not save the export extension.');
+				});
+			}
+		};
+
+		extSelect.addEventListener('change', () => {
+			if (extSelect.value === 'custom') {
+				extInput.focus();
+				extInput.select();
+				return;
+			}
+			persistExtension(extSelect.value);
+		});
+		extInput.addEventListener('change', () => {
+			persistExtension(extInput.value);
+		});
+
 		selectionSummaryEl = targetsCard.createDiv({
 			cls: 've-sidebar__selection-summary',
 			text: selectionDescription,
