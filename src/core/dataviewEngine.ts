@@ -6,6 +6,10 @@
  * Queries may be written on a single line (`TABLE status FROM "Notes" WHERE
  * status = "active"`) or with one clause per line; both forms are equivalent.
  *
+ * Supported sources: FROM "folder", FROM #tag (also quoted tags), TABLE columns,
+ * WHERE, SORT and WITHOUT ID. Link/function/union sources and FROM "" remain visible.
+ * Unquoted source names containing syntax such as parentheses must be quoted.
+ *
  * Supported WHERE expression subset:
  *   - boolean combinators:  A and B, A or B, ( ... )   ('or' binds loosest)
  *   - equality:             field = value,  field != value
@@ -19,6 +23,7 @@
  */
 
 import { ParsedFile } from './types';
+import { splitContentSegments } from './markdownClean';
 
 export interface ParsedDataviewQuery {
 	type: 'TABLE' | 'LIST';
@@ -54,6 +59,31 @@ function stripEnclosingQuotes(str: string): string {
 	return trimmed;
 }
 
+/** Removes directives only outside quoted strings, preserving escaped quotes verbatim. */
+function stripWithoutIdOutsideStrings(text: string): { text: string; withoutId: boolean } {
+	let result = '';
+	let quote = '';
+	let withoutId = false;
+	for (let i = 0; i < text.length; i++) {
+		const char = text[i] ?? '';
+		if (quote) {
+			result += char;
+			if (char === '\\') result += text[++i] ?? '';
+			else if (char === quote) quote = '';
+			continue;
+		}
+		if (char === '"' || char === "'") quote = char;
+		const directive = !quote && (i === 0 || !/\w/.test(text[i - 1] ?? ''))
+			? /^WITHOUT\s+ID\b/i.exec(text.slice(i)) : null;
+		if (directive) {
+			result += ' ';
+			i += directive[0].length - 1;
+			withoutId = true;
+		} else result += char;
+	}
+	return { text: result, withoutId };
+}
+
 /**
  * Parses a Dataview block.
  *
@@ -71,8 +101,7 @@ export function parseDataviewQuery(rawBlock: string): ParsedDataviewQuery | null
 		.trim();
 	if (!text) return null;
 
-	const withoutId = /\bWITHOUT\s+ID\b/i.test(text);
-	const stripped = text.replace(/\bWITHOUT\s+ID\b/gi, ' ');
+	const { text: stripped, withoutId } = stripWithoutIdOutsideStrings(text);
 	const typeMatch = /^(TABLE|LIST)\b/i.exec(stripped);
 	if (!typeMatch) return null;
 
@@ -105,6 +134,9 @@ export function parseDataviewQuery(rawBlock: string): ParsedDataviewQuery | null
 			return null;
 		}
 		if (clause.keyword === 'from') {
+			// Ignore syntax-looking characters inside quoted folder/tag names.
+			const syntax = clause.body.replace(/"(?:\\[\s\S]|[^"\\])*"|'(?:\\[\s\S]|[^'\\])*'/g, ' ');
+			if (/\[\[|[(),]|\b(?:AND|OR)\b/i.test(syntax)) return null;
 			const fromVal = stripEnclosingQuotes(clause.body);
 			if (!fromVal) return null;
 			if (fromVal.startsWith('#')) {
@@ -669,17 +701,37 @@ export function evaluateDataviewQuery(query: ParsedDataviewQuery, files: ParsedF
 	return [headerLine, separatorLine, ...rows].join('\n') + '\n';
 }
 
-const DATAVIEW_BLOCK_REGEX = /^ {0,3}```dataview\r?\n([\s\S]*?)^ {0,3}```/gm;
-
 export function renderDataviewBlocks(content: string, files: ParsedFile[]): string {
-	return content.replace(DATAVIEW_BLOCK_REGEX, (fullMatch, queryText: string) => {
-		const parsed = parseDataviewQuery(queryText);
-		if (!parsed) return fullMatch;
+	// The shared scanner expects LF closers. Project CRLF for classification only,
+	// mapping segment bounds back so literal/malformed blocks keep their exact bytes.
+	const crlfPositions: number[] = [];
+	const normalized = content.replace(/\r\n/g, (_newline: string, offset: number) => {
+		crlfPositions.push(offset - crlfPositions.length);
+		return '\n';
+	});
+	let normalizedEnd = 0;
+	let removed = 0;
+	let rawStart = 0;
+	return splitContentSegments(normalized).map((segment) => {
+		normalizedEnd += segment.text.length;
+		while ((crlfPositions[removed] ?? Infinity) < normalizedEnd) removed++;
+		const rawEnd = normalizedEnd + removed;
+		const originalText = content.slice(rawStart, rawEnd);
+		rawStart = rawEnd;
+		if (!segment.code) return originalText;
+		const lines = segment.text.split(/\r?\n/);
+		const marker = /^ {0,3}(`{3,})[ \t]*dataview[ \t]*$/i.exec(lines[0] ?? '')?.[1];
+		if (!marker || lines.length < 3) return originalText;
+		// A shorter final fence must not turn an unterminated long block executable.
+		const closer = new RegExp('^ {0,3}`{' + marker.length + ',}[ \\t]*$');
+		if (!closer.test(lines[lines.length - 1] ?? '')) return originalText;
+		const parsed = parseDataviewQuery(lines.slice(1, -1).join('\n'));
+		if (!parsed) return originalText;
 		try {
 			return evaluateDataviewQuery(parsed, files);
 		} catch (error: unknown) {
-			if (error instanceof DataviewQueryError) return fullMatch;
+			if (error instanceof DataviewQueryError) return originalText;
 			throw error;
 		}
-	});
+	}).join('');
 }

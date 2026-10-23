@@ -107,3 +107,14 @@ Plus un test d'intégration : une note contenant `[[#Sommaire]]` ne doit plus pr
 
 - L'expression assouplie pourrait capturer des séquences qui n'étaient pas des liens (`a[[b`), mais l'ancre `]]` reste obligatoire. Les tests existants sur les liens malformés le vérifieront.
 - Le retrait du `\` final modifie un nom de fichier se terminant réellement par `\` — impossible sous Windows, très rare ailleurs ; à documenter dans le commentaire.
+
+## Journal d'exécution
+
+### 2026-10-21 — `47ef39b`; documentation follow-up
+
+- Baseline pull/check PASS (142 tests / 100 smoke). Read the full plan, wikilink module and prose-only pipeline call. Actual caller search shows `extractWikilinks` is currently an exported helper, not called by the sidebar; its contract is still kept aligned with transformation.
+- Tests first: **13 new tests failed** for the specified causes. Eight table assertions cover the seven syntax cases (including both clean-text and Markdown anchor-only forms); two tests cross-check extraction/display rules, preserve empty/malformed inputs, middle backslashes and keep-wikilink mode, and forbid a resolver call for empty targets. Three feature tests cover every non-keep link mode across all four plain export formats, with no raw `[[` remaining.
+- Added the shared `parseWikilink` helper, optional groups, one trailing table-escape removal, current-document anchors, and ignored numeric embed dimensions. `[[]]`, `[[#]]`, malformed links and `[[A|B|C]]` behavior are preserved. Pipeline code protection is unchanged. Comments document omitted embed widths and the trailing-backslash ambiguity.
+- Added smoke assertion `markdown: anchor-only wikilink rendered` against a real exported fixture. `npm run check` PASS: **155/155 tests, 101/101 smoke**, typecheck/build green. No dependency, resolver-policy or file-format refactor.
+
+- Implementation `47ef39b` pushed; tracker marked `fait`. All acceptance criteria met; remaining: none.

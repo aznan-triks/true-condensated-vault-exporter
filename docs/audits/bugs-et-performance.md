@@ -1,3 +1,5 @@
+Implementation status: see [docs/plans/technique/README.md](../plans/technique/README.md).
+
 # Audit technique — bugs et performance
 
 **Projet** : `true-condensated-vault-exporter` (plugin Obsidian `vault-exporter` 2.1.0, `isDesktopOnly: true`, `minAppVersion` 1.7.2)

@@ -10,8 +10,11 @@ import { formatForNotebookLM } from '../src/core/notebooklmFormatter';
 import { formatForHtml, simpleMarkdownToHtml, renderInline, noteHeadings } from '../src/core/htmlFormatter';
 import { formatForMarkdown } from '../src/core/markdownFormatter';
 import { parseCanvasContent } from '../src/core/canvasParser';
-import { buildSplitFiles } from '../src/features/exportSplit';
-import { cleanNote, createExportContext, parseVault } from '../src/core/pipeline';
+import {
+	SPLIT_PRESETS, applySplitPreset, buildSplitFiles, detectSplitPreset,
+	parseSubfolderSplitRule, previewSplitFiles,
+} from '../src/features/exportSplit';
+import { cleanNote, createExportContext, parseVault, visibleMetadata } from '../src/core/pipeline';
 import { DEFAULT_SETTINGS, ExporterSettings, VaultFile, mergeSettings } from '../src/core/types';
 import {
 	canonicalOutputPath,
@@ -102,6 +105,36 @@ describe('filter', () => {
 		expect(isFileIncluded('Knowledge Base/01_World/Timeline.md', opts2)).toBe(true);
 	});
 
+	describe('Unicode path comparisons (VE-006)', () => {
+		const nfd = 'Notes/Cafe\u0301.md';
+		it('resolves NFC text to the original NFD disk path', () => {
+			const resolver = buildLinkResolver([{ path: nfd, name: 'Cafe\u0301.md' }]);
+			expect(resolver('Café')).toBe(nfd);
+			expect(resolver('Notes/Café.md')).toBe(nfd);
+		});
+		it('excludes NFD folders using NFC settings', () => {
+			expect(isFileIncluded('Notes/Cafe\u0301/inside.md', { ...options, excludedFolders: ['Notes/Café'] })).toBe(false);
+		});
+		it('reserves NFD paths using NFC destinations', () => {
+			expect(isFileIncluded(nfd, { ...options, reservedPaths: ['Notes/Café.md'] })).toBe(false);
+		});
+		it('includes NFD paths under an NFC scope', () => {
+			expect(isFileIncluded('Notes/Cafe\u0301/inside.md', { ...options, scopeRoot: 'Notes/Café' })).toBe(true);
+		});
+		it('normalizes onlyPath, excludedFiles and excludedPrefixes comparisons too', () => {
+			expect(isFileIncluded(nfd, { ...options, onlyPath: 'Notes/Café.md' })).toBe(true);
+			expect(isFileIncluded(nfd, { ...options, excludedFiles: ['Café.md'] })).toBe(false);
+			expect(isFileIncluded('Cafe\u0301-private/inside.md', { ...options, excludedPrefixes: ['Café-'] })).toBe(false);
+		});
+		it('keeps distinct names distinct and preserves NFD output names', () => {
+			expect(isFileIncluded('Notes/Cafe.md', { ...options, excludedFiles: ['Notes/Café.md'] })).toBe(true);
+			const files = [{ path: nfd, name: 'Cafe\u0301.md', content: 'body' }];
+			const settings = { ...DEFAULT_SETTINGS, splitMode: 'individual-files' as const, splitOutputFolder: 'out' };
+			const ctx = createExportContext(files, settings);
+			expect(buildSplitFiles(files.map((f) => cleanNote(f, ctx)), settings)[0]?.path).toBe('out/' + nfd);
+		});
+	});
+
 	it('matches normalized tags and their nested subtags without prefix collisions', () => {
 		expect(matchesTag(['#Research', 'projects/notes'], '#research')).toBe(true);
 		expect(matchesTag(['projects/notes'], 'projects')).toBe(true);
@@ -169,6 +202,45 @@ describe('wikilink', () => {
 	it('markdown format falls back to the raw target when unresolved', () => {
 		const out = transformWikilinks('See [[Missing/Note]]', 'markdown', () => undefined);
 		expect(out).toBe('See [Note](Missing/Note)');
+	});
+
+	describe('complete syntax (VE-005)', () => {
+		const resolver = buildLinkResolver([{ path: 'Note.md', name: 'Note.md' }, { path: 'Assets/pic.png', name: 'pic.png' }]);
+		it.each([
+			['[[#Sommaire]]', 'clean-text', 'Sommaire'],
+			['[[#Sommaire]]', 'markdown', '[Sommaire](#sommaire)'],
+			['[[Note#]]', 'clean-text', 'Note'],
+			['[[Note|]]', 'clean-text', 'Note'],
+			['[[Note#Titre\\|Alias]]', 'markdown', '[Alias](Note.md#titre)'],
+			['[[Note\\|Alias]]', 'canonical-alias', 'Note (Alias)'],
+			['![[pic.png|300]]', 'markdown', '![pic.png](Assets/pic.png)'],
+			['![[pic.png|300x200]]', 'clean-text', 'pic.png'],
+		] as const)('transforms %s in %s', (input, format, expected) => {
+			expect(transformWikilinks(input, format, resolver)).toBe(expected);
+		});
+
+		it('uses the same parsing and display names for extraction and transformation', () => {
+			const inputs = ['[[#A]]', '[[B#]]', '[[B|]]', '[[Note\\|Alias]]', '![[pic.png|300]]', '![[pic.png|300x200]]', '[[A|B|C]]'];
+			for (const input of inputs) {
+				const links = extractWikilinks(input);
+				expect(links, input).toHaveLength(1);
+				expect(transformWikilinks(input, 'clean-text'), input).toBe(links[0]?.displayName);
+			}
+			expect(extractWikilinks('[[#A]] and [[B#]]')).toHaveLength(2);
+			expect(transformWikilinks('[[A|B|C]]', 'clean-text')).toBe('B|C');
+		});
+
+		it('preserves empty and malformed links, middle backslashes, and keep-wikilink mode', () => {
+			const input = '[[]] [[#]] [[unfinished';
+			expect(extractWikilinks(input)).toEqual([]);
+			for (const format of ['clean-text', 'canonical-alias', 'markdown', 'keep-wikilink'] as const) {
+				expect(transformWikilinks(input, format)).toBe(input);
+			}
+			expect(extractWikilinks('[[Dir\\Name|Alias]]')[0]?.target).toBe('Dir\\Name');
+			expect(transformWikilinks('[[Note\\|Alias]]', 'keep-wikilink')).toBe('[[Note\\|Alias]]');
+			const neverResolve = (): string => { throw new Error('Anchor-only links must not call the resolver'); };
+			expect(transformWikilinks('[[#A]]', 'markdown', neverResolve)).toBe('[A](#a)');
+		});
 	});
 
 	it('resolves explicit extensions and URL-encodes vault paths with spaces', () => {
@@ -349,6 +421,89 @@ describe('dataviewEngine', () => {
 		expect(result).toContain('Event1');
 		expect(result).toContain('Event2');
 		expect(result).not.toContain('World');
+	});
+
+	describe('top-level Dataview fences (VE-016)', () => {
+		const query = 'TABLE ordre FROM "Knowledge Base/80_History/Events"';
+		const top = '```dataview\n' + query + '\n```';
+		it.each(['````markdown', '```markdown', '~~~markdown'])('preserves nested query examples under %s', (opening) => {
+			const marker = opening.startsWith('~') ? '~~~' : opening.replace('markdown', '');
+			const body = opening + '\n' + top + '\n' + marker;
+			expect(renderDataviewBlocks(body, parsed)).toBe(body);
+		});
+		it('still executes a real triple-backtick top-level query', () => {
+			expect(renderDataviewBlocks(top, parsed)).toBe(evaluateDataviewQuery(parseDataviewQuery(query)!, parsed));
+		});
+		it.each(['````dataview', '   ```` DATAVIEW   '])('executes the long top-level opening %s with its matching closer', (opening) => {
+			const body = opening + '\n' + query + '\n````  \t';
+			expect(renderDataviewBlocks(body, parsed)).toBe(evaluateDataviewQuery(parseDataviewQuery(query)!, parsed));
+		});
+		it.each([
+			'Use ` ```dataview ` in a note.',
+			'```dataview\n' + query,
+			'````dataview\n' + query + '\n```',
+			'```dataviewjs\n' + query + '\n```',
+			'    ```dataview\n' + query + '\n    ```',
+		])('leaves inline/unclosed/other-language/indented code literal: %s', (body) => {
+			expect(renderDataviewBlocks(body, parsed)).toBe(body);
+		});
+		it('handles adjacent literal and real fences without a blank separator', () => {
+			const literal = '````markdown\n' + top + '\n````';
+			expect(renderDataviewBlocks(literal + '\n' + top, parsed)).toBe(literal + '\n' + evaluateDataviewQuery(parseDataviewQuery(query)!, parsed));
+		});
+		it('executes a CRLF query before following prose without changing the remaining line endings', () => {
+			const body = top.replace(/\n/g, '\r\n') + '\r\nAfter';
+			expect(renderDataviewBlocks(body, parsed)).toBe(evaluateDataviewQuery(parseDataviewQuery(query)!, parsed) + '\r\nAfter');
+		});
+		it('preserves mixed-line-ending literal examples and unsupported queries byte-for-byte', () => {
+			const body = 'Intro\r\n````markdown\r\n' + top.replace(/\n/g, '\r\n') + '\r\n````\r\n```dataview\nTABLE title FROM [[Unsupported]]\n```\nAfter';
+			expect(renderDataviewBlocks(body, parsed)).toBe(body);
+		});
+		it('preserves unsupported long-fence queries with CRLF verbatim', () => {
+			const body = '````dataview\r\nTABLE title FROM [[Unsupported]]\r\n````';
+			expect(renderDataviewBlocks(body, parsed)).toBe(body);
+		});
+		it('preserves nested examples through the complete cleaning pipeline', () => {
+			const literal = '````markdown\n' + top + '\n````';
+			const file = { path: 'Guide.md', name: 'Guide.md', content: literal + '\n\n' + top };
+			const result = cleanNote(file, createExportContext([...sampleFiles, file], DEFAULT_SETTINGS));
+			expect(result.body).toContain(literal);
+			expect(result.body.match(/\| File \| ordre \|/g)).toHaveLength(1);
+		});
+	});
+
+	describe('faithful queries (VE-007)', () => {
+		it.each(['"WITHOUT ID"', "'WITHOUT ID'", '"a \\"WITHOUT ID\\" value"'])('preserves literal %s and does not hide the ID column', (literal) => {
+			const query = parseDataviewQuery('TABLE title\nWHERE title = ' + literal);
+			expect(query?.whereClauses).toEqual(['title = ' + literal]);
+			expect(query?.showId).toBe(true);
+		});
+		it('preserves source names and column labels containing WITHOUT ID', () => {
+			const query = parseDataviewQuery('TABLE title AS "WITHOUT ID" FROM "WITHOUT ID folder"');
+			expect(query?.fromPath).toBe('WITHOUT ID folder');
+			expect(query?.columnLabels).toEqual(['WITHOUT ID']);
+			expect(query?.showId).toBe(true);
+		});
+		it('still recognizes the real WITHOUT ID directive outside quoted literals', () => {
+			const query = parseDataviewQuery('TABLE title FROM "F" WHERE title = "WITHOUT ID"\nWITHOUT ID');
+			expect(query?.showId).toBe(false);
+			expect(query?.whereClauses).toEqual(['title = "WITHOUT ID"']);
+		});
+		it.each(['[[Some Note]]', 'outgoing([[Some Note]])', '#tag AND "Folder"'])('preserves the entire unsupported FROM %s block', (source) => {
+			const block = '```dataview\nTABLE title FROM ' + source + '\n```';
+			expect(renderDataviewBlocks(block, parsed)).toBe(block);
+		});
+		it.each(['"Folder, Sub (AND OR)"', '#lore'])('still evaluates supported FROM %s', (source) => {
+			const files = parseVault([{ path: 'Folder, Sub (AND OR)/A.md', name: 'A.md', content: '---\ntitle: Result\ntags: [lore]\n---\nbody' }]);
+			const block = '```dataview\nTABLE title FROM ' + source + '\n```';
+			const rendered = renderDataviewBlocks(block, files);
+			expect(rendered).toContain('Result');
+			expect(rendered).not.toContain('```dataview');
+		});
+		it('continues to preserve an unsupported all-files FROM source', () => {
+			const block = '```dataview\nTABLE title FROM ""\n```';
+			expect(renderDataviewBlocks(block, parsed)).toBe(block);
+		});
 	});
 
 	it('supports WITHOUT ID and contains() in dataview queries', () => {
@@ -694,6 +849,53 @@ describe('formatters and split export', () => {
 		expect(noFooter).not.toContain('<footer class="ve-footer">');
 	});
 
+	describe('HTML code blocks (VE-011)', () => {
+		it('renders tilde fences with a language class', () => {
+			expect(simpleMarkdownToHtml('~~~js\nconst x = 1;\n~~~')).toContain('<pre><code class="language-js">');
+		});
+		it('does not emit an empty language class', () => {
+			const html = simpleMarkdownToHtml('```\nx\n```');
+			expect(html).toContain('<pre><code>');
+			expect(html).not.toContain('language-');
+		});
+		it('groups and escapes indented code without generating headings', () => {
+			const html = simpleMarkdownToHtml('    # not a heading\n    <code>\n\n    still code');
+			expect(html).toContain('<pre><code>');
+			expect(html).not.toContain('<h1');
+			expect(html).toContain('    # not a heading\n    &lt;code&gt;');
+			expect(html.match(/<pre>/g)).toHaveLength(1);
+		});
+		it('does not close four backticks with three or with another marker', () => {
+			const html = simpleMarkdownToHtml('````md\n```js\nx\n```\n~~~\n# literal\n````\n# Visible');
+			expect(html).toContain('```js');
+			expect(html).toContain('# literal');
+			expect(html).not.toContain('<h1 id="literal"');
+			expect(html).toContain('<h1 id="visible"');
+		});
+		it('treats four-space fences and tab-indented lines as literal indented code', () => {
+			const html = simpleMarkdownToHtml('    ```js\n    x\n    ```\n\n\t# literal');
+			expect(html).not.toContain('language-js');
+			expect(html).not.toContain('<h1');
+			expect(html).toContain('    ```js');
+		});
+		it('keeps quotes, tables and indented list markers rendering as before', () => {
+			const html = simpleMarkdownToHtml('> quote\n\n| a | b |\n| - | - |\n| 1 | 2 |\n\nparagraph\n\n    - item');
+			expect(html).toContain('<blockquote');
+			expect(html).toContain('<table>');
+			expect(html).toContain('<li>item</li>');
+			expect(html).not.toContain('<pre>');
+		});
+		it('uses the same fence and indentation exclusions in the note TOC', () => {
+			const body = '~~~md\n# hidden tilde\n~~~\n\n    # hidden indent\n\n# Yes\n````md\n```\n# hidden short fence\n```\n````\n## Yes 2';
+			expect(noteHeadings(body)).toEqual(['Yes', 'Yes 2']);
+			const file = { path: 'A.md', name: 'A.md', content: body };
+			const note = cleanNote(file, createExportContext([file], DEFAULT_SETTINGS));
+			const html = formatForHtml([note], DEFAULT_SETTINGS, 'now');
+			expect(html).not.toMatch(/<a[^>]*>hidden/);
+			expect(html).not.toMatch(/<h[12][^>]*>hidden/);
+		});
+	});
+
 	it('noteHeadings ignores code fences', () => {
 		expect(noteHeadings('# A\n```\n# not a heading\n```\n## B')).toEqual(['A', 'B']);
 	});
@@ -704,6 +906,64 @@ describe('formatters and split export', () => {
 		expect(md).toContain('1. [Event 1](#event-1-0)');
 		expect(md).toContain('## 2. World <a id="world-1"></a>');
 		expect(md).toContain('Description with World');
+	});
+
+	describe('Markdown TOC labels (VE-012)', () => {
+		it.each([
+			['A]B', '[A\\]B](#ab-0)'],
+			['[Draft] Titre', '[\\[Draft\\] Titre](#draft-titre-0)'],
+			['C\\D', '[C\\\\D](#cd-0)'],
+			['E\\[F]', '[E\\\\\\[F\\]](#ef-0)'],
+		])('escapes %s as a valid link without changing the section title', (title, expected) => {
+			const file = { path: 'A.md', name: 'A.md', content: 'body' };
+			const base = cleanNote(file, createExportContext([file], DEFAULT_SETTINGS));
+			const text = formatForMarkdown([{ ...base, title }], DEFAULT_SETTINGS, 'now');
+			expect(text).toContain(expected);
+			const link = /^1\. \[((?:\\.|[^\]\\])*)\]\(#[\w-]+\)/m.exec(text);
+			expect(link?.[1]?.replace(/\\([\\[\]])/g, '$1')).toBe(title);
+			expect(text).toContain('## 1. ' + title + ' <a id="');
+		});
+		it('escapes source hints without changing anchor generation', () => {
+			const file = { path: 'A.md', name: 'A.md', content: 'body' };
+			const base = cleanNote(file, createExportContext([file], DEFAULT_SETTINGS));
+			const notes = ['A]B', '[Draft] Titre', 'C\\D'].map((title) => ({ ...base, title, path: 'N/[Draft]/A]B.md' }));
+			const text = formatForMarkdown(notes, DEFAULT_SETTINGS, 'now');
+			expect(text).toContain('[A\\]B](#ab-0)');
+			expect(text).toContain('[\\[Draft\\] Titre](#draft-titre-1)');
+			expect(text).toContain('[C\\\\D](#cd-2)');
+			expect(text).toContain('<small>*(N/\\[Draft\\]/A\\]B.md)*</small>');
+			expect(text).toContain('## 1. A]B <a id="ab-0"></a>');
+		});
+	});
+
+	describe('portable split destinations (VE-004)', () => {
+		const baseFile = { path: 'A.md', name: 'A.md', content: 'same' };
+		const baseNote = cleanNote(baseFile, createExportContext([baseFile], DEFAULT_SETTINGS));
+		const notes = (paths: string[]) => paths.map((path) => ({ ...baseNote, path, title: path }));
+		it('names both folders in a sanitization collision', () => {
+			expect(() => buildSplitFiles(notes(['A?B/x.md', 'A_B/y.md']), { ...DEFAULT_SETTINGS, splitOutputFolder: 'out' }))
+				.toThrow(/Two split outputs.*A\?B.*A_B/);
+		});
+		it('rejects md/canvas collisions even when their output bodies are identical', () => {
+			expect(() => buildSplitFiles(notes(['X.md', 'X.canvas']), { ...DEFAULT_SETTINGS, splitMode: 'individual-files', splitOutputFolder: 'out' }))
+				.toThrow(/Two split outputs.*X\.md.*X\.canvas/);
+		});
+		it('rejects case-only destination collisions for portability', () => {
+			expect(() => buildSplitFiles(notes(['A.md', 'a.md']), { ...DEFAULT_SETTINGS, splitMode: 'individual-files', splitOutputFolder: 'out' }))
+				.toThrow(/Two split outputs.*A\.md.*a\.md/);
+		});
+		it('sanitizes each generated segment, strips trailing dots/spaces and preserves legal ampersands', () => {
+			const outputs = buildSplitFiles(notes(['Bad?Dir. /Q&A?:*|"<>\u0001.md']), { ...DEFAULT_SETTINGS, splitMode: 'individual-files', splitOutputFolder: 'out' });
+			expect(outputs[0]?.path).toBe('out/Bad_Dir/Q&A________.md');
+			expect(outputs[0]?.path).not.toMatch(/[<>:"\\|?*\u0000-\u001f]/);
+		});
+		it.each(['CON.md', 'nul.extra.md', 'COM1.md', 'Lpt9.md'])('prefixes the reserved Windows segment %s', (path) => {
+			expect(buildSplitFiles(notes([path]), { ...DEFAULT_SETTINGS, splitMode: 'individual-files', splitOutputFolder: 'out' })[0]?.path).toBe('out/_' + path);
+		});
+		it('leaves the complete ordered ten-note safe corpus unchanged', () => {
+			const paths = ['A.md', 'B/C.md', ...Array.from({ length: 8 }, (_, i) => 'D/' + i + '.md')];
+			expect(buildSplitFiles(notes(paths), { ...DEFAULT_SETTINGS, splitMode: 'individual-files', splitOutputFolder: 'out' }).map((f) => f.path)).toEqual(paths.map((path) => 'out/' + path));
+		});
 	});
 
 	it('groups split files by first folder under the scope root', () => {
@@ -739,9 +999,247 @@ describe('formatters and split export', () => {
 		expect(outputs[0]?.path).toBe('out/Knowledge Base/80_History/Event1.md');
 		expect(outputs[0]?.content.startsWith('---\ntitle: Event 1')).toBe(true);
 	});
+
+	it.each(['flat-prefixed', 'flat-underscored', 'flat-leaf', 'nested'] as const)('retains fail-fast sanitization collisions for published style %s', (splitSubfolderStyle) => {
+		const files = [{ path: 'A?B/x.md', name: 'x.md', content: 'one' }, { path: 'A_B/y.md', name: 'y.md', content: 'two' }];
+		const settings = { ...DEFAULT_SETTINGS, splitSubfolderStyle, splitSubfolderDepth: 'all-recursive' as const, splitOutputFolder: 'out' };
+		const ctx = createExportContext(files, settings);
+		expect(() => buildSplitFiles(files.map((file) => cleanNote(file, ctx)), settings)).toThrow(/Two split outputs.*A\?B.*A_B/);
+	});
+
+	it('matches published subfolder rules across NFC/NFD without renaming output segments', () => {
+		const file = { path: 'Cafe\u0301/Re\u0301gion/Leaf/A.md', name: 'A.md', content: 'body' };
+		const settings = { ...DEFAULT_SETTINGS, splitGroupFolder: 'Café', splitSubfolders: ['Café/Région'], splitSubfolderStyle: 'nested' as const, splitOutputFolder: 'out' };
+		const ctx = createExportContext([file], settings);
+		expect(buildSplitFiles([cleanNote(file, ctx)], settings)[0]?.path).toBe('out/Re\u0301gion/Leaf.txt');
+	});
+
+	it('splits selected subfolders with flat-prefixed naming by default and supports chaining (direct 1-level mode)', () => {
+		const nestedFiles: VaultFile[] = [
+			{ path: 'Knowledge Base/01_World/Overview.md', name: 'Overview.md', content: 'world overview' },
+			{ path: 'Knowledge Base/01_World/Regions/North.md', name: 'North.md', content: 'north region' },
+			{ path: 'Knowledge Base/01_World/Regions/Cities/Capital.md', name: 'Capital.md', content: 'capital city' },
+			{ path: 'Knowledge Base/01_World/Factions/Guild.md', name: 'Guild.md', content: 'guild faction' },
+			{ path: 'Knowledge Base/80_History/Eras/Ancient.md', name: 'Ancient.md', content: 'ancient era' },
+		];
+		const settings = {
+			...DEFAULT_SETTINGS,
+			scopeRoot: 'Knowledge Base',
+			splitOutputFolder: 'out',
+			splitSubfolders: ['Knowledge Base/01_World'],
+			splitSubfolderDepth: 'direct' as const,
+		};
+		const ctx = createExportContext(nestedFiles, settings);
+		const notes = nestedFiles.map((f) => cleanNote(f, ctx));
+		const outputs = buildSplitFiles(notes, settings);
+
+		expect(outputs.map((o) => o.path).sort()).toEqual([
+			'out/01_World - Factions.txt',
+			'out/01_World - Regions.txt',
+			'out/01_World.txt',
+			'out/80_History.txt',
+		]);
+		expect(outputs.find((o) => o.path === 'out/01_World.txt')?.content).toContain('world overview');
+		expect(outputs.find((o) => o.path === 'out/01_World - Regions.txt')?.content).toContain('north region');
+		// In 1-level mode, Cities stays grouped inside Regions until 01_World/Regions is also selected
+		expect(outputs.find((o) => o.path === 'out/01_World - Regions.txt')?.content).toContain('capital city');
+		expect(outputs.find((o) => o.path === 'out/01_World - Factions.txt')?.content).toContain('guild faction');
+		expect(outputs.find((o) => o.path === 'out/80_History.txt')?.content).toContain('ancient era');
+
+		// Chaining a deeper subfolder splits that deeper level as well
+		const chainedSettings = {
+			...settings,
+			splitSubfolders: ['01_World', '01_World/Regions'],
+		};
+		const chainedOutputs = buildSplitFiles(notes, chainedSettings);
+		expect(chainedOutputs.map((o) => o.path).sort()).toEqual([
+			'out/01_World - Factions.txt',
+			'out/01_World - Regions - Cities.txt',
+			'out/01_World - Regions.txt',
+			'out/01_World.txt',
+			'out/80_History.txt',
+		]);
+		expect(chainedOutputs.find((o) => o.path === 'out/01_World - Regions - Cities.txt')?.content).toContain('capital city');
+	});
+
+	it('supports all subfolder naming styles (flat-prefixed, flat-leaf, flat-underscored, nested) and scope-wide depth modes', () => {
+		const nestedFiles: VaultFile[] = [
+			{ path: '01_World/Regions/North.md', name: 'North.md', content: 'north region' },
+			{ path: '01_World/Regions/Cities/Capital.md', name: 'Capital.md', content: 'capital city' },
+			{ path: '01_World/Regions/Cities/Districts/Market.md', name: 'Market.md', content: 'market district' },
+			{ path: '80_History/Eras/Ancient/Timeline.md', name: 'Timeline.md', content: 'timeline' },
+		];
+		const baseSettings = {
+			...DEFAULT_SETTINGS,
+			splitOutputFolder: 'out',
+			splitSubfolders: ['01_World'],
+			splitSubfolderDepth: 'recursive' as const,
+		};
+		const ctx = createExportContext(nestedFiles, baseSettings);
+		const notes = nestedFiles.map((f) => cleanNote(f, ctx));
+
+		// flat-leaf
+		const leafOutputs = buildSplitFiles(notes, { ...baseSettings, splitSubfolderStyle: 'flat-leaf' });
+		expect(leafOutputs.map((o) => o.path).sort()).toEqual([
+			'out/80_History.txt',
+			'out/Cities.txt',
+			'out/Districts.txt',
+			'out/Regions.txt',
+		]);
+
+		// flat-underscored
+		const underscoredOutputs = buildSplitFiles(notes, { ...baseSettings, splitSubfolderStyle: 'flat-underscored' });
+		expect(underscoredOutputs.map((o) => o.path).sort()).toEqual([
+			'out/01_World_Regions.txt',
+			'out/01_World_Regions_Cities.txt',
+			'out/01_World_Regions_Cities_Districts.txt',
+			'out/80_History.txt',
+		]);
+
+		// nested
+		const nestedOutputs = buildSplitFiles(notes, { ...baseSettings, splitSubfolderStyle: 'nested' });
+		expect(nestedOutputs.map((o) => o.path).sort()).toEqual([
+			'out/01_World/Regions.txt',
+			'out/01_World/Regions/Cities.txt',
+			'out/01_World/Regions/Cities/Districts.txt',
+			'out/80_History.txt',
+		]);
+
+		// all-two-levels across the entire scope without needing splitSubfolders
+		const twoLevelsOutputs = buildSplitFiles(notes, {
+			...DEFAULT_SETTINGS,
+			splitOutputFolder: 'out',
+			splitSubfolderDepth: 'all-two-levels',
+			splitSubfolderStyle: 'flat-prefixed',
+		});
+		expect(twoLevelsOutputs.map((o) => o.path).sort()).toEqual([
+			'out/01_World - Regions.txt',
+			'out/80_History - Eras.txt',
+		]);
+
+		// all-recursive across the entire scope
+		const allRecursiveOutputs = buildSplitFiles(notes, {
+			...DEFAULT_SETTINGS,
+			splitOutputFolder: 'out',
+			splitSubfolderDepth: 'all-recursive',
+			splitSubfolderStyle: 'flat-prefixed',
+		});
+		expect(allRecursiveOutputs.map((o) => o.path).sort()).toEqual([
+			'out/01_World - Regions - Cities - Districts.txt',
+			'out/01_World - Regions - Cities.txt',
+			'out/01_World - Regions.txt',
+			'out/80_History - Eras - Ancient.txt',
+		]);
+
+		// Per-folder override: 01_World/* (1-level) + 80_History/** (recursive)
+		const mixedSettings = {
+			...DEFAULT_SETTINGS,
+			splitOutputFolder: 'out',
+			splitSubfolderDepth: 'direct' as const,
+			splitSubfolderStyle: 'flat-leaf' as const,
+			splitSubfolders: ['01_World/*', '80_History/**'],
+		};
+		const mixedOutputs = buildSplitFiles(notes, mixedSettings);
+		expect(mixedOutputs.map((o) => o.path).sort()).toEqual([
+			'out/Ancient.txt',
+			'out/Regions.txt',
+		]);
+		expect(parseSubfolderSplitRule('Knowledge Base/01_World/**', 'Knowledge Base', 'direct')).toEqual({
+			path: '01_World',
+			mode: 'recursive',
+		});
+		expect(parseSubfolderSplitRule('01_World/*', '', 'recursive')).toEqual({
+			path: '01_World',
+			mode: 'direct',
+		});
+	});
+
+	it('disambiguates colliding leaf folder names only when two split groups share a leaf name in flat-leaf mode', () => {
+		const collidingFiles: VaultFile[] = [
+			{ path: 'Projects/Archive/old-spec.md', name: 'old-spec.md', content: 'project archive' },
+			{ path: 'Projects/Frontend/ui.md', name: 'ui.md', content: 'frontend ui' },
+			{ path: 'Notes/Archive/old-note.md', name: 'old-note.md', content: 'notes archive' },
+		];
+		const settings = {
+			...DEFAULT_SETTINGS,
+			splitOutputFolder: 'out',
+			splitSubfolders: ['Projects', 'Notes'],
+			splitSubfolderStyle: 'flat-leaf' as const,
+		};
+		const ctx = createExportContext(collidingFiles, settings);
+		const notes = collidingFiles.map((f) => cleanNote(f, ctx));
+		const outputs = buildSplitFiles(notes, settings);
+		expect(outputs.map((o) => o.path).sort()).toEqual([
+			'out/Frontend.txt',
+			'out/Notes - Archive.txt',
+			'out/Projects - Archive.txt',
+		]);
+	});
+
+	it('applies and detects split presets and builds live preview paths', () => {
+		expect(SPLIT_PRESETS.length).toBeGreaterThanOrEqual(7);
+		expect(detectSplitPreset(DEFAULT_SETTINGS)).toBe('top-level');
+
+		const s = { ...DEFAULT_SETTINGS, splitSubfolders: ['Projects'] };
+		expect(detectSplitPreset(s)).toBe('notebooklm-selected');
+
+		applySplitPreset(s, 'notebooklm-deep');
+		expect(s.splitSubfolderDepth).toBe('all-recursive');
+		expect(s.splitSubfolderStyle).toBe('flat-prefixed');
+		expect(detectSplitPreset(s)).toBe('notebooklm-deep');
+		expect(previewSplitFiles(s)).toContain('Vault export - split/Projects - SubfolderA - Deep.txt');
+
+		applySplitPreset(s, 'folder-tree');
+		expect(s.splitSubfolderStyle).toBe('nested');
+		expect(detectSplitPreset(s)).toBe('folder-tree');
+		expect(previewSplitFiles(s)).toContain('Vault export - split/Projects/SubfolderA/Deep.txt');
+
+		applySplitPreset(s, 'clean-leaf');
+		expect(s.splitSubfolderStyle).toBe('flat-leaf');
+		expect(detectSplitPreset(s)).toBe('clean-leaf');
+
+		applySplitPreset(s, 'top-level');
+		expect(s.splitSubfolders).toEqual([]);
+		expect(detectSplitPreset(s)).toBe('top-level');
+
+		applySplitPreset(s, 'markdown-mirror');
+		expect(s.splitMode).toBe('individual-files');
+		expect(detectSplitPreset(s)).toBe('markdown-mirror');
+		expect(previewSplitFiles(s)[0]).toMatch(/\.md$/);
+	});
 });
 
 describe('pipeline', () => {
+	describe('ignored built-in properties (VE-010)', () => {
+		const settings = { ...DEFAULT_SETTINGS, stripFrontmatter: false, ignoredProperties: [] };
+		const file = { path: 'A.md', name: 'A.md', content: '---\ncategory: Cat\norder: 1\nstatus: done\ntags: [alpha]\n---\nbody' };
+		const note = cleanNote(file, createExportContext([file], settings));
+		it.each([
+			['category', 'order', 'status', 'tags'],
+			['CATEGORY', 'Order', 'STATUS', 'Tags'],
+			['categories', 'ordre', 'statut', 'tag'],
+		])('hides all built-ins for keys %j', (...keys) => {
+			expect(visibleMetadata(note, { ...settings, ignoredProperties: keys })).toEqual([]);
+		});
+		it('keeps non-ignored custom metadata', () => {
+			const extra = { ...note, metadata: { ...note.metadata, custom: { Auteur: 'Alice' } } };
+			expect(visibleMetadata(extra, { ...settings, ignoredProperties: ['category', 'order', 'status', 'tags'] })).toEqual([['Auteur', 'Alice']]);
+		});
+		it('preserves the exact default metadata order and values', () => {
+			expect(visibleMetadata(note, settings)).toEqual([['Category', 'Cat'], ['Order', '1'], ['Status', 'done'], ['Tags', 'alpha']]);
+		});
+		it('omits built-in labels from all three consolidated formats', () => {
+			const ignored = { ...settings, ignoredProperties: ['category', 'order', 'status', 'tags'] };
+			for (const output of [formatForNotebookLM([note], ignored, 'now'), formatForMarkdown([note], ignored, 'now'), formatForHtml([note], ignored, 'now')]) {
+				for (const label of ['Category', 'Order', 'Status', 'Tags']) expect(output).not.toContain(label);
+			}
+		});
+		it('keeps split frontmatter verbatim even when its keys are ignored', () => {
+			const split = buildSplitFiles([note], { ...settings, splitMode: 'individual-files', ignoredProperties: ['category', 'order', 'status', 'tags'] });
+			expect(split[0]?.content).toBe('---\ncategory: Cat\norder: 1\nstatus: done\ntags: [alpha]\n---\n\nbody');
+		});
+	});
+
 	it('parses frontmatter exactly once per run (shared ParsedFile list)', () => {
 		const files: VaultFile[] = [
 			{ path: 'A.md', name: 'A.md', content: '---\ntitle: A\n---\nbody' },
@@ -803,6 +1301,29 @@ describe('settings', () => {
 		expect(DEFAULT_SETTINGS.htmlTheme).toBe('system');
 		expect(DEFAULT_SETTINGS.htmlAccentColor).toMatch(/^#[0-9a-f]{6}$/i);
 		expect(DEFAULT_SETTINGS.htmlShowToc).toBe(true);
+		expect(DEFAULT_SETTINGS.splitSubfolders).toEqual([]);
+		expect(DEFAULT_SETTINGS.splitSubfolderDepth).toBe('direct');
+		expect(DEFAULT_SETTINGS.splitSubfolderStyle).toBe('flat-prefixed');
+	});
+
+	it('normalizes splitSubfolders, splitSubfolderDepth, and splitSubfolderStyle', () => {
+		const merged = mergeSettings({
+			splitSubfolders: [' Projects ', '', 'Projects', 'Notes/**'],
+			splitSubfolderDepth: 'all-two-levels',
+			splitSubfolderStyle: 'nested',
+		});
+		expect(merged.splitSubfolders).toEqual(['Projects', 'Notes/**']);
+		expect(merged.splitSubfolderDepth).toBe('all-two-levels');
+		expect(merged.splitSubfolderStyle).toBe('nested');
+
+		const invalid = mergeSettings({
+			splitSubfolders: 'not-an-array',
+			splitSubfolderDepth: 'infinite',
+			splitSubfolderStyle: 'random',
+		});
+		expect(invalid.splitSubfolders).toEqual([]);
+		expect(invalid.splitSubfolderDepth).toBe('direct');
+		expect(invalid.splitSubfolderStyle).toBe('flat-prefixed');
 	});
 
 	it('defaults to writing inside the vault and round-trips an external folder', () => {
@@ -962,6 +1483,20 @@ describe('output target (external folder)', () => {
 		expect(reservedOutputPaths(outside, { vaultBasePath: 'C:\\Vault' })).toEqual([]);
 		// Without a known vault base path, absolute locations cannot be mapped.
 		expect(reservedOutputPaths(inside)).toEqual([]);
+	});
+
+	it('reserves resolved destinations without re-rooting them (VE-002)', () => {
+		const resolved = resolveOutputSettings({
+			...DEFAULT_SETTINGS, useExternalOutputFolder: true,
+			externalOutputFolder: 'C:/Vault/Exports', splitOutputFolder: '',
+		});
+		const options = { vaultBasePath: 'C:/Vault', alreadyResolved: true };
+		const reserved = reservedOutputPaths(resolved, options);
+		expect(reserved).toContain('Exports');
+		expect(reserved).not.toContain('Exports/Exports');
+		expect(reserved).toContain('Exports/Vault export.md');
+		expect(reservedOutputPaths(resolved, options)).toEqual(reserved);
+		expect(resolved.splitOutputFolder).toBe('C:/Vault/Exports');
 	});
 
 	it('excludes a vault-internal external folder from the next export', () => {

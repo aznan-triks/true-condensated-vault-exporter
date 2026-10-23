@@ -21,6 +21,7 @@ export interface FinishInfo {
 }
 
 export class ProgressPanel {
+	private static current: ProgressPanel | null = null;
 	private readonly root: HTMLElement;
 	private readonly statusEl: HTMLElement;
 	private readonly barEl: HTMLElement;
@@ -34,9 +35,11 @@ export class ProgressPanel {
 	private elapsedTimer: number | null = null;
 	private readonly startedAt = Date.now();
 	private finished = false;
+	private destroyed = false;
 
 	constructor(private readonly options: PanelOptions) {
-		document.querySelectorAll('.ve-panel').forEach((el) => el.remove());
+		ProgressPanel.current?.destroy();
+		ProgressPanel.current = this;
 
 		this.root = document.body.createDiv({ cls: 've-panel' });
 
@@ -79,6 +82,7 @@ export class ProgressPanel {
 	}
 
 	update(current: number, total: number, label?: string, file?: string): void {
+		if (this.destroyed) return;
 		const ratio = total > 0 ? Math.min(1, current / total) : 0;
 		this.barEl.style.width = (ratio * 100) + '%';
 		this.progressEl.setText(current + ' / ' + total + (label ? ' · ' + label : ''));
@@ -87,10 +91,12 @@ export class ProgressPanel {
 	}
 
 	private updateElapsed(durationMs = Date.now() - this.startedAt): void {
+		if (this.destroyed) return;
 		this.elapsedEl.setText('Elapsed ' + formatDuration(durationMs));
 	}
 
 	log(message: string, isError = false): void {
+		if (this.destroyed) return;
 		const row = document.createElement('div');
 		row.className = 've-panel__row' + (isError ? ' ve-panel__row--error' : '');
 		const icon = document.createElement('span');
@@ -110,6 +116,7 @@ export class ProgressPanel {
 	}
 
 	finish(outcome: 'success' | 'cancelled' | 'error', summary: string, info?: FinishInfo): void {
+		if (this.destroyed) return;
 		this.finished = true;
 		this.cancelBtn.hide();
 		const durationMs = info?.durationMs ?? Date.now() - this.startedAt;
@@ -148,7 +155,14 @@ export class ProgressPanel {
 		}
 	}
 
+	static destroyCurrent(): void {
+		ProgressPanel.current?.destroy();
+	}
+
 	destroy(): void {
+		if (this.destroyed) return;
+		this.destroyed = true;
+		if (ProgressPanel.current === this) ProgressPanel.current = null;
 		if (this.timer !== null) {
 			window.clearTimeout(this.timer);
 			this.timer = null;

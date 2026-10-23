@@ -41,6 +41,16 @@ export interface ParsedFile {
 export type WikilinkFormat = 'clean-text' | 'keep-wikilink' | 'markdown' | 'canonical-alias';
 export type HtmlTheme = 'system' | 'light' | 'dark';
 export type HtmlFont = 'system' | 'serif' | 'monospace';
+export type SplitSubfolderDepth = 'direct' | 'recursive' | 'all-two-levels' | 'all-recursive';
+export type SplitSubfolderStyle = 'flat-prefixed' | 'flat-leaf' | 'flat-underscored' | 'nested';
+export type SplitPresetId =
+	| 'top-level'
+	| 'notebooklm-selected'
+	| 'notebooklm-two-levels'
+	| 'notebooklm-deep'
+	| 'clean-leaf'
+	| 'folder-tree'
+	| 'markdown-mirror';
 export type RememberedExportTarget = 'all' | 'notebooklm' | 'html' | 'markdown' | 'split' | 'zip';
 /** Supported successful-panel auto-close delays in seconds; zero keeps it open. */
 export const PROGRESS_PANEL_AUTO_CLOSE_OPTIONS = [0, 5, 8, 15, 30, 60] as const;
@@ -82,6 +92,12 @@ export interface ExporterSettings {
 	splitMode: 'folder-grouped' | 'individual-files';
 	/** Folder whose direct subfolders become split groups (empty = scope root) */
 	splitGroupFolder: string;
+	/** Subfolders that also split their own subfolders into one .txt file per folder */
+	splitSubfolders: string[];
+	/** Default depth when splitting folders listed in `splitSubfolders` (or across the scope) */
+	splitSubfolderDepth: SplitSubfolderDepth;
+	/** File naming and directory structure for subfolder split files */
+	splitSubfolderStyle: SplitSubfolderStyle;
 	/** Destination folder for split files (vault-relative or absolute) */
 	splitOutputFolder: string;
 	/** Whether to remove YAML frontmatter during export */
@@ -90,7 +106,7 @@ export interface ExporterSettings {
 	renderDataview: boolean;
 	/** Target format for wikilinks */
 	wikilinkFormat: WikilinkFormat;
-	/** Frontmatter property keys to ignore/strip during export */
+	/** Properties hidden in consolidated metadata; individual split frontmatter is not filtered. */
 	ignoredProperties: string[];
 	/** Whether to include Obsidian .canvas files in exports */
 	includeCanvas: boolean;
@@ -145,6 +161,9 @@ export const DEFAULT_SETTINGS: ExporterSettings = {
 	zipOutputPath: 'Vault export.zip',
 	splitMode: 'folder-grouped',
 	splitGroupFolder: '',
+	splitSubfolders: [],
+	splitSubfolderDepth: 'direct',
+	splitSubfolderStyle: 'flat-prefixed',
 	splitOutputFolder: 'Vault export - split',
 	stripFrontmatter: true,
 	renderDataview: true,
@@ -181,7 +200,7 @@ const STRING_SETTING_KEYS = [
 	'htmlFooterText',
 ] as const satisfies readonly (keyof ExporterSettings)[];
 
-const ARRAY_SETTING_KEYS = ['excludedFolders', 'excludedFiles', 'excludedPrefixes', 'ignoredProperties'] as const;
+const ARRAY_SETTING_KEYS = ['excludedFolders', 'excludedFiles', 'excludedPrefixes', 'ignoredProperties', 'splitSubfolders'] as const;
 const REMEMBERED_EXPORT_TARGETS: readonly RememberedExportTarget[] = ['all', 'notebooklm', 'html', 'markdown', 'split', 'zip'];
 
 /** Validates saved data and drops unknown or malformed settings. */
@@ -192,6 +211,7 @@ export function mergeSettings(loaded: unknown): ExporterSettings {
 		excludedFiles: [...DEFAULT_SETTINGS.excludedFiles],
 		excludedPrefixes: [...DEFAULT_SETTINGS.excludedPrefixes],
 		ignoredProperties: [...DEFAULT_SETTINGS.ignoredProperties],
+		splitSubfolders: [...DEFAULT_SETTINGS.splitSubfolders],
 	};
 	if (!loaded || typeof loaded !== 'object' || Array.isArray(loaded)) {
 		return result;
@@ -251,6 +271,22 @@ export function mergeSettings(loaded: unknown): ExporterSettings {
 		result.splitMode = source.splitMode;
 	}
 	if (
+		source.splitSubfolderDepth === 'direct' ||
+		source.splitSubfolderDepth === 'recursive' ||
+		source.splitSubfolderDepth === 'all-two-levels' ||
+		source.splitSubfolderDepth === 'all-recursive'
+	) {
+		result.splitSubfolderDepth = source.splitSubfolderDepth;
+	}
+	if (
+		source.splitSubfolderStyle === 'flat-prefixed' ||
+		source.splitSubfolderStyle === 'flat-leaf' ||
+		source.splitSubfolderStyle === 'flat-underscored' ||
+		source.splitSubfolderStyle === 'nested'
+	) {
+		result.splitSubfolderStyle = source.splitSubfolderStyle;
+	}
+	if (
 		source.wikilinkFormat === 'clean-text' ||
 		source.wikilinkFormat === 'keep-wikilink' ||
 		source.wikilinkFormat === 'markdown' ||
@@ -289,6 +325,9 @@ export type ProgressCallback = (progress: ExportProgress) => void;
 
 /** What the export features need from the host (implemented by the Obsidian gateway, faked in tests). */
 export interface ExportGateway {
+	/** Absolute vault root, used to compare absolute outputs with source notes. */
+	getVaultBasePath?(): string | null;
+	/** Reads matching sources; output paths in settings must already be resolved for this run. */
 	loadVaultFiles(
 		settings: ExporterSettings,
 		signal?: AbortSignal,

@@ -114,3 +114,16 @@ Test d'annulation existant (`features.test.ts:230-260`) doit rester vert.
 
 - Changer le type d'erreur peut casser un appelant qui teste `error.constructor === Error` : aucun dans `src/`, et `instanceof Error` reste vrai.
 - Le durcissement du smoke test peut révéler un vrai défaut du chemin d'annulation UI (c'est le but) ; s'il échoue, traiter le défaut, ne pas assouplir l'assertion.
+
+## Journal d'exécution
+
+### 2026-10-21 — `60cfdca`; documentation follow-up
+
+- Baseline pull/check PASS (177 tests / 101 smoke); read the full plan, both write paths, snapshot, command handlers, panel finish contract and smoke cancellation path.
+- Tests first: **3/3 feature regressions failed** on bare errors lacking partialResult/failedPath. They cover a failed third plain write (exact successful paths/UTF-8 bytes), failed ZIP before any output, and successful ZIP followed by a failed plain write. Smoke first failed three assertions: missing completed-file count in panel/Notice and empty history despite two files written.
+- Added exported `ExportFailedError` with partialResult, failedPath and original cause. A small local write wrapper covers only the two gateway calls; ZIP construction stays outside it. Cancellation errors are not reclassified. Successful writes are recorded only after their awaited call completes. No output is deleted or restored.
+- Command error handling now keeps the partial result, feeds counts/bytes/skipped/duration into the existing panel contract and history, and names completed files and failed path in the panel/Notice. No ProgressPanel signature change was needed.
+- Hardened cancellation smoke with an actual Cancel-button click immediately after the first successful gateway write; it now **requires Cancelled, never Done**, and checks the one-file summary/history. This avoids the old timing race rather than weakening the assertion. Expected injected error logging is checked and only that expected entry is removed from console hygiene checks.
+- `npm run check` PASS: **180/180 tests, 107/107 smoke** (six net new assertions), strict typecheck/build. All existing cancellation tests remain green; partial results match completed writes exactly.
+
+- Implementation `60cfdca` pushed; tracker marked `fait`. All acceptance criteria met; remaining: none.

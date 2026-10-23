@@ -92,3 +92,14 @@ Second test : mutation du **tableau** `ignoredProperties` en place (push) → la
 
 - Un futur appelant qui comptait sur l'identité de l'objet serait cassé : aucun aujourd'hui, et le contrat devient plus strict (bon sens).
 - `structuredClone` échoue sur des valeurs non clonables (fonctions, `Symbol`) : `ExporterSettings` ne contient que des types primitifs et des tableaux de chaînes. Un test de chargement des settings suffit à le garantir.
+
+## Journal d'exécution
+
+### 2026-10-21 — `85857ae`; documentation follow-up
+
+- Baseline pull/check PASS (173 tests / 101 smoke); read the full plan, settings type, resolver, context/cleaner and formatter/UI read/write sites. No settings-object identity dependency found in source.
+- Added four tests first: all **4 failed** (mid-run output/title/link settings changed, pushed ignored property hid metadata, raw object and arrays were shared with the gateway, including external mode).
+- One-line fix: `structuredClone(resolveOutputSettings(rawSettings))` at the single run entry point. No freezing, JSON round-trip, resolver identity change or UI locking. Snapshot is taken before any progress callback or async read.
+- Tests now prove 12 links use the initial Markdown mode uniformly, original title/destination survive callback mutation, six metadata rows survive an in-place array push, and raw settings remain equal while all relevant arrays are detached in both external modes. `npm run check` PASS: **177/177 tests, 101/101 smoke**, typecheck/build. No persistence change (VE-017 remains separate).
+
+- Implementation `85857ae` pushed; tracker marked `fait`. All acceptance criteria met; remaining: none.

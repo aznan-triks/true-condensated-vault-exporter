@@ -14,26 +14,30 @@ export interface WikilinkMatch {
 	displayName: string;
 }
 
-const WIKILINK_REGEX = /!?\[\[([^\]|#]+)(?:#([^\]|]+))?(?:\|([^\]]+))?\]\]/g;
+const WIKILINK_REGEX = /!?\[\[([^\]|#]*)(?:#([^\]|]*))?(?:\|([^\]]*))?\]\]/g;
+
+/**
+ * Shared syntax/display rules for previews and exported links. One trailing
+ * backslash is the table-pipe escape (a literal trailing backslash is ambiguous).
+ * Embed dimensions are intentionally omitted: standard Markdown has no width syntax.
+ */
+function parseWikilink(raw: string, targetGroup?: string, headingGroup?: string, aliasGroup?: string): WikilinkMatch | null {
+	const target = (targetGroup ?? '').trim().replace(/\\$/, '');
+	const heading = headingGroup?.trim().replace(/\\$/, '');
+	if (!target && !heading) return null;
+	const capturedAlias = aliasGroup?.trim();
+	const alias = raw.startsWith('!') && /^\d+(?:x\d+)?$/.test(capturedAlias ?? '') ? undefined : capturedAlias;
+	const targetBasename = target ? target.split('/').pop() ?? target : heading ?? '';
+	return { raw, target, heading, alias, displayName: alias || targetBasename };
+}
 
 export function extractWikilinks(content: string): WikilinkMatch[] {
 	const matches: WikilinkMatch[] = [];
 	let match: RegExpExecArray | null;
 	const regex = new RegExp(WIKILINK_REGEX.source, 'g');
 	while ((match = regex.exec(content)) !== null) {
-		const target = (match[1] ?? '').trim();
-		const heading = match[2]?.trim();
-		const alias = match[3]?.trim();
-		const targetBasename = target.split('/').pop() ?? target;
-		const displayName = alias || targetBasename;
-
-		matches.push({
-			raw: match[0],
-			target,
-			heading,
-			alias,
-			displayName,
-		});
+		const parsed = parseWikilink(match[0], match[1], match[2], match[3]);
+		if (parsed) matches.push(parsed);
 	}
 	return matches;
 }
@@ -46,7 +50,7 @@ export function buildLinkResolver(files: { path: string; name: string }[]): (tar
 	const byPath = new Map<string, string>();
 	const byBasename = new Map<string, string>();
 	const normalizeTarget = (value: string): string =>
-		value.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '').replace(/\.(md|canvas)$/i, '').toLowerCase();
+		value.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '').replace(/\.(md|canvas)$/i, '').toLowerCase().normalize('NFC');
 
 	for (const file of files) {
 		const noExt = normalizeTarget(file.path);
@@ -65,7 +69,7 @@ export function buildLinkResolver(files: { path: string; name: string }[]): (tar
 	};
 }
 
-function escapeMarkdownLabel(label: string): string {
+export function escapeMarkdownLabel(label: string): string {
 	return label.replace(/\\/g, '\\\\').replace(/\[/g, '\\[').replace(/\]/g, '\\]');
 }
 
@@ -101,13 +105,12 @@ export function transformWikilinks(
 		return content;
 	}
 
-	return content.replace(WIKILINK_REGEX, (raw, targetGroup, headingGroup, aliasGroup) => {
+	return content.replace(WIKILINK_REGEX, (raw: string, targetGroup: string, headingGroup: string | undefined, aliasGroup: string | undefined) => {
+		const parsed = parseWikilink(raw, targetGroup, headingGroup, aliasGroup);
+		if (!parsed) return raw;
+		const { target, heading, alias, displayName } = parsed;
 		const isEmbed = raw.startsWith('!');
-		const target = (targetGroup ?? '').trim();
-		const heading = headingGroup?.trim();
-		const alias = aliasGroup?.trim();
-		const targetBasename = target.split('/').pop() ?? target;
-		const displayName = alias || targetBasename;
+		const targetBasename = target ? target.split('/').pop() ?? target : heading ?? '';
 
 		if (format === 'clean-text') {
 			// Embeds keep their display text: dropping them would silently
@@ -123,15 +126,16 @@ export function transformWikilinks(
 		}
 
 		if (format === 'markdown') {
-			const resolved = resolveLink ? resolveLink(target) : target;
+			const resolved = target && resolveLink ? resolveLink(target) : target;
 			const destination = encodeMarkdownPath(resolved || target);
+			const anchor = heading ? `#${encodeURIComponent(heading.toLowerCase().trim().replace(/\s+/g, '-'))}` : '';
+			if (!target) return `[${escapeMarkdownLabel(displayName)}](${anchor})`;
 			if (isEmbed) {
 				if (!isAttachmentTarget(resolved || target)) {
 					return `[${escapeMarkdownLabel(displayName)}](${destination})`;
 				}
 				return `![${escapeMarkdownLabel(displayName)}](${destination})`;
 			}
-			const anchor = heading ? `#${encodeURIComponent(heading.toLowerCase().trim().replace(/\s+/g, '-'))}` : '';
 			return `[${escapeMarkdownLabel(displayName)}](${destination}${anchor})`;
 		}
 

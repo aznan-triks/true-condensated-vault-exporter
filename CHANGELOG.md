@@ -1,5 +1,43 @@
 # Changelog
 
+## Unreleased
+
+## [2.2.1] - 2026-10-23
+
+### Fixed
+- Preserve the published v2.2.0 split depth, naming, preset, preview and tabbed-settings features while integrating the technical fixes below.
+- Settings text edits now save after a 300 ms pause, with close/unload flushes and visible save-failure feedback. Live settings update immediately; discrete controls remain immediate. Settings/history writes use ordered immutable snapshots instead of overlapping writes.
+- Recent history retains five runs with at most 20 output paths each, while preserving exact file counts and byte totals, including migrated legacy entries. The sidebar still reveals the first output; complete export/partial-failure results and exported files are not truncated.
+- Dataview now executes only closed top-level query fences. Queries shown inside Markdown/tilde code examples remain literal, while valid long backtick query fences render normally. Inline, unterminated, unsupported and DataviewJS examples retain their contents; literal mixed/CRLF line endings are preserved by block classification.
+- The release workflow runs the complete check on the tagged commit under Node 22 before publication. Existing install assets now fail explicitly unless a manual run opts into overwrite; missing assets can still be attached without touching unrelated files.
+- Replacing or unloading an export progress panel now releases its elapsed/auto-close timers and DOM. Late progress/completion callbacks on destroyed panels do nothing; failed/cancelled panels retain their existing visible-until-closed behavior.
+- Exports render outputs on demand, write plain files before the ZIP, and reuse compressed records instead of re-rendering selected outputs for the archive, reducing simultaneous uncompressed copies. Files and archive contents are unchanged. Failures during later ZIP construction/write retain exact completed-file information; completed outputs are never rolled back. Whole archive ArrayBuffers are reused at the vault boundary, while subviews/shared buffers remain safely copied. The large-vault time target is met in the harness, but the peak-memory target remains unmet; further VE-013 memory work is explicitly deferred by user decision.
+- HTML exports recognize tilde and long fences, require matching fence markers/lengths, and render four-space/tab-indented code without turning it into headings. Code headings are also excluded from note navigation. Language-less blocks no longer emit an empty language class; existing list/table/quote rendering is retained.
+- Split filenames now sanitize Windows-forbidden/control characters and trailing dots/spaces in generated segments, and prefix reserved device names such as CON. Ambiguous split destinations fail before any output is written, naming both source notes/folders and the target—including case-only or equal-content collisions. Rename a source or choose another split mode; no automatic numbered renaming is performed.
+- Consolidated Markdown escapes brackets and backslashes in table-of-contents labels and source hints, so special-character titles keep valid links. Section titles and existing anchor generation remain unchanged.
+- Ignored Frontmatter Properties now hides Category, Order, Status and Tags as well as custom metadata in consolidated exports, including case-insensitive/common legacy aliases. With no matching ignored property the metadata is unchanged. The setting now explicitly explains that individual split files preserve raw frontmatter unless Strip Frontmatter is enabled.
+- Failed writes now report the failing path and the exact files/bytes already written, including ZIP output. The progress panel, notification and history retain that partial result. Completed files are deliberately kept—there is no automatic deletion or rollback.
+- Each export now uses a deep settings snapshot, so editing settings or list properties during a run cannot mix rendering rules or redirect that run’s destinations. Saved/live settings remain editable and are not modified by the export.
+- Dataview keeps `WITHOUT ID` inside quoted literals, folder names and column labels unchanged. Unsupported link/function/union sources now retain the original query block instead of showing a misleading empty result. Source names containing syntax such as parentheses must be quoted; `FROM ""` remains unsupported and visible.
+- Path filters and wikilink resolution now compare canonically equivalent NFC/NFD Unicode names, preventing missed accent-containing scopes, exclusions and reserved outputs. Original disk names and link destinations are preserved. Distinct Linux names that differ only in Unicode composition intentionally share the same comparison key.
+- Wikilinks now handle current-note anchors, empty heading/alias suffixes, and escaped table pipes consistently in extraction and export. Resized embeds display the attachment name rather than numeric dimensions; standard Markdown output intentionally omits those dimensions. Empty or malformed links are preserved.
+- Split exports now index output ancestors instead of comparing every pair of paths, and append grouped notes without copying each group on every note. Output order and overlap errors are preserved. Writing yields to the UI in batches using the existing yield setting, while cancellation is checked between every file. Cancellation snapshots are built only when needed, avoiding growing copies after every file; the measured 16,000-note split run now meets the <2s gate in the Node harness.
+- External split destinations inside the vault are now reserved exactly as resolved for the export, including a blank split destination. Repeated runs no longer re-read their own mirrors, and the sidebar preview uses the same exclusions. Existing nested exports are left untouched; no files are deleted automatically.
+- Exports now reject any destination that would overwrite a loaded source note, before writing any file or building the ZIP. The error names both paths, including absolute destinations inside the vault. Case-only differences are rejected for portable safety, even on case-sensitive systems. Choose a distinct output folder or file name instead.
+
+## [2.2.0] - 2026-10-07
+
+### Added
+- **Split Subfolders, Naming Styles, Depth Modes & Presets.** Folder-grouped split exports can now produce one `.txt` file per subfolder as well:
+  - **Split Subfolder Naming (`splitSubfolderStyle`):** choose between *Flat with parent prefix* (`Parent - Subfolder.txt`, default and recommended for NotebookLM), *Flat with subfolder name only* (`Subfolder.txt`, with automatic disambiguation on collision), *Flat with underscore path* (`Parent_Subfolder.txt`), and *Mirrored subfolder tree* (`Parent/Subfolder.txt`).
+  - **Split Subfolder Depth (`splitSubfolderDepth`) & per-folder overrides:** choose 1-level direct subfolders or recursive nested subfolders for selected folders in `Split Subfolders`, or enable 2-level or full recursive splitting across the entire scope automatically. Each folder in `Split Subfolders` also has a button to cycle between Default, `1 level (/*)`, and `Recursive (/**)`.
+  - **Split Presets (`SPLIT_PRESETS`) & Live Output Preview:** 7 one-click presets in both Settings and the Sidebar (*Top-level only*, *Selected subfolders (NotebookLM)*, *All 2 levels (flat)*, *All subfolders (flat)*, *Short names*, *Folder tree*, and *1 .md per note*), quick-add folder buttons (*Quick add folder* and *+ All parent folders*), and a live preview of the resulting split file paths.
+
+## [2.1.1] - 2026-10-05
+
+### Added
+- **Tabbed settings navigation.** Vault Exporter settings are organized into focused categories, with a global search that lists matching controls. Clicking a result switches to the right category, scrolls to the setting, focuses its control, and briefly highlights it. Category tabs also support keyboard navigation.
+
 ## [2.1.0] - 2026-10-05
 
 ### Added

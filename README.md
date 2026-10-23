@@ -30,6 +30,8 @@ An Obsidian desktop plugin for turning a vault, folder, or tagged subset into fi
 
 The sidebar also shows a scope preview and the five most recent runs, including each run’s duration. It remembers your selected export targets by default; turn this off in **Settings → General** to start with all targets instead. Use a history row’s folder button to reveal its first output, or clear the history without deleting exported files. When a tag filter is active, the preview is path-based and the sidebar says so; Canvas files are not included in tag-scoped exports. The sidebar and progress panel adapt to narrower and shorter windows, with larger touch targets.
 
+History keeps exact file counts and byte totals, plus the first 20 output paths per run for display/reveal, rather than retaining every path. This never deletes or truncates exported files.
+
 ### Scope and content
 
 Use **Scope Root** to limit exports to a vault folder and **Scope Tag** to include notes with a matching frontmatter or inline tag. Excluded folders, files, and folder prefixes apply to both. Previous exporter outputs are automatically excluded, so repeat runs do not ingest their own files.
@@ -50,19 +52,23 @@ Then reload Obsidian and enable **Vault Exporter** in **Settings → Community p
 
 ## Settings worth knowing
 
-The settings page is grouped and searchable: type a setting name or description to narrow the list.
+The settings page uses searchable category tabs: search by name or description, then jump to a result.
+
+Text edits take effect in memory immediately and are saved after a 300 ms pause. Leaving the settings tab or unloading the plugin requests a flush; discrete controls save immediately. A forced shutdown before a pending write completes can still lose the last unsaved edit.
 
 - **Scope Root / Scope Tag** and exclusion lists control what is read.
 - Each consolidated format, the ZIP, and split files have configurable output paths. Use vault-relative paths or absolute paths on desktop; a blank split destination means the vault root.
 - **External Output Folder** redirects every output outside the vault. Turn it on, pick an absolute folder with the system folder picker, and all consolidated files, ZIP bundles, and split files are written there instead — relative paths keep their subfolders, absolute paths keep only their final name. The section shows where exports currently go, and the sidebar footer and scope preview both link to these settings. Outputs written back inside the vault (for example when the external folder is a vault subfolder) are still protected from re-export.
-- Split mode chooses folder-grouped text files or a one-to-one Markdown mirror.
-- Markdown-processing settings control frontmatter, Dataview, Canvas, wikilinks, and ignored properties.
+- Split mode chooses folder-grouped text files or a one-to-one Markdown mirror. Published v2.2.0 subfolder selection, direct/recursive depth, flat or nested naming styles, presets and live path previews remain available in Settings and the sidebar.
+- Markdown-processing settings control frontmatter, Dataview, Canvas, wikilinks, and ignored properties. **Ignored Frontmatter Properties** hides built-in and custom fields in consolidated metadata (case-insensitive, including common aliases). Individual split files keep the original frontmatter unless **Strip Frontmatter** is enabled; ignored properties do not filter that raw copy.
 - **Export Feedback & Behavior** lets you keep successful progress panels open or choose their auto-close delay. Cancelled and failed panels remain visible for review. You can also reveal the first output automatically in the desktop file manager.
 - **HTML Personalization** lets you choose system/light/dark appearance, accent color, typography, reading width, navigation/search, source paths, metadata badges, and footer attribution. A live preview reflects theme, accent, typography, and width changes. These choices only affect the standalone HTML export. **Advanced** still includes custom HTML CSS and UI yield frequency.
 
 Markdown links point to vault-root-relative paths, not paths relative to each exported file. Consolidated Markdown and HTML work best at the vault root; links may need adjustment for outputs saved elsewhere, especially split Markdown mirrors. Unreadable notes are skipped and reported. Files already written are kept if an export is cancelled.
 
 ## Development
+
+The **Release** workflow checks the tagged commit with `npm run check` on Node 22 before building/publishing assets. Existing `main.js`, `manifest.json` or `styles.css` assets cause an explicit failure by default. Reattaching/replacing them requires a manual workflow run for the tag with **overwrite** set to `true`; unrelated assets are left alone.
 
 ```bash
 npm ci

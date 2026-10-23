@@ -91,3 +91,15 @@ Dans `tests/core.test.ts` (section split) :
 
 - Deux notes qui ne différaient que par `.canvas`/`.md` ne peuvent plus être exportées ensemble en mode individuel : c'est le prix de l'absence de perte silencieuse ; l'utilisateur peut changer de mode ou renommer.
 - Le préfixage `_CON` change un nom de fichier rare ; documenté dans le message de release.
+
+## Journal d'exécution
+
+### 2026-10-21 — `82f8652`; documentation follow-up
+
+- Baseline pull/check PASS (192 tests / 107 smoke); read full plan, both split naming branches, inter-format guard and clean-export command (unchanged).
+- Tests first: **10 failed / 1 passed**. Failures reproduce missing source-aware collisions in grouped/individual/case-only cases (including identical bodies), illegal/control/trailing characters, reserved device names, and opaque run-level errors. A safe ten-note ordered corpus already passed.
+- Added local segment sanitization for both modes and a destination map keyed by portable case-insensitive paths. Collisions always fail before returning split outputs, with both quoted source notes/folders and the target, even if bodies match; no numbered automatic renaming. Reserved CON/PRN/AUX/NUL/COM1–9/LPT1–9 stems are prefixed. Empty sanitized segments use `_`. Original Unicode and configured destination roots are not rewritten.
+- Clarified two inconsistent examples by following the ordered action steps: illegal generated characters are **sanitized**, not rejected (the acceptance sentence saying all three examples throw conflicts with step 1/tests); `&` is legal and retained, so `Q&A?.md → Q&A_.md`. Actual collisions still reject. Group labels use readable `folder "name"` formatting rather than nested quote pairs.
+- All **11 tests pass**; run-level fixtures assert zero text/binary writes and both source names. Existing inter-format safety/order/NFD tests remain unchanged and green. `npm run check` PASS: **203/203 tests, 107/107 smoke**, typecheck/build. Behavior intentionally stricter for case-only/equal-body collisions; documented in changelog.
+
+- Implementation `82f8652` pushed; tracker marked `fait`. All acceptance criteria met; remaining: none.

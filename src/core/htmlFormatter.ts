@@ -89,6 +89,38 @@ function closeBlock(out: string[], kind: 'list' | 'table' | 'quote', listTag = '
 	else if (kind === 'quote') out.push('</blockquote>');
 }
 
+interface HtmlFence {
+	closer: RegExp;
+	language: string;
+}
+
+// HTML block/heading scans share these rules. The prose cleaner has a separate
+// scanner: do not reuse its segmentation here (it does not model indented code).
+function openHtmlFence(line: string): HtmlFence | null {
+	const match = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
+	const marker = match?.[1];
+	return marker ? {
+		closer: new RegExp('^ {0,3}' + marker[0] + '{' + marker.length + ',}[ \\t]*$'),
+		language: (match[2] ?? '').trim(),
+	} : null;
+}
+
+function startsIndentedCode(lines: string[], index: number): boolean {
+	const line = lines[index] ?? '';
+	return (index === 0 || !(lines[index - 1] ?? '').trim()) && !!line.trim()
+		&& /^(?: {4}|\t)/.test(line) && !/^(?:[-*+]|\d+\.)\s/.test(line.trimStart());
+}
+
+function indentedCodeEnd(lines: string[], start: number): number {
+	let end = start + 1;
+	while (end < lines.length) {
+		const line = lines[end] ?? '';
+		if (line.trim() && !/^(?: {4}|\t)/.test(line)) break;
+		end++;
+	}
+	return end;
+}
+
 /**
  * Block-level markdown -> HTML. `idPrefix` keeps heading anchors unique
  * across documents (e.g. 'doc-3-').
@@ -97,6 +129,7 @@ export function simpleMarkdownToHtml(md: string, idPrefix = '', headingIds?: str
 	const lines = md.split(/\r?\n/);
 	const htmlLines: string[] = [];
 	let block: 'none' | 'code' | 'table' | 'list' | 'quote' = 'none';
+	let fence: HtmlFence | null = null;
 	let listTag = 'ul';
 	let quoteLines: string[] = [];
 	let headingIndex = 0;
@@ -138,23 +171,35 @@ export function simpleMarkdownToHtml(md: string, idPrefix = '', headingIds?: str
 		const line = rawLine.trimEnd();
 		const trimmed = line.trim();
 
-		// Code fences
-		if (trimmed.startsWith('```')) {
-			if (block === 'code') {
+		if (fence) {
+			if (fence.closer.test(rawLine)) {
 				htmlLines.push('</code></pre>');
 				block = 'none';
-			} else {
-				if (block === 'list') closeBlock(htmlLines, 'list', listTag);
-				if (block === 'table') closeBlock(htmlLines, 'table');
-				if (block === 'quote') flushQuote();
-				const lang = trimmed.slice(3).trim();
-				htmlLines.push('<pre><code class="language-' + escapeHtml(lang) + '">');
-				block = 'code';
-			}
+				fence = null;
+			} else htmlLines.push(escapeHtml(rawLine));
 			continue;
 		}
-		if (block === 'code') {
-			htmlLines.push(escapeHtml(rawLine));
+		const opening = openHtmlFence(rawLine);
+		if (opening) {
+			if (block === 'list') closeBlock(htmlLines, 'list', listTag);
+			if (block === 'table') closeBlock(htmlLines, 'table');
+			if (block === 'quote') flushQuote();
+			fence = opening;
+			const cls = opening.language ? ' class="language-' + escapeHtml(opening.language) + '"' : '';
+			htmlLines.push('<pre><code' + cls + '>');
+			block = 'code';
+			continue;
+		}
+		if (startsIndentedCode(lines, i)) {
+			if (block === 'list') closeBlock(htmlLines, 'list', listTag);
+			if (block === 'table') closeBlock(htmlLines, 'table');
+			if (block === 'quote') flushQuote();
+			htmlLines.push('<pre><code>');
+			const end = indentedCodeEnd(lines, i);
+			for (; i < end; i++) htmlLines.push(escapeHtml(lines[i] ?? ''));
+			i--;
+			htmlLines.push('</code></pre>');
+			block = 'none';
 			continue;
 		}
 
@@ -269,14 +314,24 @@ interface HeadingRecord {
 function collectHeadings(body: string, idPrefix: string): HeadingRecord[] {
 	const out: HeadingRecord[] = [];
 	const used = new Set<string>();
-	let inCode = false;
-	for (const raw of body.split(/\r?\n/)) {
-		const line = raw.trim();
-		if (line.startsWith('```')) {
-			inCode = !inCode;
+	let fence: HtmlFence | null = null;
+	const lines = body.split(/\r?\n/);
+	for (let i = 0; i < lines.length; i++) {
+		const raw = lines[i] ?? '';
+		if (fence) {
+			if (fence.closer.test(raw)) fence = null;
 			continue;
 		}
-		if (inCode) continue;
+		const opening = openHtmlFence(raw);
+		if (opening) {
+			fence = opening;
+			continue;
+		}
+		if (startsIndentedCode(lines, i)) {
+			i = indentedCodeEnd(lines, i) - 1;
+			continue;
+		}
+		const line = raw.trim();
 		const match = line.match(/^(#{1,6})\s+(.*)$/);
 		if (!match) continue;
 		const label = (match[2] ?? '').trim();

@@ -37,7 +37,7 @@ export class ObsidianVaultGateway implements ExportGateway {
 		onProgress?: (current: number, total: number, currentFile?: string) => void,
 		onSkipped?: (path: string, message: string) => void
 	): Promise<VaultFile[]> {
-		const reserved = reservedOutputPaths(settings, { vaultBasePath: this.getVaultBasePath() });
+		const reserved = reservedOutputPaths(settings, { vaultBasePath: this.getVaultBasePath(), alreadyResolved: true });
 		const tag = settings.scopeTag?.replace(/^#+/, '').trim().toLowerCase();
 
 		const candidates = this.app.vault.getFiles().filter((file) => {
@@ -175,13 +175,19 @@ export class ObsidianVaultGateway implements ExportGateway {
 	 * Writes binary data (e.g. a ZIP archive) to a vault or absolute path.
 	 */
 	async writeBinary(targetPath: string, data: Uint8Array): Promise<void> {
-		// Copy into a fresh ArrayBuffer (data.buffer may be a SharedArrayBuffer view)
-		const buffer = new ArrayBuffer(data.byteLength);
-		new Uint8Array(buffer).set(data);
 		if (path.isAbsolute(targetPath)) {
 			await fs.promises.mkdir(path.dirname(targetPath), { recursive: true });
 			await fs.promises.writeFile(targetPath, data);
 			return;
+		}
+
+		let buffer: ArrayBuffer;
+		if (data.buffer instanceof ArrayBuffer && data.byteOffset === 0 && data.byteLength === data.buffer.byteLength) {
+			buffer = data.buffer;
+		} else {
+			// Copy subviews/SharedArrayBuffers: Obsidian expects just these bytes.
+			buffer = new ArrayBuffer(data.byteLength);
+			new Uint8Array(buffer).set(data);
 		}
 
 		const norm = normalizeVaultTarget(targetPath);

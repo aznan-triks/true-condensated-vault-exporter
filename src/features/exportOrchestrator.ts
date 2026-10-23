@@ -12,9 +12,9 @@
 import { ExportGateway, ExporterSettings, ProgressCallback, RememberedExportTarget, VaultFile } from '../core/types';
 import { CleanedNote, cleanNote, createExportContext } from '../core/pipeline';
 import { CONSOLIDATED_FORMATS, ConsolidatedFormatId } from './formats';
-import { OutputFile, buildSplitFiles } from './exportSplit';
-import { buildZip, zipEntryName, ZipEntry } from '../core/zip';
-import { canonicalOutputPath, externalFolderBase, resolveOutputSettings, usesExternalOutputFolder } from '../core/outputTarget';
+import { OutputPlan, planSplitFiles } from './exportSplit';
+import { buildPreparedZip, prepareZipEntry, PreparedZipEntry, zipEntryName, validateZipEntryNames } from '../core/zip';
+import { canonicalOutputPath, externalFolderBase, resolveOutputSettings, usesExternalOutputFolder, vaultRelativeOutputPath } from '../core/outputTarget';
 
 export type ExportTarget = RememberedExportTarget;
 
@@ -22,6 +22,14 @@ export class ExportCancelledError extends Error {
 	constructor(readonly partialResult?: ExportResult) {
 		super('Export cancelled.');
 		this.name = 'ExportCancelledError';
+	}
+}
+
+/** A write failure keeps successful outputs intact and reports their exact partial result. */
+export class ExportFailedError extends Error {
+	constructor(message: string, readonly partialResult: ExportResult, readonly failedPath?: string, cause?: unknown) {
+		super(message, { cause });
+		this.name = 'ExportFailedError';
 	}
 }
 
@@ -33,9 +41,9 @@ export interface ExportResult {
 	durationMs: number;
 }
 
-function checkCancelled(signal?: AbortSignal, partialResult?: ExportResult): void {
+function checkCancelled(signal?: AbortSignal, partialResult?: () => ExportResult): void {
 	if (signal?.aborted) {
-		throw new ExportCancelledError(partialResult);
+		throw new ExportCancelledError(partialResult?.());
 	}
 }
 
@@ -44,28 +52,27 @@ function yieldToUi(): Promise<void> {
 	return new Promise((resolve) => setTimeout(resolve, 0));
 }
 
-const textEncoder = new TextEncoder();
 export function utf8ByteLength(text: string): number {
-	return textEncoder.encode(text).length;
+	return Buffer.byteLength(text, 'utf8');
 }
 
-function consolidatedOutputs(
+function consolidatedPlans(
 	notes: CleanedNote[],
 	settings: ExporterSettings,
 	exportedAt: string,
 	requested: Set<ConsolidatedFormatId>
-): Map<ConsolidatedFormatId, OutputFile> {
-	const map = new Map<ConsolidatedFormatId, OutputFile>();
+): Map<ConsolidatedFormatId, OutputPlan> {
+	const map = new Map<ConsolidatedFormatId, OutputPlan>();
 	for (const [id, format] of Object.entries(CONSOLIDATED_FORMATS) as [ConsolidatedFormatId, (typeof CONSOLIDATED_FORMATS)[ConsolidatedFormatId]][]) {
 		if (requested.has(id)) {
-			map.set(id, { path: format.outputPath(settings), content: format.render(notes, settings, exportedAt) });
+			map.set(id, { path: format.outputPath(settings), render: () => format.render(notes, settings, exportedAt) });
 		}
 	}
 	return map;
 }
 
 interface LabeledOutput {
-	out: OutputFile;
+	out: OutputPlan;
 	stage: string;
 }
 
@@ -92,11 +99,16 @@ function pathsOverlap(left: string, right: string): boolean {
 	return a === b || a.startsWith(b + '/') || b.startsWith(a + '/');
 }
 
+/** Portable comparison key; absolute outputs inside the vault refer to the same sources. */
+function sourceKey(path: string, vaultBasePath: string): string {
+	return (vaultRelativeOutputPath(path, vaultBasePath) ?? canonicalOutputPath(path)).toLowerCase();
+}
+
 /** Selects the individual files to write for the requested targets (no zip). */
 function selectOutputs(
 	targets: ExportTarget[],
-	consolidated: Map<ConsolidatedFormatId, OutputFile>,
-	split: OutputFile[]
+	consolidated: Map<ConsolidatedFormatId, OutputPlan>,
+	split: OutputPlan[]
 ): LabeledOutput[] {
 	const selected: LabeledOutput[] = [];
 	for (const t of targets) {
@@ -113,19 +125,28 @@ function selectOutputs(
 	}
 	// Repeated targets are harmless; different outputs sharing a path are not.
 	const seen = new Map<string, LabeledOutput>();
+	// First descendant for each directory prefix, retaining the original conflict message.
+	const ancestors = new Map<string, LabeledOutput>();
 	const deduped: LabeledOutput[] = [];
 	for (const item of selected) {
 		validateOutputPath(item.out.path, item.stage);
 		const key = canonicalOutputPath(item.out.path);
 		const previous = seen.get(key);
 		if (previous) {
-			if (previous.out.content === item.out.content) continue;
+			if (previous.out === item.out || previous.out.render() === item.out.render()) continue;
 			throw new Error('Output path conflict: ' + previous.out.path + ' is used by more than one export.');
 		}
-		for (const [otherPath, other] of seen) {
-			if (pathsOverlap(otherPath, key)) {
+		const descendant = ancestors.get(key);
+		if (descendant) {
+			throw new Error('Output paths overlap: ' + descendant.out.path + ' and ' + item.out.path + '.');
+		}
+		for (let slash = key.indexOf('/'); slash !== -1; slash = key.indexOf('/', slash + 1)) {
+			const prefix = key.slice(0, slash);
+			const other = seen.get(prefix);
+			if (other) {
 				throw new Error('Output paths overlap: ' + other.out.path + ' and ' + item.out.path + '.');
 			}
+			if (!ancestors.has(prefix)) ancestors.set(prefix, item);
 		}
 		seen.set(key, item);
 		deduped.push(item);
@@ -133,29 +154,40 @@ function selectOutputs(
 	return deduped;
 }
 
-/** Builds the zip entry list: every consolidated format + split files. */
-function zipEntries(
-	consolidated: Map<ConsolidatedFormatId, OutputFile>,
-	split: OutputFile[],
-	externalBase: string
-): ZipEntry[] {
-	const encoder = new TextEncoder();
-	const all = [...consolidated.values(), ...split];
-	const seen = new Map<string, string>();
-	const entries: ZipEntry[] = [];
-	for (const out of all) {
-		const name = zipEntryName(out.path, externalBase);
-		const previous = seen.get(name);
-		if (previous !== undefined) {
-			if (previous !== out.content) throw new Error('ZIP entry name conflict: ' + name + '.');
-			continue;
-		}
-		seen.set(name, out.content);
-		entries.push({ name, data: encoder.encode(out.content) });
-	}
-	return entries;
+interface NamedOutput {
+	name: string;
+	out: OutputPlan;
 }
 
+/** Preflight names/deduplication without retaining rendered strings. */
+function zipOutputs(consolidated: Map<ConsolidatedFormatId, OutputPlan>, split: OutputPlan[], externalBase: string): NamedOutput[] {
+	const seen = new Map<string, OutputPlan>();
+	const outputs: NamedOutput[] = [];
+	for (const out of [...consolidated.values(), ...split]) {
+		const name = zipEntryName(out.path, externalBase);
+		const previous = seen.get(name);
+		if (previous) {
+			if (previous !== out && previous.render() !== out.render()) throw new Error('ZIP entry name conflict: ' + name + '.');
+			continue;
+		}
+		seen.set(name, out);
+		outputs.push({ name, out });
+	}
+	validateZipEntryNames(outputs.map((out) => out.name));
+	return outputs;
+}
+
+/** Reuse prepared records and render only ZIP-only outputs, in canonical order. */
+function* zipRecords(outputs: NamedOutput[], prepared: Map<OutputPlan, PreparedZipEntry>, modifiedAt: Date): Generator<PreparedZipEntry> {
+	const encoder = new TextEncoder();
+	for (const { name, out } of outputs) {
+		const record = prepared.get(out) ?? prepareZipEntry({ name, data: encoder.encode(out.render()) }, modifiedAt);
+		prepared.delete(out);
+		yield record;
+	}
+}
+
+/** Written files are never rolled back: cancellation and write failures report what was kept. */
 export async function runExports(
 	gateway: ExportGateway,
 	rawSettings: ExporterSettings,
@@ -166,7 +198,7 @@ export async function runExports(
 ): Promise<ExportResult> {
 	// External output folder: every configured destination is re-rooted once,
 	// before validation and before the ZIP/plain outputs are compared.
-	const settings = resolveOutputSettings(rawSettings);
+	const settings: ExporterSettings = structuredClone(resolveOutputSettings(rawSettings));
 	const startedAt = Date.now();
 	const uniqueTargets = [...new Set(targets)];
 	if (uniqueTargets.length === 0) throw new Error('Select at least one export target.');
@@ -220,7 +252,7 @@ export async function runExports(
 		},
 		(filePath, message) => addSkipped(filePath, message)
 	));
-	checkCancelled(signal, snapshot());
+	checkCancelled(signal, snapshot);
 	if (files.length === 0) {
 		if (skippedFiles.length > 0) {
 			throw new Error('Could not read any of the ' + skippedFiles.length + ' matching files. ' + firstReadFailure);
@@ -233,7 +265,7 @@ export async function runExports(
 	const requestedYield = Number.isFinite(settings.yieldEvery) ? Math.floor(settings.yieldEvery) : 25;
 	const every = Math.max(1, Math.min(1000, requestedYield));
 	for (const [i, file] of files.entries()) {
-		checkCancelled(signal, snapshot());
+		checkCancelled(signal, snapshot);
 		try {
 			notes.push(cleanNote(file, ctx));
 		} catch (err: unknown) {
@@ -256,7 +288,7 @@ export async function runExports(
 	if (notes.length === 0) {
 		throw new Error('No note could be processed (' + files.length + ' files were skipped).');
 	}
-	checkCancelled(signal, snapshot());
+	checkCancelled(signal, snapshot);
 	onProgress({ stage: 'Cleaning notes', current: files.length, total: files.length, log: 'Processed ' + notes.length + ' notes.' });
 
 	const zipRequested = uniqueTargets.includes('zip');
@@ -271,13 +303,14 @@ export async function runExports(
 	}
 
 	const exportedAt = new Date().toISOString();
-	const consolidated = consolidatedOutputs(notes, settings, exportedAt, requestedFormats);
+	const consolidated = consolidatedPlans(notes, settings, exportedAt, requestedFormats);
 	const splitRequested = zipRequested || uniqueTargets.some((target) => target === 'all' || target === 'split');
-	const split = splitRequested ? buildSplitFiles(notes, settings) : [];
+	const split = splitRequested ? planSplitFiles(notes, settings) : [];
 	const externalBase = usesExternalOutputFolder(settings) ? externalFolderBase(settings.externalOutputFolder) : '';
 	const plainTargets = uniqueTargets.filter((target) => target !== 'zip');
 	const plainOutputs = selectOutputs(plainTargets, consolidated, split);
 	const zipPath = zipRequested ? validateOutputPath(settings.zipOutputPath, 'ZIP bundle') : '';
+	const archiveOutputs = zipRequested ? zipOutputs(consolidated, split, externalBase) : [];
 
 	if (zipRequested) {
 		for (const item of plainOutputs) {
@@ -287,25 +320,39 @@ export async function runExports(
 		}
 	}
 
-	checkCancelled(signal, snapshot());
-	let zipData: Uint8Array | null = null;
-	if (zipRequested) {
-		onProgress({ stage: 'ZIP bundle', current: 0, total: 1, log: 'Building archive (all formats + split)...' });
-		await yieldToUi();
-		zipData = buildZip(zipEntries(consolidated, split, externalBase));
+	onProgress({ stage: 'Validating outputs', current: 0, total: 1, log: 'Checking outputs against source notes...' });
+	const vaultBasePath = gateway.getVaultBasePath?.() ?? '';
+	const sources = new Map(files.map((file) => [sourceKey(file.path, vaultBasePath), file.path]));
+	const outputPaths = plainOutputs.map((item) => item.out.path);
+	if (zipRequested) outputPaths.push(zipPath);
+	for (const path of outputPaths) {
+		const source = sources.get(sourceKey(path, vaultBasePath));
+		if (source !== undefined) {
+			throw new Error('Output "' + path + '" would overwrite the note "' + source + '". Choose another output folder or name.');
+		}
 	}
 
-	if (zipRequested && zipData) {
-		checkCancelled(signal, snapshot());
-		onProgress({ stage: 'ZIP bundle', current: 1, total: 1, currentFile: zipPath, log: 'Writing ' + zipPath });
-		await gateway.writeBinary(zipPath, zipData);
-		written.push({ path: zipPath, bytes: zipData.length });
-		await yieldToUi();
-		checkCancelled(signal, snapshot());
-	}
+	checkCancelled(signal, snapshot);
+	const failure = (path: string, error: unknown): ExportFailedError => {
+		const message = error instanceof Error ? error.message : String(error);
+		return new ExportFailedError('Export failed after writing ' + written.length + ' file(s) at "' + path + '": ' + message, snapshot(), path, error);
+	};
+	const writeOutput = async (path: string, write: () => Promise<void>): Promise<void> => {
+		try {
+			await write();
+		} catch (error: unknown) {
+			if (error instanceof ExportCancelledError) throw error;
+			throw failure(path, error);
+		}
+	};
+
+	const prepared = new Map<OutputPlan, PreparedZipEntry>();
+	const archiveNames = new Map(archiveOutputs.map(({ name, out }) => [out, name]));
+	const zipModifiedAt = new Date();
+	const encoder = new TextEncoder();
 
 	for (const [i, item] of plainOutputs.entries()) {
-		checkCancelled(signal, snapshot());
+		checkCancelled(signal, snapshot);
 		onProgress({
 			stage: item.stage,
 			current: i + 1,
@@ -313,10 +360,49 @@ export async function runExports(
 			currentFile: item.out.path,
 			log: 'Writing ' + item.out.path,
 		});
-		await gateway.writeFile(item.out.path, item.out.content);
-		written.push({ path: item.out.path, bytes: utf8ByteLength(item.out.content) });
+		let content: string;
+		try {
+			content = item.out.render();
+		} catch (error: unknown) {
+			if (error instanceof ExportCancelledError || written.length === 0) throw error;
+			throw failure(item.out.path, error);
+		}
+		await writeOutput(item.out.path, () => gateway.writeFile(item.out.path, content));
+		written.push({ path: item.out.path, bytes: utf8ByteLength(content) });
+		const archiveName = archiveNames.get(item.out);
+		if (archiveName !== undefined) {
+			checkCancelled(signal, snapshot);
+			try {
+				prepared.set(item.out, prepareZipEntry({ name: archiveName, data: encoder.encode(content) }, zipModifiedAt));
+			} catch (error: unknown) {
+				if (error instanceof ExportCancelledError) throw error;
+				throw failure(zipPath, error);
+			}
+		}
+		content = ''; // Do not retain a large string across the UI yield/next render.
+		if ((i + 1) % every === 0 || i + 1 === plainOutputs.length) await yieldToUi();
+		checkCancelled(signal, snapshot);
+	}
+
+	// The gateway requires a complete archive: compression is incremental in
+	// memory, not disk streaming. Only compressed records survive each entry.
+	if (zipRequested) {
+		checkCancelled(signal, snapshot);
+		onProgress({ stage: 'ZIP bundle', current: 0, total: 1, log: 'Building archive (all formats + split)...' });
 		await yieldToUi();
-		checkCancelled(signal, snapshot());
+		let archive: Uint8Array;
+		try {
+			archive = buildPreparedZip(zipRecords(archiveOutputs, prepared, zipModifiedAt));
+		} catch (error: unknown) {
+			if (error instanceof ExportCancelledError || written.length === 0) throw error;
+			throw failure(zipPath, error);
+		}
+		checkCancelled(signal, snapshot);
+		onProgress({ stage: 'ZIP bundle', current: 1, total: 1, currentFile: zipPath, log: 'Writing ' + zipPath });
+		await writeOutput(zipPath, () => gateway.writeBinary(zipPath, archive));
+		written.push({ path: zipPath, bytes: archive.length });
+		await yieldToUi();
+		checkCancelled(signal, snapshot);
 	}
 
 	const result = snapshot();

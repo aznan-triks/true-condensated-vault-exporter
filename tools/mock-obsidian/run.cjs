@@ -50,6 +50,19 @@ global.requestAnimationFrame = (cb) => setTimeout(() => cb(Date.now()), 16);
 global.cancelAnimationFrame = (id) => clearTimeout(id);
 require('./dom-helpers.cjs').install(window);
 
+// Track the panel's real elapsed timers across failure/replacement/unload.
+const panelIntervals = new Set();
+let peakPanelIntervals = 0;
+const realSetInterval = window.setInterval.bind(window);
+const realClearInterval = window.clearInterval.bind(window);
+window.setInterval = (...args) => {
+	const id = realSetInterval(...args);
+	panelIntervals.add(id);
+	peakPanelIntervals = Math.max(peakPanelIntervals, panelIntervals.size);
+	return id;
+};
+window.clearInterval = (id) => { panelIntervals.delete(id); realClearInterval(id); };
+
 const obsidianMock = require('./obsidian-mock.cjs');
 
 // Obsidian's renderer provides CommonJS `require` on the window; the plugin's
@@ -100,12 +113,13 @@ function writeFixture(root) {
 		'# Alpha', '', 'Body of Alpha with [[Beta]] and #project.', '',
 		'%%internal comment%%', '', 'Embedded note: ![[Beta]]', 'Embedded image: ![[Assets/pic.png]]', '', 'Inline `code with %% kept`.', '',
 		'```python', 'print("hi") # not a heading', '```', '',
-		'## Tasks', '- [ ] one', '',
+		'## Tasks', '- [ ] one', '', 'Anchor-only reference: [[#Tasks]]', '',
 	].join('\n'));
 	write('Projects/Beta.md', '---\ntags: [project]\nstatus: done\n---\n# Beta\n\nBeta links to [[Alpha|the alpha note]]. #project\n');
 	write('Dataview/Projects.md', [
 		'```dataview', 'TABLE status FROM "Projects" WHERE status = "done" SORT file.name ASC', '```', '',
 		'```dataviewjs', 'const x = 1;', '```', '',
+		'````markdown', '```dataview', 'TABLE status FROM "Projects"', '```', '````', '',
 	].join('\n'));
 	write('Knowledge Base/Note.md', '# Note\n\nA note in a folder with a space.\n');
 	write('.hidden/Secret.md', '# Secret\n\nHidden folder.\n');
@@ -238,6 +252,18 @@ const has = (rel) => fs.existsSync(path.join(VAULT, rel));
 	} else {
 		record('HTML sidebar target is available for persistence test', false);
 	}
+	const sidebarSplitPreset = view.containerEl.querySelector('.ve-sidebar__split-preset-select');
+	if (sidebarSplitPreset) {
+		sidebarSplitPreset.value = 'notebooklm-two-levels';
+		sidebarSplitPreset.dispatchEvent(new window.Event('change', { bubbles: true }));
+		await sleep(30);
+		record('sidebar split preset selector updates settings', plugin._data?.settings?.splitSubfolderDepth === 'all-two-levels', plugin._data?.settings?.splitSubfolderDepth);
+		sidebarSplitPreset.value = 'top-level';
+		sidebarSplitPreset.dispatchEvent(new window.Event('change', { bubbles: true }));
+		await sleep(30);
+	} else {
+		record('sidebar split preset selector rendered', false, 'no .ve-sidebar__split-preset-select');
+	}
 	await plugin.activateSidebarView();
 	record('re-opening reuses the existing leaf', plugin.app.workspace.getLeavesOfType('vault-exporter-sidebar').length === 1);
 
@@ -261,12 +287,14 @@ const has = (rel) => fs.existsSync(path.join(VAULT, rel));
 		record('markdown: both project notes present', md.includes('# Alpha') && md.includes('# Beta'));
 		record('markdown: frontmatter stripped', !md.includes('cssclasses') && !md.includes('status: done'));
 		record('markdown: wikilink resolved', md.includes('Beta') && !md.includes('[[Beta]]'));
+		record('markdown: anchor-only wikilink rendered', md.includes('Anchor-only reference: Tasks') && !md.includes('[[#Tasks]]'));
 		record('markdown: prose comment removed but inline code kept', !md.includes('%%internal comment%%') && md.includes('code with %% kept'));
 		record('markdown: fenced code intact', md.includes('print("hi") # not a heading'));
 		record('markdown: dataview table rendered', md.includes('| status |') && /\| Alpha \| done \|/.test(md) && /\| Beta \| done \|/.test(md));
 		record('markdown: note embed kept as text', md.includes('Embedded note: Beta') && !md.includes('![[Beta]]'));
 		record('markdown: attachment embed kept as its file name', md.includes('Embedded image: pic.png'));
 		record('markdown: dataviewjs left as a code block', md.includes('dataviewjs'));
+		record('markdown: nested Dataview example stays literal (VE-016)', md.includes('````markdown\n```dataview\nTABLE status FROM "Projects"\n```\n````'));
 		record('markdown: hidden folder excluded', !md.includes('Secret'));
 	}
 	if (has('Vault export.html')) {
@@ -327,7 +355,18 @@ const has = (rel) => fs.existsSync(path.join(VAULT, rel));
 			[...tab.containerEl.querySelectorAll('.ve-settings-row')].filter((row) => !row.hidden).length >= 2
 				&& [...tab.containerEl.querySelectorAll('.ve-settings-section')].filter((section) => !section.hidden).length === 1);
 		searchInput.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-		record('Escape clears settings search', searchInput.value === '' && [...tab.containerEl.querySelectorAll('.ve-settings-section')].every((section) => !section.hidden));
+		record('Escape clears settings search and returns to the active category',
+			searchInput.value === ''
+				&& [...tab.containerEl.querySelectorAll('.ve-settings-section')].filter((section) => !section.hidden).length === 1
+				&& tab.containerEl.querySelector('#ve-settings-section-general')?.hidden === false);
+		searchInput.value = 'accent';
+		searchInput.dispatchEvent(new window.Event('input', { bubbles: true }));
+		const searchResult = tab.containerEl.querySelector('.ve-settings__search-result');
+		searchResult?.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+		record('clicking a search result jumps to its setting',
+			searchInput.value === ''
+				&& tab.containerEl.querySelector('#ve-settings-section-html')?.hidden === false
+				&& tab.containerEl.querySelector('[data-setting-title="HTML Accent Color"]')?.classList.contains('ve-settings-row--targeted'));
 	} else {
 		record('settings search control rendered', false, 'no .ve-settings__search input');
 	}
@@ -384,9 +423,35 @@ const has = (rel) => fs.existsSync(path.join(VAULT, rel));
 	if (outputsInput) {
 		outputsInput.value = 'Out/notebooklm.txt';
 		outputsInput.dispatchEvent(new window.Event('change', { bubbles: true }));
-		await sleep(30);
+		await sleep(350);
 		record('edited text setting is saved', plugin._data?.settings?.notebooklmOutputPath === 'Out/notebooklm.txt', plugin._data?.settings?.notebooklmOutputPath);
 	}
+	console.log('\n--- typing burst (VE-017) ---');
+	const titleForBurst = settingByLabel('Document Title')?.querySelector('input');
+	const titleBeforeBurst = plugin.settings.documentTitle;
+	const saveDataBeforeBurst = plugin.saveData;
+	let typingWrites = 0;
+	plugin.saveData = async function (data) {
+		typingWrites++;
+		await saveDataBeforeBurst.call(this, structuredClone(data));
+	};
+	for (let i = 0; i < 10; i++) {
+		if (titleForBurst) {
+			titleForBurst.value = 'Typing ' + i;
+			titleForBurst.dispatchEvent(new window.Event('change', { bubbles: true }));
+		}
+	}
+	record('typing updates live settings immediately', plugin.settings.documentTitle === 'Typing 9');
+	record('typing defers disk persistence during the burst', typingWrites === 0, typingWrites);
+	await sleep(350);
+	record('ten keystrokes persist exactly once with the final value', typingWrites === 1 && plugin._data?.settings?.documentTitle === 'Typing 9', typingWrites);
+	if (titleForBurst) {
+		titleForBurst.value = titleBeforeBurst;
+		titleForBurst.dispatchEvent(new window.Event('change', { bubbles: true }));
+		await sleep(350);
+	}
+	plugin.saveData = saveDataBeforeBurst;
+
 	const themeSelect = settingByLabel('HTML Color Theme')?.querySelector('select');
 	if (themeSelect) {
 		themeSelect.value = 'dark';
@@ -420,7 +485,96 @@ const has = (rel) => fs.existsSync(path.join(VAULT, rel));
 		widthSlider.dispatchEvent(new window.Event('change', { bubbles: true }));
 		await sleep(30);
 	}
+	const splitPresetPill = tab.containerEl.querySelector('.ve-preset-pill[data-preset-id="folder-tree"]');
+	if (splitPresetPill) {
+		splitPresetPill.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+		await sleep(30);
+		record('split preset pill applies folder-tree preset and updates preview',
+			plugin._data?.settings?.splitSubfolderDepth === 'all-recursive'
+				&& plugin._data?.settings?.splitSubfolderStyle === 'nested'
+				&& (tab.containerEl.querySelector('.ve-split-preview')?.textContent ?? '').includes('Projects/'),
+			JSON.stringify({
+				depth: plugin._data?.settings?.splitSubfolderDepth,
+				style: plugin._data?.settings?.splitSubfolderStyle,
+			}));
+		const topLevelPill = tab.containerEl.querySelector('.ve-preset-pill[data-preset-id="top-level"]');
+		topLevelPill?.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+		await sleep(30);
+	} else {
+		record('split preset pills rendered', false, 'no .ve-preset-pill');
+	}
+	const splitNamingSelect = settingByLabel('Split Subfolder Naming')?.querySelector('select');
+	if (splitNamingSelect) {
+		splitNamingSelect.value = 'flat-leaf';
+		splitNamingSelect.dispatchEvent(new window.Event('change', { bubbles: true }));
+		await sleep(30);
+		record('split subfolder naming preference is saved', plugin._data?.settings?.splitSubfolderStyle === 'flat-leaf', plugin._data?.settings?.splitSubfolderStyle);
+		const refreshedNamingSelect = settingByLabel('Split Subfolder Naming')?.querySelector('select');
+		if (refreshedNamingSelect) {
+			refreshedNamingSelect.value = 'flat-prefixed';
+			refreshedNamingSelect.dispatchEvent(new window.Event('change', { bubbles: true }));
+			await sleep(30);
+		}
+	} else {
+		record('split subfolder naming preference rendered', false, 'no select control');
+	}
+	const splitDepthSelect = settingByLabel('Split Subfolder Depth')?.querySelector('select');
+	if (splitDepthSelect) {
+		splitDepthSelect.value = 'recursive';
+		splitDepthSelect.dispatchEvent(new window.Event('change', { bubbles: true }));
+		await sleep(30);
+		record('split subfolder depth preference is saved', plugin._data?.settings?.splitSubfolderDepth === 'recursive', plugin._data?.settings?.splitSubfolderDepth);
+		const refreshedDepthSelect = settingByLabel('Split Subfolder Depth')?.querySelector('select');
+		if (refreshedDepthSelect) {
+			refreshedDepthSelect.value = 'direct';
+			refreshedDepthSelect.dispatchEvent(new window.Event('change', { bubbles: true }));
+			await sleep(30);
+		}
+	} else {
+		record('split subfolder depth preference rendered', false, 'no select control');
+	}
+	const splitSubfoldersRow = settingByLabel('Split Subfolders')?.closest('.ve-settings-row');
+	const splitSubfolderInput = splitSubfoldersRow?.querySelector('input[type="text"]');
+	const splitSubfolderAdd = splitSubfoldersRow?.querySelector('button.mod-cta');
+	if (splitSubfolderInput && splitSubfolderAdd) {
+		splitSubfolderInput.value = 'Projects';
+		splitSubfolderInput.dispatchEvent(new window.Event('change', { bubbles: true }));
+		splitSubfolderAdd.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+		await sleep(30);
+		record('split subfolder can be added in settings', JSON.stringify(plugin._data?.settings?.splitSubfolders) === '["Projects"]', JSON.stringify(plugin._data?.settings?.splitSubfolders));
+		const modeBtn = settingByLabel('Split Subfolders')?.closest('.ve-settings-row')?.querySelector('.ve-list-item__mode');
+		modeBtn?.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+		await sleep(30);
+		const modeBtnAfterDirect = settingByLabel('Split Subfolders')?.closest('.ve-settings-row')?.querySelector('.ve-list-item__mode');
+		modeBtnAfterDirect?.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+		await sleep(30);
+		record('split subfolder depth mode cycles per folder', JSON.stringify(plugin._data?.settings?.splitSubfolders) === '["Projects/**"]', JSON.stringify(plugin._data?.settings?.splitSubfolders));
+		const delBtn = settingByLabel('Split Subfolders')?.closest('.ve-settings-row')?.querySelector('.ve-list-item__del');
+		delBtn?.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+		await sleep(30);
+		record('split subfolder can be removed in settings', JSON.stringify(plugin._data?.settings?.splitSubfolders) === '[]', JSON.stringify(plugin._data?.settings?.splitSubfolders));
+	} else {
+		record('split subfolders setting rendered', false, 'missing input or add button');
+	}
 	record('no console errors in settings', consoleErrors.length === 0, consoleErrors.join(' | '));
+
+	console.log('\n--- bounded history (VE-017) ---');
+	const historyBeforeBounded = plugin.history;
+	plugin.setHistory([{
+		id: 'sample', label: 'Sampled history', startedAt: Date.now(), durationMs: 100,
+		outcome: 'success', files: Array.from({ length: 100 }, (_, i) => ({ path: i === 0 ? 'Vault export.md' : 'Out/sample-' + i + '.md', bytes: 1024 })),
+	}]);
+	await sleep(30);
+	record('persisted history keeps twenty paths with exact totals', plugin._data?.history?.[0]?.files?.length === 20 && plugin.history[0]?.fileCount === 100 && plugin.history[0]?.totalBytes === 102400);
+	const boundedMeta = view.containerEl.querySelector('.ve-history__meta')?.textContent ?? '';
+	record('sampled history displays the full count and bytes', boundedMeta.includes('100 files') && boundedMeta.includes('100.0 KB'), boundedMeta);
+	const boundedHistoryRevealState = require('./obsidian-mock.cjs').__state;
+	boundedHistoryRevealState.revealCalls.length = 0;
+	view.containerEl.querySelector('.ve-history__reveal')?.click();
+	await sleep(20);
+	record('sampled history still reveals its first actual output', boundedHistoryRevealState.revealCalls.length === 1 && boundedHistoryRevealState.revealCalls[0] === path.join(VAULT, 'Vault export.md'));
+	plugin.setHistory(historyBeforeBounded);
+	await sleep(30);
 
 	console.log('\n--- command palette targets ---');
 	plugin.settings = { ...plugin.settings, notebooklmOutputPath: 'Vault export - NotebookLM.txt' };
@@ -460,18 +614,45 @@ const has = (rel) => fs.existsSync(path.join(VAULT, rel));
 	record('clean export written next to the note', has('Projects/Alpha (clean export).md'));
 	record('export-active-folder finishes', (await runCommand('export-active-folder')) === 'Done');
 
+	console.log('\n--- partial failure (VE-009) ---');
+	const originalWrite = plugin.gateway.writeFile;
+	plugin.gateway.writeFile = async function (target, content) {
+		if (target === 'Vault export.md') throw new Error('disk full (VE-009 smoke)');
+		await originalWrite.call(this, target, content);
+	};
+	record('failed write reports Failed', (await runCommand('export-all')) === 'Failed');
+	record('failed panel names completed files and failed path', /2 files written/.test(panelText()) && panelText().includes('Vault export.md'), panelText().slice(-220));
+	record('failed history records the two completed paths',
+		JSON.stringify(plugin.history[0]?.files?.map((f) => f.path)) === JSON.stringify(['Vault export - NotebookLM.txt', 'Vault export.html']),
+		JSON.stringify(plugin.history[0]?.files?.map((f) => f.path)));
+	record('failure notice reports completed files', require('./obsidian-mock.cjs').__state.notices.some((n) => /Failed.*2 files written/.test(n.message)));
+	const expectedFailureLog = consoleErrors.findIndex((message) => message.includes('disk full (VE-009 smoke)'));
+	record('expected write failure is logged', expectedFailureLog >= 0);
+	if (expectedFailureLog >= 0) consoleErrors.splice(expectedFailureLog, 1);
+	plugin.gateway.writeFile = originalWrite;
+	record('failed panel releases its elapsed interval (VE-014)', panelIntervals.size === 0);
+
 	console.log('\n--- cancellation ---');
-	void runCommand('export-all');
-	await sleep(15);
-	const cancelBtn = window.document.querySelector('.ve-panel__cancel');
-	cancelBtn?.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
-	record('cancel click handled', Boolean(cancelBtn));
-	record('panel reports cancellation or completion', ['Cancelled', 'Done'].includes(await waitFinished()), panelStatus());
+	let cancelClicked = false;
+	plugin.gateway.writeFile = async function (target, content) {
+		await originalWrite.call(this, target, content);
+		if (!cancelClicked) {
+			const cancel = window.document.querySelector('.ve-panel__cancel');
+			cancelClicked = Boolean(cancel);
+			cancel?.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+		}
+	};
+	const cancelledStatus = await runCommand('export-all');
+	plugin.gateway.writeFile = originalWrite;
+	record('cancel click handled after the first completed write', cancelClicked);
+	record('panel reports cancellation, never success', cancelledStatus === 'Cancelled', panelStatus());
+	record('cancel summary and history report the one completed file', /1 files/.test(panelText()) && plugin.history[0]?.files?.length === 1, panelText().slice(-140));
 	record('no stuck running state', plugin._commands.length === 10 && window.document.querySelector('.ve-panel__cancel')?.isShown() === false, window.document.querySelector('.ve-panel__status')?.textContent);
 
 	console.log('\n--- reveal shortcut ---');
 	// Fresh, deterministic run: the reveal button appears after a successful export.
 	record('export-markdown finishes again', (await runCommand('export-markdown')) === 'Done');
+	record('success after failure keeps one panel without timer accumulation (VE-014)', document.querySelectorAll('.ve-panel').length === 1 && panelIntervals.size === 0 && peakPanelIntervals === 1);
 	const revealState = require('./obsidian-mock.cjs').__state;
 	revealState.revealCalls.length = 0;
 	const revealBtn = window.document.querySelector('.ve-panel__reveal');
@@ -520,10 +701,32 @@ const has = (rel) => fs.existsSync(path.join(VAULT, rel));
 	fs.rmSync(EXTERNAL, { recursive: true, force: true });
 	tab.display();
 
+	console.log('\n--- in-vault external split preview (VE-002) ---');
+	const settingsBeforePreview = plugin.settings;
+	await plugin.app.vault.create('Preview/A.md', 'source');
+	await plugin.app.vault.create('Preview/Exports/A.md', 'previous split export');
+	plugin.settings = {
+		...plugin.settings, scopeRoot: 'Preview', useExternalOutputFolder: true,
+		externalOutputFolder: path.join(VAULT, 'Preview/Exports'), splitOutputFolder: '',
+	};
+	await view.refresh();
+	record('sidebar excludes the resolved blank split destination',
+		view.containerEl.querySelector('.ve-card__value')?.textContent.startsWith('1 notes') === true,
+		view.containerEl.querySelector('.ve-card__value')?.textContent);
+	plugin.settings = settingsBeforePreview;
+
 	console.log('\n--- graceful degradation without Electron ---');
 	plugin.gateway.revealOutput = () => null;
 	record('reveal returns false when no OS path', plugin.gateway.revealInFileManager('Vault export.md') === false);
 	delete plugin.gateway.revealOutput;
+
+	console.log('\n--- progress panel unload (VE-014) ---');
+	const unloadExport = plugin._commands.find((command) => command.id === 'export-all')?.callback();
+	record('unload fixture has one running panel interval', panelIntervals.size === 1);
+	plugin.onunload();
+	record('unload removes panel and interval immediately', document.querySelectorAll('.ve-panel').length === 0 && panelIntervals.size === 0);
+	await unloadExport;
+	record('late cancelled callbacks after unload recreate nothing', document.querySelectorAll('.ve-panel').length === 0 && panelIntervals.size === 0);
 
 	console.error = realError;
 	console.warn = realWarn;

@@ -6,7 +6,7 @@
 import { App, Notice } from 'obsidian';
 import { ExporterSettings } from '../core/types';
 import { ObsidianVaultGateway } from '../obsidian/vaultGateway';
-import { runExports, ExportTarget, ExportCancelledError, ExportResult } from '../features/exportOrchestrator';
+import { runExports, ExportTarget, ExportCancelledError, ExportFailedError, ExportResult } from '../features/exportOrchestrator';
 import { ExportHistoryEntry, pushHistory, formatBytes, formatDuration } from '../features/exportHistory';
 import { ProgressPanel } from '../ui/ProgressPanel';
 
@@ -149,8 +149,15 @@ export async function executeTargets(ctx: UiContext, targets: ExportTarget[], op
 			const msg = err instanceof Error ? err.message : String(err);
 			console.error('[vault-exporter]', err);
 			panel.log(msg, true);
-			panel.finish('error', 'Export failed: ' + msg, { durationMs: Date.now() - startedAt });
-			new Notice('✕ Export failed: ' + msg, 6000);
+			if (err instanceof ExportFailedError) result = err.partialResult;
+			const summary = result ? 'Failed · ' + result.written.length + ' files written: ' + msg : 'Export failed: ' + msg;
+			panel.finish('error', summary, {
+				fileCount: result?.written.length,
+				bytes: result?.totalBytes,
+				skipped: result?.skippedFiles.length,
+				durationMs: Date.now() - startedAt,
+			});
+			new Notice('✕ ' + summary, 6000);
 		}
 	} finally {
 		running = null;

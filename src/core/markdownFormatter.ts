@@ -5,6 +5,7 @@
 
 import { ExporterSettings } from './types';
 import { CleanedNote, visibleMetadata } from './pipeline';
+import { escapeMarkdownLabel } from './wikilink';
 
 function generateAnchor(title: string, index: number): string {
 	const slug = title
@@ -33,12 +34,13 @@ export function formatForMarkdown(notes: CleanedNote[], settings: ExporterSettin
 
 	notes.forEach((note, i) => {
 		const title = displayTitle(note);
-		parts.push((i + 1) + '. [' + title + '](#' + generateAnchor(title, i) + ') <small>*(' + note.path + ')*</small>');
+		parts.push((i + 1) + '. [' + escapeMarkdownLabel(title) + '](#' + generateAnchor(title, i) + ') <small>*(' + escapeMarkdownLabel(note.path) + ')*</small>');
 	});
 	parts.push('', '---', '');
 
 	notes.forEach((note, i) => {
 		const title = displayTitle(note);
+		// Section titles are not link labels: deliberately keep their original text.
 		parts.push('## ' + (i + 1) + '. ' + title + ' <a id="' + generateAnchor(title, i) + '"></a>');
 		parts.push('*Source: `' + note.path + '`*', '');
 

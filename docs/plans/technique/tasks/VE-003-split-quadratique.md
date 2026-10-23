@@ -90,3 +90,41 @@ Référence : cible `markdown` seule sur le même corpus = **37 / 40 / 116 ms** 
 
 - Une erreur d'index (préfixe sans séparateur) manquerait un conflit : les cas `a.md`/`ab.md` et `a/b.md`/`a.md` verrouillent les deux directions.
 - Le `yield` par lot (étape 4) peut dégrader la réactivité du bouton Cancel : condition mesurée, sinon abandon.
+
+## Journal d'exécution
+
+### 2026-10-21 — `7bf8a83`, implementation validated, numerical gate blocked; documentation follow-up
+
+- Baseline: `git pull --rebase` up to date, `npm run check` **PASS** (133 tests / 100 smoke). Read the full plan and affected source/test sites.
+- Tests first in `tests/features.test.ts`, suite `linear split validation (VE-003)`: **7 passed / 1 failed** before the fix. `canonicalizes a linear number of paths instead of every pair` observed **10,300** canonicalizations for only 100 outputs (required <1,000); it now passes. The other tests lock exact overlap messages in both insertion directions, four non-overlapping pairs (including case-sensitive outputs), and the complete ordered 50-path/content list across five folders. Existing conflicts, ZIP overlap, unsafe-path and cancellation tests are unchanged.
+- Corrected a test-example typo without changing the intended invariant: `a.md` and `a/b.md` are distinct paths, not ancestors. They are tested as a valid pair; actual overlap is tested with `a.md` and `a.md/b.md`, in both orders. No existing test was changed for this correction.
+- Replaced the pairwise scan with an ancestor **Map**, rather than a Set, to retain the first original descendant for the unchanged error message without a secondary scan. Grouping appends to the existing array. No path cache or parallel writes.
+- Disposable measurement harness: Node **v22.22.3**, fake gateway, no I/O, ordered path and content checks at every write, sizes 2k/4k/8k/16k. "No timers" replaces only the harness's `setTimeout(0)` with queued microtasks, matching the audit's algorithm-isolation method. Real-timer runs do not stub timers. Actual measurements:
+
+| Notes | Before, no timers (ms) | After ancestor/group fix, no timers (ms) | After fix, real timers, per-file yield (ms) | After batched yield, real timers (ms) |
+|---|---:|---:|---:|---:|
+| 2,000 | 1,630.66 | 51.13 | 2,421.00 | 238.56 |
+| 4,000 | 6,201.85 | 84.18 | 4,767.97 | 459.41 |
+| 8,000 | 23,525.40 | 190.11 | 9,718.24 | 957.17 |
+| 16,000 | 94,809.28 | 449.53 | 19,482.00 | **2,036.18** |
+
+- Before-first-write time at 16k: **94,510.62 → 148.58 ms** in the no-timer algorithm measurements. Full ordered names and bodies remained identical. Grouped-only `buildSplitFiles`: **44.60 → 8.35 ms** (8k), **471.96 → 21.66 ms** (16k), **3,554.26 → 33.58 ms** (32k).
+- Optional batching was measured only after removing the algorithmic bottleneck. It uses existing `yieldEvery`, preserves a cancellation check per file, and still yields after the final file. A disposable extension of the real bundle's mock-Obsidian smoke test scheduled a real timer after the first write and clicked the actual Cancel button. At 16k notes:
+  - batch 25: **Cancelled**, 25 files written, timer-request → stop **42.91 ms**, click → stop **12.85 ms**;
+  - batch 1,000 (maximum setting): **Cancelled**, 1,000 files written, timer-request → stop **122.15 ms**, click → stop **3.37 ms**.
+  These are real Node timers and jsdom click handling with a fake gateway, **not a live Electron/Obsidian measurement**; no stronger claim is made.
+- `npm run check` **PASS**: 141/141 tests, 100/100 smoke assertions; strict typecheck and production build. All measurement scripts/bundles were kept in `/tmp` and removed after collecting the results.
+- **Numerical gate NOT met:** final real-timer total **2,036.18 ms**, exceeding the strict 2,000 ms bound by **36.18 ms (1.81%)**. No rerun selected for a better number, no setting/default changed to game the target, no completion claim. The dated audit's 153.12 s baseline is left unchanged.
+- **Out-of-scope observation (not fixed):** every `checkCancelled(signal, snapshot())` eagerly copies `written`/`skippedFiles` and reduces all written bytes even when the signal is not aborted. In the write loop this performs growing work on each file; it is separate from the two planned root causes. Keep all partial-result/cancellation safeguards intact.
+- **Proposal, awaiting user approval:** extend VE-003 narrowly to construct the existing cancellation snapshot only when cancellation is actually observed, without changing its contents or any error handling; test identical partial results and remeasure with the same harness. Alternatively the user may explicitly accept the measured 2.036 s bound. No further implementation or subsequent plan is started pending that decision.
+- Implementation `7bf8a83` pushed to the session branch; this documentation follow-up records its hash. Status: **bloqué**, not `fait`. Remaining: decision on this small scope extension / numerical criterion, final measurement and validation if approved, then VE-005.
+
+### 2026-10-21 — `f284dd7`; documentation follow-up
+
+- User approval: **"enchaîne sans t'arrêter"**, following the explicit request to extend VE-003 to lazy cancellation snapshots. The numerical target is unchanged.
+- Restored the local Git metadata to the already-pushed session history after verifying all restored workspace files byte-for-byte against `60294fa`; fast-forwarded this same branch, retained a backup stash, reinstalled only the existing lockfile. Baseline check PASS (141 tests / 100 smoke).
+- Added `does not eagerly reduce cancellation snapshots for successful split writes` first: **184 reductions** for 60 notes (expected <10), failing for the growing-snapshot work. Changed only the local cancellation helper to accept a snapshot callback and evaluate it on abort. Every cancellation check and all partial-result fields are retained; existing load/clean/write cancellation regressions pass unchanged.
+- Same real-timer, no-I/O harness, default `yieldEvery: 25`, all ordered names/bodies checked: **235.21 / 448.39 / 891.28 / 1,727.26 ms** for 2k/4k/8k/16k. At 16k the previously blocked **2,036.18 ms → 1,727.26 ms** now meets <2s. No timer stubbing, default tuning, or best-of rerun. Disposable `/tmp` script and bundle removed.
+- `npm run check` PASS: **142/142 tests, 100/100 smoke**, strict typecheck and production build. The nine VE-003 tests and all prior cancellation/ordered-output tests pass. No partial-failure behavior changed (VE-009 remains separate).
+
+- Implementation `f284dd7` pushed; tracker marked `fait`. All acceptance criteria met; remaining: none.

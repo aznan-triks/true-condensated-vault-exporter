@@ -7,9 +7,11 @@
 import { ItemView, Notice, WorkspaceLeaf, setIcon } from 'obsidian';
 import { EXPORT_COMMANDS, TARGET_LABELS, UiContext, executeTargets, isExportRunning } from '../commands/registry';
 import { ExportTarget } from '../features/exportOrchestrator';
+import { SPLIT_PRESETS, applySplitPreset, detectSplitPreset } from '../features/exportSplit';
 import { ExportHistoryEntry, formatBytes, formatDuration, relativeTime, totalBytes } from '../features/exportHistory';
 import { isFileIncluded, reservedOutputPaths } from '../core/filter';
-import { usesExternalOutputFolder } from '../core/outputTarget';
+import { resolveOutputSettings, usesExternalOutputFolder } from '../core/outputTarget';
+import { SplitPresetId } from '../core/types';
 
 export const VIEW_TYPE_EXPORTER_SIDEBAR = 'vault-exporter-sidebar';
 
@@ -102,7 +104,9 @@ export class ExporterSidebarView extends ItemView {
 				this.stats = null;
 				return;
 			}
-			const reserved = reservedOutputPaths(ctx.settings, { vaultBasePath: ctx.gateway.getVaultBasePath() });
+			const reserved = reservedOutputPaths(resolveOutputSettings(ctx.settings), {
+				vaultBasePath: ctx.gateway.getVaultBasePath(), alreadyResolved: true,
+			});
 			let noteCount = 0;
 			let canvasCount = 0;
 			let bytes = 0;
@@ -222,6 +226,32 @@ export class ExporterSidebarView extends ItemView {
 			row.addEventListener('click', () => toggleTarget(cmd.target));
 		}
 
+		const splitPresetRow = targetsCard.createDiv({ cls: 've-sidebar__split-preset' });
+		splitPresetRow.createSpan({ cls: 've-sidebar__split-preset-label', text: 'Split preset' });
+		const splitPresetSelect = splitPresetRow.createEl('select', {
+			cls: 'dropdown ve-sidebar__split-preset-select',
+			attr: { 'aria-label': 'Split export preset' },
+		});
+		splitPresetSelect.disabled = isExportRunning();
+		for (const preset of SPLIT_PRESETS) {
+			const opt = splitPresetSelect.createEl('option', { text: preset.shortLabel });
+			opt.value = preset.id;
+		}
+		const customOpt = splitPresetSelect.createEl('option', { text: 'Custom' });
+		customOpt.value = 'custom';
+		splitPresetSelect.value = detectSplitPreset(ctx.settings);
+		splitPresetSelect.addEventListener('change', () => {
+			const chosen = splitPresetSelect.value;
+			if (!SPLIT_PRESETS.some((preset) => preset.id === chosen)) return;
+			applySplitPreset(ctx.settings, chosen as SplitPresetId);
+			if (ctx.persistSettings) {
+				void ctx.persistSettings().catch((error: unknown) => {
+					console.error('[vault-exporter] Could not save split preset:', error);
+					new Notice('Could not save the selected split preset.');
+				});
+			}
+		});
+
 		const selectionDescription = describeSelection();
 		selectionSummaryEl = targetsCard.createDiv({
 			cls: 've-sidebar__selection-summary',
@@ -319,7 +349,7 @@ export class ExporterSidebarView extends ItemView {
 		main.createSpan({ cls: 've-history__label', text: entry.label });
 		main.createSpan({
 			cls: 've-history__meta',
-			text: relativeTime(entry.startedAt) + ' · ' + formatDuration(entry.durationMs) + ' · ' + entry.files.length + ' files · ' + formatBytes(totalBytes(entry.files)),
+			text: relativeTime(entry.startedAt) + ' · ' + formatDuration(entry.durationMs) + ' · ' + (entry.fileCount ?? entry.files.length) + ' files · ' + formatBytes(entry.totalBytes ?? totalBytes(entry.files)),
 		});
 		const firstOutput = entry.files[0];
 		if (firstOutput) {
