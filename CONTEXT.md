@@ -1,6 +1,7 @@
 # Project context: Vault Exporter
 
 > Last updated: 2026-10-23 (v2.3.0 release preparation). Keep this file in English.
+> `AGENTS.md`, `CLAUDE.md`, `CONTEXT.md` and `NEXT_SESSION.md` are public contributor docs read by cloud agents (Arena): keep them tracked, in English, with no private rules or local paths (owner decision, 2026-11-04).
 
 ## Product
 
