@@ -6,7 +6,7 @@
 
 import { App, FileSystemAdapter, TFile, normalizePath, Platform } from 'obsidian';
 import { ExportGateway, ExporterSettings, VaultFile } from '../core/types';
-import { isFileIncluded, isTagScopeMatch, reservedOutputPaths } from '../core/filter';
+import { compileFilter, isFileIncluded, isTagScopeMatch, reservedOutputPaths } from '../core/filter';
 import { openFolder, pickFolder, resolveElectronShell } from './electronBridge';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -39,17 +39,18 @@ export class ObsidianVaultGateway implements ExportGateway {
 	): Promise<VaultFile[]> {
 		const reserved = reservedOutputPaths(settings, { vaultBasePath: this.getVaultBasePath(), alreadyResolved: true });
 		const tag = settings.scopeTag?.replace(/^#+/, '').trim().toLowerCase();
+		const compiled = compileFilter({
+			scopeRoot: settings.scopeRoot,
+			excludedFolders: settings.excludedFolders,
+			excludedFiles: settings.excludedFiles,
+			excludedPrefixes: settings.excludedPrefixes,
+			includeCanvas: settings.includeCanvas,
+			reservedPaths: reserved,
+			onlyPath: settings.onlyFile,
+		});
 
 		const candidates = this.app.vault.getFiles().filter((file) => {
-			if (!isFileIncluded(file.path, {
-				scopeRoot: settings.scopeRoot,
-				excludedFolders: settings.excludedFolders,
-				excludedFiles: settings.excludedFiles,
-				excludedPrefixes: settings.excludedPrefixes,
-				includeCanvas: settings.includeCanvas,
-				reservedPaths: reserved,
-				onlyPath: settings.onlyFile,
-			})) {
+			if (!isFileIncluded(file.path, compiled)) {
 				return false;
 			}
 			return !tag || isTagScopeMatch(file.path, this.fileTags(file), tag);
@@ -121,10 +122,17 @@ export class ObsidianVaultGateway implements ExportGateway {
 		return this.app.vault.getFiles().map((f) => f.path);
 	}
 
+	private frontmatterKeysCache: { keys: string[]; time: number } | null = null;
+
 	/**
 	 * Scans vault metadata cache and returns all unique frontmatter property keys.
+	 * Results are briefly cached (5s) to avoid freezing Obsidian during UI operations.
 	 */
 	getAllFrontmatterKeys(): string[] {
+		const now = Date.now();
+		if (this.frontmatterKeysCache && now - this.frontmatterKeysCache.time < 5000) {
+			return this.frontmatterKeysCache.keys;
+		}
 		const keys = new Set<string>();
 		const files = this.app.vault.getMarkdownFiles();
 		for (const file of files) {
@@ -137,7 +145,9 @@ export class ObsidianVaultGateway implements ExportGateway {
 				}
 			}
 		}
-		return Array.from(keys).sort();
+		const sorted = Array.from(keys).sort();
+		this.frontmatterKeysCache = { keys: sorted, time: now };
+		return sorted;
 	}
 
 	/**

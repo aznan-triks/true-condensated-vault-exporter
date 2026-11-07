@@ -688,7 +688,7 @@ const has = (rel) => fs.existsSync(path.join(VAULT, rel));
 	const vaultBefore = fs.readdirSync(VAULT).sort();
 	record('export-markdown (external) finishes', (await runCommand('export-markdown')) === 'Done');
 	record('external output written outside the vault', fs.existsSync(path.join(EXTERNAL, 'Vault export.md')));
-	record('export history records the external path', String(plugin.history[0]?.files?.[0]?.path ?? '').startsWith(EXTERNAL), String(plugin.history[0]?.files?.[0]?.path));
+	record('export history records the external path', String(plugin.history[0]?.files?.[0]?.path ?? '').replace(/\\/g, '/').startsWith(EXTERNAL.replace(/\\/g, '/')), String(plugin.history[0]?.files?.[0]?.path));
 	record('the vault gained no new output file',
 		JSON.stringify(fs.readdirSync(VAULT).sort()) === JSON.stringify(vaultBefore),
 		fs.readdirSync(VAULT).filter((name) => !vaultBefore.includes(name)).join(', '));

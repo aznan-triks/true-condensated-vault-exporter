@@ -9,7 +9,7 @@ import { EXPORT_COMMANDS, TARGET_LABELS, UiContext, executeTargets, isExportRunn
 import { ExportTarget } from '../features/exportOrchestrator';
 import { SPLIT_PRESETS, applySplitPreset, detectSplitPreset } from '../features/exportSplit';
 import { ExportHistoryEntry, formatBytes, formatDuration, relativeTime, totalBytes } from '../features/exportHistory';
-import { isFileIncluded, reservedOutputPaths } from '../core/filter';
+import { compileFilter, isFileIncluded, reservedOutputPaths } from '../core/filter';
 import { resolveOutputSettings, usesExternalOutputFolder } from '../core/outputTarget';
 import { COMMON_EXPORT_EXTENSIONS, normalizeExtension } from '../core/extension';
 import { SplitPresetId } from '../core/types';
@@ -108,18 +108,19 @@ export class ExporterSidebarView extends ItemView {
 			const reserved = reservedOutputPaths(resolveOutputSettings(ctx.settings), {
 				vaultBasePath: ctx.gateway.getVaultBasePath(), alreadyResolved: true,
 			});
+			const compiled = compileFilter({
+				scopeRoot: ctx.settings.scopeRoot,
+				excludedFolders: ctx.settings.excludedFolders,
+				excludedFiles: ctx.settings.excludedFiles,
+				excludedPrefixes: ctx.settings.excludedPrefixes,
+				includeCanvas: ctx.settings.includeCanvas,
+				reservedPaths: reserved,
+			});
 			let noteCount = 0;
 			let canvasCount = 0;
 			let bytes = 0;
 			for (const f of info) {
-				if (!isFileIncluded(f.path, {
-					scopeRoot: ctx.settings.scopeRoot,
-					excludedFolders: ctx.settings.excludedFolders,
-					excludedFiles: ctx.settings.excludedFiles,
-					excludedPrefixes: ctx.settings.excludedPrefixes,
-					includeCanvas: ctx.settings.includeCanvas,
-					reservedPaths: reserved,
-				})) {
+				if (!isFileIncluded(f.path, compiled)) {
 					continue;
 				}
 				if (f.path.endsWith('.canvas')) {

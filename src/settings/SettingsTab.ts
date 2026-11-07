@@ -1308,6 +1308,7 @@ export class VaultExporterSettingsTab extends PluginSettingTab {
 		row.dataset.settingDescription = desc;
 		row.dataset.sectionId = sectionId;
 		row.dataset.sectionTitle = sectionTitle;
+		row.dataset.searchable = (title + ' ' + desc).toLocaleLowerCase();
 	}
 
 	private createSetting(containerEl: HTMLElement, title: string, desc: string): { row: HTMLElement; setting: Setting } {
@@ -1373,14 +1374,20 @@ export class VaultExporterSettingsTab extends PluginSettingTab {
 		const isFiltering = query.length > 0 || this.onlyChanged;
 		const matchingRows: HTMLElement[] = [];
 
-		for (const row of Array.from(sections.querySelectorAll<HTMLElement>('.ve-settings-row'))) {
-			const listValues = Array.from(row.querySelectorAll('.ve-list-item__text')).map((el) => el.textContent ?? '');
-			const searchableText = [
-				row.dataset.settingTitle,
-				row.dataset.settingDescription,
-				...listValues,
-			].filter(Boolean).join(' ').toLocaleLowerCase();
-			const matchesQuery = !query || searchableText.includes(query);
+		const rows = sections.querySelectorAll<HTMLElement>('.ve-settings-row');
+		for (let i = 0; i < rows.length; i++) {
+			const row = rows[i]!;
+			let searchable = row.dataset.searchable;
+			if (!searchable || row.querySelector('.ve-list-item__text')) {
+				const listValues = Array.from(row.querySelectorAll('.ve-list-item__text')).map((el) => el.textContent ?? '');
+				searchable = [
+					row.dataset.settingTitle,
+					row.dataset.settingDescription,
+					...listValues,
+				].filter(Boolean).join(' ').toLocaleLowerCase();
+				row.dataset.searchable = searchable;
+			}
+			const matchesQuery = !query || searchable.includes(query);
 			const matchesChanged = !this.onlyChanged || row.classList.contains('ve-setting--modified');
 			const matches = matchesQuery && matchesChanged;
 			row.hidden = !matches;
@@ -1923,9 +1930,22 @@ export class VaultExporterSettingsTab extends PluginSettingTab {
 		this.renderChangelogView();
 	}
 
+	private sharedDomParser: DOMParser | null = null;
+	private parsedChangelogCache: { markdown: string; introHtml: string; rawItems: RawChangelogItem[] } | null = null;
+
 	private appendSafeHtml(container: HTMLElement, html: string): void {
-		const parsed = new window.DOMParser().parseFromString(html, 'text/html');
+		this.sharedDomParser ??= new window.DOMParser();
+		const parsed = this.sharedDomParser.parseFromString(html, 'text/html');
 		container.append(...Array.from(parsed.body.childNodes));
+	}
+
+	private getParsedChangelog(): { introHtml: string; rawItems: RawChangelogItem[] } {
+		if (this.parsedChangelogCache && this.parsedChangelogCache.markdown === this.changelogRawMarkdown) {
+			return this.parsedChangelogCache;
+		}
+		const parsed = parseRawChangelogMarkdown(this.changelogRawMarkdown);
+		this.parsedChangelogCache = { markdown: this.changelogRawMarkdown, ...parsed };
+		return parsed;
 	}
 
 	private renderChangelogView(): void {
@@ -1933,7 +1953,7 @@ export class VaultExporterSettingsTab extends PluginSettingTab {
 		const container = this.clContentContainer;
 		container.empty();
 
-		const { introHtml, rawItems } = parseRawChangelogMarkdown(this.changelogRawMarkdown);
+		const { introHtml, rawItems } = this.getParsedChangelog();
 		this.populateVersionSelects(rawItems);
 
 		const result = filterAndGroupChangelog(rawItems, {

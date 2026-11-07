@@ -1,7 +1,7 @@
 {
   "id": "vault-exporter",
   "name": "Vault Exporter",
-  "version": "2.3.0",
+  "version": "2.3.1",
   "minAppVersion": "1.7.2",
   "description": "Export your vault to NotebookLM text, styled HTML, consolidated Markdown, split files, or ZIP bundles — with custom file extensions, Dataview rendering, tag scoping, export history and live previews.",
   "author": "aznan-triks",

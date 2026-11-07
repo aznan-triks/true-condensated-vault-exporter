@@ -4,6 +4,16 @@
 
 ## Unreleased
 
+## [2.3.1] - 2026-11-07
+
+### Improved
+- **Plain:** Significantly reduced Obsidian freezes and CPU usage during vault scanning, export execution, and settings navigation. Non-Markdown files and attachments are skipped immediately, and settings search reacts instantly.
+- **Technical:** Introduced `CompiledFilter` in `src/core/filter.ts` with early extension rejection and pre-normalized exclusion rules, caching filter sets across file scans in `vaultGateway.ts` and `SidebarView.ts`. Single-pass note prose cleaning via `cleanNoteBody` in `src/core/markdownClean.ts` eliminates up to 4 redundant segmentation passes per note, and Dataview processing is skipped on notes without dataview blocks. Cached frontmatter property scan and autocompletion candidates with a short TTL to prevent UI lockups.
+
+### Fixed
+- **Plain:** Prevented typing lag in the settings search bar and removed redundant full-vault rescans when interacting with settings.
+- **Technical:** Pre-indexed searchable setting text on DOM rows in `SettingsTab.ts`, memoized parsed changelog cards with a shared DOMParser instance, and normalized cross-platform line endings in release tests and smoke test runners.
+
 ## [2.3.0] - 2026-10-23
 
 ### Added

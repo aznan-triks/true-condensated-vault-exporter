@@ -1,10 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
-import { isFileIncluded, isTagScopeMatch, matchesTag, reservedOutputPaths } from '../src/core/filter';
+import { compileFilter, isFileIncluded, isTagScopeMatch, matchesTag, reservedOutputPaths } from '../src/core/filter';
 import { extractWikilinks, transformWikilinks, buildLinkResolver } from '../src/core/wikilink';
 import { parseFrontmatter } from '../src/core/frontmatter';
-import { applyToProse, removeComments, cleanCallouts, sanitizeWhitespace, splitContentSegments } from '../src/core/markdownClean';
+import { applyToProse, cleanCallouts, cleanNoteBody, removeComments, sanitizeWhitespace, splitContentSegments } from '../src/core/markdownClean';
 import { parseDataviewQuery, evaluateDataviewQuery, renderDataviewBlocks, resolveField } from '../src/core/dataviewEngine';
 import { formatForNotebookLM } from '../src/core/notebooklmFormatter';
 import { formatForHtml, simpleMarkdownToHtml, renderInline, noteHeadings } from '../src/core/htmlFormatter';
@@ -132,6 +132,24 @@ describe('filter', () => {
 			const settings = { ...DEFAULT_SETTINGS, splitMode: 'individual-files' as const, splitOutputFolder: 'out' };
 			const ctx = createExportContext(files, settings);
 			expect(buildSplitFiles(files.map((f) => cleanNote(f, ctx)), settings)[0]?.path).toBe('out/' + nfd);
+		});
+		it('supports pre-compiled filters for high-throughput scanning', () => {
+			const filterOpts = {
+				scopeRoot: 'Knowledge Base',
+				excludedFolders: ['00_Admin'],
+				excludedFiles: ['secret.md'],
+				excludedPrefixes: ['_draft'],
+				includeCanvas: false,
+				reservedPaths: ['Vault export.md'],
+			};
+			const compiled = compileFilter(filterOpts);
+			expect(isFileIncluded('Knowledge Base/Doc.md', compiled)).toBe(true);
+			expect(isFileIncluded('Knowledge Base/image.png', compiled)).toBe(false);
+			expect(isFileIncluded('Knowledge Base/00_Admin/Doc.md', compiled)).toBe(false);
+			expect(isFileIncluded('Knowledge Base/secret.md', compiled)).toBe(false);
+			expect(isFileIncluded('Knowledge Base/_draft-test/Doc.md', compiled)).toBe(false);
+			expect(isFileIncluded('Vault export.md', compiled)).toBe(false);
+			expect(isFileIncluded('Other/Doc.md', compiled)).toBe(false);
 		});
 	});
 
@@ -382,6 +400,24 @@ describe('markdownClean', () => {
 		// Unterminated fence: everything after it is literal code.
 		const open = applyToProse('text %%gone%%\n```\nstill %%kept%%', removeComments);
 		expect(open).toBe('text \n```\nstill %%kept%%');
+	});
+
+	it('cleans note body in a single pass while preserving code blocks and inline spans', () => {
+		const text = [
+			'Prose %%secret%% and [[Link]].',
+			'```python',
+			'# [[NotALink]] and %%not a comment%%',
+			'```',
+			'Inline `[[Code]]` test.',
+		].join('\n');
+		const cleaned = cleanNoteBody(text, (prose) => removeComments(transformWikilinks(prose, 'clean-text')));
+		expect(cleaned).toBe([
+			'Prose  and Link.',
+			'```python',
+			'# [[NotALink]] and %%not a comment%%',
+			'```',
+			'Inline `[[Code]]` test.',
+		].join('\n'));
 	});
 
 	it('collapses blank lines in prose but keeps them inside code', () => {

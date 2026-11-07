@@ -23,6 +23,28 @@ export interface FilterOptions {
 	reservedPaths?: string[];
 }
 
+export interface CompiledFilter {
+	scopeRootNorm: string;
+	includeCanvas: boolean;
+	onlyPathNorm: string;
+	reservedPathsNorm: string[];
+	excludedFilesNorm: string[];
+	excludedFoldersNorm: string[];
+	excludedPrefixesNorm: string[];
+}
+
+export function compileFilter(options: FilterOptions): CompiledFilter {
+	return {
+		scopeRootNorm: options.scopeRoot ? pathKey(options.scopeRoot) : '',
+		includeCanvas: Boolean(options.includeCanvas),
+		onlyPathNorm: options.onlyPath ? pathKey(options.onlyPath) : '',
+		reservedPathsNorm: (options.reservedPaths ?? []).map((p) => pathKey(p)).filter(Boolean),
+		excludedFilesNorm: options.excludedFiles.map((f) => pathKey(f).toLowerCase()).filter(Boolean),
+		excludedFoldersNorm: options.excludedFolders.map((f) => pathKey(f).toLowerCase()).filter(Boolean),
+		excludedPrefixesNorm: options.excludedPrefixes.map((p) => pathKey(p).toLowerCase()).filter(Boolean),
+	};
+}
+
 /**
  * Normalizes a path to forward slashes without leading/trailing slashes.
  */
@@ -77,19 +99,21 @@ export function isCleanExportArtifact(fileName: string): boolean {
 
 /**
  * Checks if a file path is included according to blacklist criteria.
+ * Supports passing a pre-compiled filter for high-throughput scanning.
  * @param relativePath Vault-relative path, e.g. 'Notes/Topic/Doc.md' or 'index.md'
- * @param options Filter options
+ * @param options Filter options or pre-compiled filter
  */
-export function isFileIncluded(relativePath: string, options: FilterOptions): boolean {
-	const normPath = pathKey(relativePath);
-	if (!normPath) {
+export function isFileIncluded(relativePath: string, options: FilterOptions | CompiledFilter): boolean {
+	const lower = relativePath.toLowerCase();
+	const isMd = lower.endsWith('.md');
+	const isCanvas = lower.endsWith('.canvas');
+	const includeCanvas = 'includeCanvas' in options ? Boolean(options.includeCanvas) : false;
+	if (!isMd && !(isCanvas && includeCanvas)) {
 		return false;
 	}
 
-	const lowerPath = normPath.toLowerCase();
-	const isMd = lowerPath.endsWith('.md');
-	const isCanvas = lowerPath.endsWith('.canvas');
-	if (!isMd && !(isCanvas && options.includeCanvas)) {
+	const normPath = pathKey(relativePath);
+	if (!normPath) {
 		return false;
 	}
 
@@ -103,37 +127,38 @@ export function isFileIncluded(relativePath: string, options: FilterOptions): bo
 	const parts = normPath.split('/');
 	const fileName = parts[parts.length - 1] ?? '';
 	const parentFolder = parts.length > 1 ? parts.slice(0, -1).join('/') : '';
+	const lowerNormPath = normPath.toLowerCase();
+	const lowerFileName = fileName.toLowerCase();
+	const lowerParentFolder = parentFolder.toLowerCase();
+
+	const compiled: CompiledFilter = 'scopeRootNorm' in options
+		? (options as CompiledFilter)
+		: compileFilter(options as FilterOptions);
 
 	// 0. Only-path override (context commands) wins over everything else
-	const normOnly = options.onlyPath ? pathKey(options.onlyPath) : '';
-	if (normOnly && normPath !== normOnly) {
+	if (compiled.onlyPathNorm && normPath !== compiled.onlyPathNorm) {
 		return false;
 	}
 
 	// 1. Check scope root if specified
-	const normScope = pathKey(options.scopeRoot);
-	if (normScope && normScope.length > 0) {
-		if (!normPath.startsWith(normScope + '/') && normPath !== normScope) {
+	if (compiled.scopeRootNorm && compiled.scopeRootNorm.length > 0) {
+		if (!normPath.startsWith(compiled.scopeRootNorm + '/') && normPath !== compiled.scopeRootNorm) {
 			return false;
 		}
 	}
 
 	// 2. Reserved output paths (previous export results) are never exported again
-	for (const reserved of options.reservedPaths ?? []) {
-		const normReserved = pathKey(reserved);
-		if (!normReserved) continue;
+	for (const normReserved of compiled.reservedPathsNorm) {
 		if (normPath === normReserved || normPath.startsWith(normReserved + '/')) {
 			return false;
 		}
 	}
 
 	// 3. Check excluded files (match against full path or just filename)
-	for (const excludedFile of options.excludedFiles) {
-		const normExcluded = pathKey(excludedFile);
-		if (!normExcluded) continue;
-		if (fileName.toLowerCase() === normExcluded.toLowerCase() ||
-			normPath.toLowerCase() === normExcluded.toLowerCase() ||
-			normPath.toLowerCase().endsWith('/' + normExcluded.toLowerCase())) {
+	for (const normExcluded of compiled.excludedFilesNorm) {
+		if (lowerFileName === normExcluded ||
+			lowerNormPath === normExcluded ||
+			lowerNormPath.endsWith('/' + normExcluded)) {
 			return false;
 		}
 	}
@@ -146,31 +171,25 @@ export function isFileIncluded(relativePath: string, options: FilterOptions): bo
 	}
 
 	// 5. Check excluded folders (exact match or path contains folder)
-	for (const excludedFolder of options.excludedFolders) {
-		const normExcluded = pathKey(excludedFolder);
-		if (!normExcluded) continue;
-
+	for (const normExcluded of compiled.excludedFoldersNorm) {
 		// Full parent folder match
-		if (parentFolder.toLowerCase() === normExcluded.toLowerCase()) {
+		if (lowerParentFolder === normExcluded) {
 			return false;
 		}
 		// Subfolder of excluded folder
-		if (parentFolder.toLowerCase().startsWith(normExcluded.toLowerCase() + '/')) {
+		if (lowerParentFolder.startsWith(normExcluded + '/')) {
 			return false;
 		}
 		// Any folder segment match
 		for (const part of parts.slice(0, -1)) {
-			if (part.toLowerCase() === normExcluded.toLowerCase()) {
+			if (part.toLowerCase() === normExcluded) {
 				return false;
 			}
 		}
 	}
 
 	// 6. Check excluded prefixes on any folder part
-	for (const prefix of options.excludedPrefixes) {
-		if (!prefix) continue;
-		const lowPrefix = pathKey(prefix).toLowerCase();
-		if (!lowPrefix) continue;
+	for (const lowPrefix of compiled.excludedPrefixesNorm) {
 		for (const part of parts.slice(0, -1)) {
 			if (part.toLowerCase().startsWith(lowPrefix)) {
 				return false;

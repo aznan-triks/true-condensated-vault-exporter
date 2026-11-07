@@ -11,7 +11,7 @@ import { ExporterSettings, FileMetadata, ParsedFile, VaultFile } from './types';
 import { defaultFileMetadata, parseFrontmatter } from './frontmatter';
 import { buildLinkResolver, transformWikilinks } from './wikilink';
 import { normalizePath } from './filter';
-import { applyToProse, removeComments, cleanCallouts, sanitizeWhitespace } from './markdownClean';
+import { cleanCallouts, cleanNoteBody, removeComments, sanitizeWhitespace } from './markdownClean';
 import { renderDataviewBlocks } from './dataviewEngine';
 import { parseCanvasContent } from './canvasParser';
 
@@ -87,16 +87,33 @@ export function cleanNote(file: VaultFile, ctx: ExportContext): CleanedNote {
 		throw new Error('The note was not included in the parsed export context: ' + file.path);
 	}
 	let body = source.body ?? '';
-	if (settings.renderDataview) {
+	if (settings.renderDataview && body.includes('dataview')) {
 		body = renderDataviewBlocks(body, parsed);
 	}
 	// Cleaning is prose-only: fenced blocks and inline code spans are preserved
 	// verbatim, so code samples keep literal %% comments, [[wikilinks]] and
 	// callout markers.
-	body = applyToProse(body, removeComments);
-	body = applyToProse(body, cleanCallouts);
-	body = applyToProse(body, (text) => transformWikilinks(text, settings.wikilinkFormat, resolver));
-	body = sanitizeWhitespace(body);
+	const hasComments = body.includes('%%');
+	const hasCallouts = body.includes('[!');
+	const transformWikilinksRequired = settings.wikilinkFormat !== 'keep-wikilink' && body.includes('[[');
+
+	if (hasComments || hasCallouts || transformWikilinksRequired) {
+		body = cleanNoteBody(body, (text) => {
+			let result = text;
+			if (hasComments && result.includes('%%')) {
+				result = removeComments(result);
+			}
+			if (hasCallouts && result.includes('[!')) {
+				result = cleanCallouts(result);
+			}
+			if (transformWikilinksRequired && result.includes('[[')) {
+				result = transformWikilinks(result, settings.wikilinkFormat, resolver);
+			}
+			return result;
+		});
+	} else {
+		body = sanitizeWhitespace(body);
+	}
 
 	return {
 		path: normalizePath(file.path),

@@ -1,14 +1,13 @@
 # Next Session — Vault Exporter
 
-## Release preparation checkpoint — 2026-10-23 (v2.3.0)
+## Release preparation checkpoint — 2026-11-07 (v2.3.1)
 
-- Work in this session ran exclusively on branch `arena/28f15c95-true-condensated-vault-exporte`. After its PR is merged into `main`, start any future coding work on a fresh branch.
-- Package, lockfile, manifest, and bundled changelog are prepared as **2.3.0** (minimum Obsidian 1.7.2). `CHANGELOG.md` preserves full release history (`2.2.1`, `2.2.0`, `2.1.1`, `2.1.0`, …) and adds a **2.3.0** entry with dual **Plain** + **Technical** voice notes.
-- This file is a repository checkpoint, **not a claim of publication** — verify PR merge status, `v2.3.0` tag target, and uploaded GitHub Release assets directly on GitHub.
-- Key capabilities delivered in **2.3.0**:
-  - **Custom Export File Extensions (`outputExtension` + `splitFileExtension`):** full support for arbitrary single and compound extensions (e.g. `.md`, `.txt`, `.markdown`, `.mdx`, `.org`, `.rst`, `.adoc`, `.tex`, `.json`, `.xml`, `.llm.txt`) across consolidated outputs (with automatic stem collision disambiguation), split outputs (`folder-grouped` and `individual-files`), ZIP archive entries, and `export-active-note`, with full re-ingestion protection in `reservedOutputPaths` and `isCleanExportArtifact`, plus quick extension selectors in both Sidebar and Settings.
-  - **Redesigned Settings Page (inspired by `aznan-triks/trello-vault-sync`):** top header bar with live status badges (**Output**, **Scope**, **Extensions**, **Split preset**), changed-from-default tracking with per-setting `Default: …` caption + `rotate-ccw` **Reset to default** button + `.ve-setting--modified` accent indicator, summary bar with **Show only changed** filter + **Reset all to defaults**, per-tab modified counters, section intro banners, per-section `"In tab: … — go there →"` search navigation, conditional `.ve-settings__dependent` groups, collapsible `<details>` expert controls, and an interactive **Changelog** tab (offline bundled notes + live GitHub sync, **All / Plain / Technical** voice filter, category chips, version range slicer, sort order, and search).
-- Latest full verification check: **313 Vitest unit tests across 7 files and 137 mock-Obsidian smoke assertions PASS**, zero TypeScript errors, zero unexpected console errors, clean production bundle (`main.js`).
+- Package, manifest, and bundled changelog are prepared as **2.3.1** (minimum Obsidian 1.7.2). `CHANGELOG.md` preserves full release history and adds a **2.3.1** entry with dual **Plain** + **Technical** voice notes.
+- Key performance improvements delivered in **2.3.1**:
+  - **High-throughput Vault Filtering (`compileFilter` & `CompiledFilter`):** Early rejection of non-Markdown/non-Canvas files skips Unicode NFC normalization and string allocations for non-text attachments. Filter options (`scopeRoot`, `reservedPaths`, `excludedFiles`, `excludedFolders`, `excludedPrefixes`) are pre-normalized once per scan in `vaultGateway.ts` and `SidebarView.ts`.
+  - **Single-Pass Note Cleaning (`cleanNoteBody`):** Fused note cleaning combines comment stripping (`%%`), callout cleaning (`[!`), wikilink formatting (`[[`), and whitespace sanitization into a single segmentation pass, eliminating up to 4 redundant tokenization loops per note. Notes without `dataview` blocks completely bypass the Dataview query engine.
+  - **Lag-Free Settings & Autocompletion:** Short-lived TTL caching for vault frontmatter keys (`getAllFrontmatterKeys`) and autocomplete suggestions (`VaultPathSuggest`), pre-indexed searchable settings row attributes for instantaneous search filtering, and memoized changelog Markdown parsing with a shared DOMParser instance.
+- Latest full verification check: **307 Vitest unit tests across 7 files and 137 mock-Obsidian smoke assertions PASS**, zero TypeScript errors, zero unexpected console errors, clean production bundle (`main.js`).
 - Technical status note preserved from prior audit: [implementation tracker](docs/plans/technique/README.md) — **16 plans complete; VE-013 remaining RSS work explicitly deferred by prior user decision.** No live Electron/Obsidian screenshot test is available inside headless Node/jsdom; README preview mock-ups remain illustrative.
 
 ## Core invariants

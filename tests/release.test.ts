@@ -4,7 +4,7 @@ import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-const workflow = readFileSync(new URL('../.github/workflows/release.yml', import.meta.url), 'utf8');
+const workflow = readFileSync(new URL('../.github/workflows/release.yml', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
 const temporary: string[] = [];
 // The production workflow executes Ubuntu Bash; static policy checks stay cross-platform.
 const shellIt = it.skipIf(process.platform === 'win32');

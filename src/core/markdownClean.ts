@@ -29,6 +29,11 @@ export function splitContentSegments(content: string): ContentSegment[] {
 	const segments: ContentSegment[] = [];
 	if (!content) return segments;
 
+	// Fast-path: completely skip line parsing if no code fence or backtick is present
+	if (!content.includes('```') && !content.includes('~~~') && !content.includes('`')) {
+		return [{ text: content, code: false }];
+	}
+
 	const lines: { text: string; start: number }[] = [];
 	let offset = 0;
 	for (const text of content.split('\n')) {
@@ -71,6 +76,11 @@ export function splitContentSegments(content: string): ContentSegment[] {
 
 /** Splits prose around inline code spans (paired backtick runs on one line). */
 function pushProseSegments(out: ContentSegment[], text: string): void {
+	if (!text.includes('`')) {
+		if (text.length > 0) out.push({ text, code: false });
+		return;
+	}
+
 	let cursor = 0;
 	let i = 0;
 	while (i < text.length) {
@@ -118,6 +128,28 @@ export function applyToProse(content: string, transform: (text: string) => strin
 	return splitContentSegments(content)
 		.map((segment) => (segment.code ? segment.text : transform(segment.text)))
 		.join('');
+}
+
+/**
+ * Combined single-pass cleaner for note prose and whitespace sanitization.
+ * Avoids repeated split/join passes over the document.
+ */
+export function cleanNoteBody(
+	content: string,
+	transformProse: (text: string) => string
+): string {
+	const segments = splitContentSegments(content);
+	return segments
+		.map((segment) => {
+			const normalized = segment.text.replace(/\r\n/g, '\n');
+			if (segment.code) return normalized;
+			const transformed = transformProse(normalized);
+			return transformed
+				.replace(/[ \t]+\n/g, '\n')
+				.replace(/\n{3,}/g, '\n\n');
+		})
+		.join('')
+		.trim();
 }
 
 export function removeComments(content: string): string {
