@@ -1,8 +1,9 @@
 # Next Session — Vault Exporter
 
-## Release preparation checkpoint — 2026-11-07 (v2.3.1)
+## Release checkpoint — 2026-11-07 (v2.3.1 published)
 
-- Package, manifest, and bundled changelog are prepared as **2.3.1** (minimum Obsidian 1.7.2). `CHANGELOG.md` preserves full release history and adds a **2.3.1** entry with dual **Plain** + **Technical** voice notes.
+- **Release v2.3.1 is live on GitHub** (`aznan-triks/true-condensated-vault-exporter`) with attached assets (`main.js`, `manifest.json`, `styles.css`).
+- Package, manifest, and bundled changelog are aligned to **2.3.1** (minimum Obsidian 1.7.2). `CHANGELOG.md` preserves full release history with dual **Plain** + **Technical** voice notes.
 - Key performance improvements delivered in **2.3.1**:
   - **High-throughput Vault Filtering (`compileFilter` & `CompiledFilter`):** Early rejection of non-Markdown/non-Canvas files skips Unicode NFC normalization and string allocations for non-text attachments. Filter options (`scopeRoot`, `reservedPaths`, `excludedFiles`, `excludedFolders`, `excludedPrefixes`) are pre-normalized once per scan in `vaultGateway.ts` and `SidebarView.ts`.
   - **Single-Pass Note Cleaning (`cleanNoteBody`):** Fused note cleaning combines comment stripping (`%%`), callout cleaning (`[!`), wikilink formatting (`[[`), and whitespace sanitization into a single segmentation pass, eliminating up to 4 redundant tokenization loops per note. Notes without `dataview` blocks completely bypass the Dataview query engine.
