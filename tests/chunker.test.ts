@@ -116,6 +116,25 @@ describe('chunker & word counting', () => {
 		}
 	});
 
+	it('subdivides a single massive paragraph without newlines', () => {
+		const words = Array.from({ length: 500 }, (_, i) => `word${i}`).join(' ');
+		const hugeNote: CleanedNote = {
+			path: 'SinglePara.md',
+			title: 'Single Para',
+			body: words,
+			isCanvas: false,
+			rawFrontmatter: '',
+			metadata: { title: 'Single Para', category: '', order: '', tags: [], custom: {} },
+		};
+
+		const splitNotes = chunkSingleNote(hugeNote, 100, DEFAULT_SETTINGS);
+		expect(splitNotes.length).toBeGreaterThanOrEqual(5);
+		for (const n of splitNotes) {
+			expect(n.title).toContain('Single Para (Part ');
+			expect(countWords(n.body)).toBeLessThanOrEqual(100);
+		}
+	});
+
 	it('formats multi-part Markdown with continuing TOC and note numbers', () => {
 		const notes = [
 			makeNote('Notes/1.md', 'First Note', 10),
@@ -134,6 +153,27 @@ describe('chunker & word counting', () => {
 		expect(md).toContain('4. [Second Note](#second-note-3)');
 		expect(md).toContain('## 3. First Note <a id="first-note-2"></a>');
 		expect(md).toContain('## 4. Second Note <a id="second-note-3"></a>');
+	});
+
+	it('produces valid document indices when a note is subdivided across chunks', () => {
+		const p1 = Array.from({ length: 80 }, (_, i) => `p1_${i}`).join(' ');
+		const p2 = Array.from({ length: 80 }, (_, i) => `p2_${i}`).join(' ');
+		const note = {
+			path: 'Solo.md',
+			title: 'Solo Note',
+			body: `${p1}\n\n${p2}`,
+			isCanvas: false,
+			rawFrontmatter: '',
+			metadata: { title: 'Solo Note', category: '', order: '', tags: [], custom: {} },
+		};
+		// 1 original note, subdivided into 2 chunks with limit = 100
+		const chunks = chunkNotesByWords([note], 100, DEFAULT_SETTINGS);
+		expect(chunks.length).toBe(2);
+		expect(chunks[1]!.totalOriginalNotes).toBeGreaterThanOrEqual(2);
+		expect(chunks[1]!.noteOffset + chunks[1]!.notes.length).toBeLessThanOrEqual(chunks[1]!.totalOriginalNotes);
+
+		const txt = formatForNotebookLM(chunks[1]!.notes, DEFAULT_SETTINGS, '2026-11-14', chunks[1]!);
+		expect(txt).not.toContain('DOCUMENT [2/1]');
 	});
 
 	it('formats multi-part NotebookLM with document numbering and headers', () => {

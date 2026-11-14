@@ -118,6 +118,17 @@ export function isReservedPathMatch(normPath: string, normReserved: string): boo
 				if (pathStem.startsWith(prefix) && /^\d+$/.test(pathStem.slice(prefix.length))) {
 					return true;
 				}
+				const lowerPrefix = reservedStem.toLowerCase() + ' - part ';
+				const lowerPathStem = pathStem.toLowerCase();
+				if (lowerPathStem.startsWith(lowerPrefix) && /^\d+$/.test(lowerPathStem.slice(lowerPrefix.length))) {
+					const lastSlashReserved = reservedStem.lastIndexOf('/');
+					const lastSlashPath = pathStem.lastIndexOf('/');
+					const folderReserved = lastSlashReserved > 0 ? reservedStem.slice(0, lastSlashReserved) : '';
+					const folderPath = lastSlashPath > 0 ? pathStem.slice(0, lastSlashPath) : '';
+					if (folderReserved === folderPath) {
+						return true;
+					}
+				}
 			}
 		}
 	}

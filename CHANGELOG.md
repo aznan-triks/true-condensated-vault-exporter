@@ -11,8 +11,8 @@
 - **Technical:** Introduced pure `src/core/chunker.ts` with allocation-free word counting via native `Intl.Segmenter` (falling back to Unicode whitespace scanning), safe threshold calculation (`effectiveWordLimit` with a 4% buffer for 500,000 words against markdown tokenizer discrepancies), single-note subdivision (`chunkSingleNote`), and multi-note partitioning (`chunkNotesByWords`). Persisted `maxWordsPerFile` in `src/core/types.ts` (default 500,000, 0 to disable), added Settings control in `src/settings/SettingsTab.ts`, updated `formatForMarkdown` and `formatForNotebookLM` to carry chunk metadata with continuous document numbering and TOC references, wired multi-part plans into `consolidatedPlans` and `planSplitFiles` (`exportSplit.ts` and `exportOrchestrator.ts`), and extended `isReservedPathMatch` in `src/core/filter.ts` to protect chunked export outputs from feedback loop re-ingestion.
 
 ### Fixed
-- **Plain:** Fixed NotebookLM rejecting large export files with "Source too long. Word count should be less than 500000".
-- **Technical:** All text/markdown/split outputs now guarantee that each emitted source file stays within NotebookLM's word limit without truncating content or dropping notes.
+- **Plain:** Fixed NotebookLM rejecting large export files with "Source too long. Word count should be less than 500000". Long notes with soft-wrapped paragraphs now subdivide cleanly without exceeding word limits, document numbering across multi-part exports stays accurate, and exported part files are never re-ingested into future scans regardless of filename casing.
+- **Technical:** Implemented `splitLargeText` in `src/core/chunker.ts` to ensure lines/paragraphs exceeding `limit` are split at word boundaries; anchored `totalOriginalNotes` to expanded note length in `chunkNotesByWords` and `exportSplit.ts` to prevent `[2/1]` document indexing anomalies; widened `effectiveWordLimit` to cap any value `>= 480000`; and updated `isReservedPathMatch` in `src/core/filter.ts` with case-insensitive stem matching for chunked parts.
 
 ## [2.3.1] - 2026-11-07
 

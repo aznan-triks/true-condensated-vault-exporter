@@ -508,7 +508,7 @@ export function planSplitFiles(notes: CleanedNote[], settings: ExporterSettings)
 					const lines = [
 						RULE,
 						'Folder: ' + group + ' (Part ' + chunk.part + ' of ' + chunk.totalParts + ')',
-						'Documents: ' + chunk.notes.length + ' (Notes ' + (chunk.noteOffset + 1) + ' to ' + (chunk.noteOffset + chunk.notes.length) + ' of ' + groupNotes.length + ')',
+						'Documents: ' + chunk.notes.length + ' (Notes ' + (chunk.noteOffset + 1) + ' to ' + (chunk.noteOffset + chunk.notes.length) + ' of ' + chunk.totalOriginalNotes + ')',
 						RULE,
 						'',
 					];

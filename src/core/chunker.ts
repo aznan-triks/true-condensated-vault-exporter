@@ -62,8 +62,18 @@ export function countNoteWords(note: CleanedNote, settings?: ExporterSettings): 
  */
 export function effectiveWordLimit(maxWords: number): number {
 	if (maxWords <= 0) return 0;
-	if (maxWords === 500000) return 480000;
+	if (maxWords >= 480000) return 480000;
 	return maxWords;
+}
+
+function splitLargeText(text: string, limit: number): string[] {
+	const words = text.split(/\s+/).filter(Boolean);
+	if (words.length <= limit) return [text];
+	const chunks: string[] = [];
+	for (let i = 0; i < words.length; i += limit) {
+		chunks.push(words.slice(i, i + limit).join(' '));
+	}
+	return chunks;
 }
 
 /**
@@ -100,6 +110,17 @@ export function chunkSingleNote(
 			let lineWords = 0;
 			for (const line of lines) {
 				const lw = countWords(line);
+				if (lw > limit) {
+					if (lineChunk.length > 0) {
+						paraChunks.push(lineChunk.join('\n'));
+						lineChunk = [];
+						lineWords = 0;
+					}
+					for (const piece of splitLargeText(line, limit)) {
+						paraChunks.push(piece);
+					}
+					continue;
+				}
 				if (lineChunk.length > 0 && lineWords + lw > limit) {
 					paraChunks.push(lineChunk.join('\n'));
 					lineChunk = [];
@@ -225,7 +246,7 @@ export function chunkNotesByWords(
 			notes: chunkNotes,
 			part: idx + 1,
 			totalParts,
-			totalOriginalNotes: notes.length,
+			totalOriginalNotes: expanded.length,
 			noteOffset: currentOffset,
 		};
 		currentOffset += chunkNotes.length;
