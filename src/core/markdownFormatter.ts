@@ -19,11 +19,29 @@ function displayTitle(note: CleanedNote): string {
 	return note.isCanvas ? 'Canvas: ' + note.title : note.title;
 }
 
-export function formatForMarkdown(notes: CleanedNote[], settings: ExporterSettings, exportedAt: string): string {
+export interface MarkdownChunkMeta {
+	part: number;
+	totalParts: number;
+	totalOriginalNotes: number;
+	noteOffset: number;
+}
+
+export function formatForMarkdown(
+	notes: CleanedNote[],
+	settings: ExporterSettings,
+	exportedAt: string,
+	chunkMeta?: MarkdownChunkMeta
+): string {
+	const isMultiPart = Boolean(chunkMeta && chunkMeta.totalParts > 1);
+	const titleSuffix = isMultiPart ? ` (Part ${chunkMeta!.part} of ${chunkMeta!.totalParts})` : '';
+	const docCount = isMultiPart
+		? `${notes.length} (Notes ${chunkMeta!.noteOffset + 1} to ${chunkMeta!.noteOffset + notes.length} of ${chunkMeta!.totalOriginalNotes})`
+		: `${notes.length}`;
+
 	const parts: string[] = [
-		'# ' + settings.documentTitle,
+		'# ' + settings.documentTitle + titleSuffix,
 		'',
-		'> *Documents: ' + notes.length + '*  ',
+		'> *Documents: ' + docCount + '*  ',
 		'> *Exported: ' + exportedAt + '*',
 		'',
 		'---',
@@ -33,15 +51,19 @@ export function formatForMarkdown(notes: CleanedNote[], settings: ExporterSettin
 	];
 
 	notes.forEach((note, i) => {
+		const docIdx = isMultiPart ? chunkMeta!.noteOffset + i : i;
+		const docNum = docIdx + 1;
 		const title = displayTitle(note);
-		parts.push((i + 1) + '. [' + escapeMarkdownLabel(title) + '](#' + generateAnchor(title, i) + ') <small>*(' + escapeMarkdownLabel(note.path) + ')*</small>');
+		parts.push(docNum + '. [' + escapeMarkdownLabel(title) + '](#' + generateAnchor(title, docIdx) + ') <small>*(' + escapeMarkdownLabel(note.path) + ')*</small>');
 	});
 	parts.push('', '---', '');
 
 	notes.forEach((note, i) => {
+		const docIdx = isMultiPart ? chunkMeta!.noteOffset + i : i;
+		const docNum = docIdx + 1;
 		const title = displayTitle(note);
 		// Section titles are not link labels: deliberately keep their original text.
-		parts.push('## ' + (i + 1) + '. ' + title + ' <a id="' + generateAnchor(title, i) + '"></a>');
+		parts.push('## ' + docNum + '. ' + title + ' <a id="' + generateAnchor(title, docIdx) + '"></a>');
 		parts.push('*Source: `' + note.path + '`*', '');
 
 		const meta = visibleMetadata(note, settings);

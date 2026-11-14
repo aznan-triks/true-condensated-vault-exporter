@@ -61,6 +61,9 @@ describe('filter', () => {
 
 		const opts = { ...options, reservedPaths: reserved };
 		expect(isFileIncluded('Vault export.md', opts)).toBe(false);
+		expect(isFileIncluded('Vault export - Part 1.md', opts)).toBe(false);
+		expect(isFileIncluded('Vault export - Part 2.md', opts)).toBe(false);
+		expect(isFileIncluded('Vault export - NotebookLM - Part 1.txt', opts)).toBe(false);
 		expect(isFileIncluded('Vault export.html', opts)).toBe(false);
 		expect(isFileIncluded('Vault export.zip', opts)).toBe(false);
 		expect(isFileIncluded('Vault export - split/Root.txt', opts)).toBe(false);
@@ -90,6 +93,7 @@ describe('filter', () => {
 	it('never re-ingests clean-export artifacts', () => {
 		const opts = { ...options };
 		expect(isFileIncluded('A/one (clean export).md', opts)).toBe(false);
+		expect(isFileIncluded('A/one (clean export) - Part 1.md', opts)).toBe(false);
 		expect(isFileIncluded('Notes/My Note (CLEAN EXPORT).md', opts)).toBe(false);
 		// unrelated files with a similar name are untouched
 		expect(isFileIncluded('A/one.md', opts)).toBe(true);

@@ -426,6 +426,13 @@ const has = (rel) => fs.existsSync(path.join(VAULT, rel));
 		await sleep(350);
 		record('edited text setting is saved', plugin._data?.settings?.notebooklmOutputPath === 'Out/notebooklm.txt', plugin._data?.settings?.notebooklmOutputPath);
 	}
+	const maxWordsInput = settingByLabel('Max Words per File (NotebookLM chunking)')?.querySelector('input');
+	if (maxWordsInput) {
+		maxWordsInput.value = '450000';
+		maxWordsInput.dispatchEvent(new window.Event('change', { bubbles: true }));
+		await sleep(350);
+		record('max words chunking setting is saved', plugin._data?.settings?.maxWordsPerFile === 450000, plugin._data?.settings?.maxWordsPerFile);
+	}
 	console.log('\n--- typing burst (VE-017) ---');
 	const titleForBurst = settingByLabel('Document Title')?.querySelector('input');
 	const titleBeforeBurst = plugin.settings.documentTitle;

@@ -15,6 +15,10 @@ import { CONSOLIDATED_FORMATS, ConsolidatedFormatId } from './formats';
 import { OutputPlan, planSplitFiles } from './exportSplit';
 import { buildPreparedZip, prepareZipEntry, PreparedZipEntry, zipEntryName, validateZipEntryNames } from '../core/zip';
 import { canonicalOutputPath, externalFolderBase, resolveOutputSettings, usesExternalOutputFolder, vaultRelativeOutputPath } from '../core/outputTarget';
+import { chunkNotesByWords } from '../core/chunker';
+import { appendFileStemSuffix } from '../core/extension';
+import { formatForMarkdown } from '../core/markdownFormatter';
+import { formatForNotebookLM } from '../core/notebooklmFormatter';
 
 export type ExportTarget = RememberedExportTarget;
 
@@ -61,11 +65,32 @@ function consolidatedPlans(
 	settings: ExporterSettings,
 	exportedAt: string,
 	requested: Set<ConsolidatedFormatId>
-): Map<ConsolidatedFormatId, OutputPlan> {
-	const map = new Map<ConsolidatedFormatId, OutputPlan>();
+): Map<ConsolidatedFormatId, OutputPlan[]> {
+	const map = new Map<ConsolidatedFormatId, OutputPlan[]>();
 	for (const [id, format] of Object.entries(CONSOLIDATED_FORMATS) as [ConsolidatedFormatId, (typeof CONSOLIDATED_FORMATS)[ConsolidatedFormatId]][]) {
-		if (requested.has(id)) {
-			map.set(id, { path: format.outputPath(settings), render: () => format.render(notes, settings, exportedAt) });
+		if (!requested.has(id)) continue;
+		const basePath = format.outputPath(settings);
+		if (id === 'html') {
+			map.set(id, [{ path: basePath, render: () => format.render(notes, settings, exportedAt) }]);
+			continue;
+		}
+		const chunks = chunkNotesByWords(notes, settings.maxWordsPerFile, settings);
+		if (chunks.length <= 1) {
+			map.set(id, [{ path: basePath, render: () => format.render(notes, settings, exportedAt) }]);
+		} else {
+			const plans: OutputPlan[] = chunks.map((chunk) => {
+				const chunkPath = appendFileStemSuffix(basePath, ' - Part ' + chunk.part);
+				return {
+					path: chunkPath,
+					render: () => {
+						if (id === 'markdown') {
+							return formatForMarkdown(chunk.notes, settings, exportedAt, chunk);
+						}
+						return formatForNotebookLM(chunk.notes, settings, exportedAt, chunk);
+					},
+				};
+			});
+			map.set(id, plans);
 		}
 	}
 	return map;
@@ -107,20 +132,24 @@ function sourceKey(path: string, vaultBasePath: string): string {
 /** Selects the individual files to write for the requested targets (no zip). */
 function selectOutputs(
 	targets: ExportTarget[],
-	consolidated: Map<ConsolidatedFormatId, OutputPlan>,
+	consolidated: Map<ConsolidatedFormatId, OutputPlan[]>,
 	split: OutputPlan[]
 ): LabeledOutput[] {
 	const selected: LabeledOutput[] = [];
 	for (const t of targets) {
 		if (t === 'all') {
-			for (const [id, out] of consolidated) {
-				selected.push({ out, stage: CONSOLIDATED_FORMATS[id].label });
+			for (const [id, plans] of consolidated) {
+				for (const out of plans) {
+					selected.push({ out, stage: CONSOLIDATED_FORMATS[id].label });
+				}
 			}
 			selected.push(...split.map((out) => ({ out, stage: 'Split' })));
 		} else if (t === 'split') {
 			selected.push(...split.map((out) => ({ out, stage: 'Split' })));
 		} else if (t !== 'zip' && consolidated.has(t)) {
-			selected.push({ out: consolidated.get(t)!, stage: CONSOLIDATED_FORMATS[t].label });
+			for (const out of consolidated.get(t)!) {
+				selected.push({ out, stage: CONSOLIDATED_FORMATS[t].label });
+			}
 		}
 	}
 	// Repeated targets are harmless; different outputs sharing a path are not.
@@ -160,10 +189,15 @@ interface NamedOutput {
 }
 
 /** Preflight names/deduplication without retaining rendered strings. */
-function zipOutputs(consolidated: Map<ConsolidatedFormatId, OutputPlan>, split: OutputPlan[], externalBase: string): NamedOutput[] {
+function zipOutputs(consolidated: Map<ConsolidatedFormatId, OutputPlan[]>, split: OutputPlan[], externalBase: string): NamedOutput[] {
 	const seen = new Map<string, OutputPlan>();
 	const outputs: NamedOutput[] = [];
-	for (const out of [...consolidated.values(), ...split]) {
+	const allPlans: OutputPlan[] = [];
+	for (const plans of consolidated.values()) {
+		allPlans.push(...plans);
+	}
+	allPlans.push(...split);
+	for (const out of allPlans) {
 		const name = zipEntryName(out.path, externalBase);
 		const previous = seen.get(name);
 		if (previous) {

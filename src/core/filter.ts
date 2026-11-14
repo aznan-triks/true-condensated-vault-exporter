@@ -94,7 +94,34 @@ export const CLEAN_EXPORT_SUFFIX = ' (clean export).md';
 
 /** True when the file is one of our own clean-export artifacts (never re-exported, regardless of extension). */
 export function isCleanExportArtifact(fileName: string): boolean {
-	return / \(clean export\)\.[^/\\]+$/i.test(fileName);
+	return / \(clean export\)(?: - Part \d+)?\.[^/\\]+$/i.test(fileName);
+}
+
+/**
+ * Returns true if a path matches a reserved output destination or any of its chunked parts
+ * (e.g. "Vault export - Part 1.md" for reserved "Vault export.md").
+ */
+export function isReservedPathMatch(normPath: string, normReserved: string): boolean {
+	if (normPath === normReserved || normPath.startsWith(normReserved + '/')) {
+		return true;
+	}
+	const lastDotReserved = normReserved.lastIndexOf('.');
+	if (lastDotReserved > 0) {
+		const reservedStem = normReserved.slice(0, lastDotReserved);
+		const reservedExt = normReserved.slice(lastDotReserved);
+		const lastDotPath = normPath.lastIndexOf('.');
+		if (lastDotPath > 0) {
+			const pathStem = normPath.slice(0, lastDotPath);
+			const pathExt = normPath.slice(lastDotPath);
+			if (pathExt.toLowerCase() === reservedExt.toLowerCase()) {
+				const prefix = reservedStem + ' - Part ';
+				if (pathStem.startsWith(prefix) && /^\d+$/.test(pathStem.slice(prefix.length))) {
+					return true;
+				}
+			}
+		}
+	}
+	return false;
 }
 
 /**
@@ -149,7 +176,7 @@ export function isFileIncluded(relativePath: string, options: FilterOptions | Co
 
 	// 2. Reserved output paths (previous export results) are never exported again
 	for (const normReserved of compiled.reservedPathsNorm) {
-		if (normPath === normReserved || normPath.startsWith(normReserved + '/')) {
+		if (isReservedPathMatch(normPath, normReserved)) {
 			return false;
 		}
 	}

@@ -6,7 +6,7 @@ import * as zipModule from '../src/core/zip';
 import { CONSOLIDATED_FORMATS } from '../src/features/formats';
 import { assignGroupFileNames, buildSplitFiles, planSplitFiles, previewSplitFiles } from '../src/features/exportSplit';
 import * as splitModule from '../src/features/exportSplit';
-import { cleanNote, createExportContext } from '../src/core/pipeline';
+import { CleanedNote, cleanNote, createExportContext } from '../src/core/pipeline';
 import { defaultFileMetadata } from '../src/core/frontmatter';
 import { runExports, ExportCancelledError, ExportFailedError, utf8ByteLength } from '../src/features/exportOrchestrator';
 import {
@@ -652,7 +652,7 @@ describe('orchestrator', () => {
 			const events: string[] = [];
 			const spies = Object.values(CONSOLIDATED_FORMATS).map((format) => {
 				const render = format.render;
-				return vi.spyOn(format, 'render').mockImplementation((...args) => { events.push('render ' + format.label); return render(...args); });
+				return vi.spyOn(format, 'render').mockImplementation((notes: CleanedNote[], settings: ExporterSettings, exportedAt: string) => { events.push('render ' + format.label); return render(notes, settings, exportedAt); });
 			});
 			try {
 				const { gateway } = fakeGateway(manyFiles.slice(0, 1));
@@ -942,6 +942,194 @@ describe('custom extensions in split & full export pipeline', () => {
 		expect(rawZip.includes(Buffer.from('Vault export - HTML.mdx'))).toBe(true);
 		expect(rawZip.includes(Buffer.from('Vault export - NotebookLM.mdx'))).toBe(true);
 		expect(rawZip.includes(Buffer.from('Vault export - split/Projects.org'))).toBe(true);
+	});
+
+	describe('NotebookLM word limit chunking and splitting', () => {
+		const makeWords = (count: number) => Array.from({ length: count }, (_, i) => `w${i}`).join(' ');
+
+		it('splits consolidated Markdown into parts when exceeding maxWordsPerFile (e.g. games.md)', async () => {
+			const written = new Map<string, string>();
+			const gateway: ExportGateway = {
+				loadVaultFiles: async () => [
+					{ path: 'games/Game1.md', name: 'Game1.md', content: '# Game 1\n' + makeWords(40) },
+					{ path: 'games/Game2.md', name: 'Game2.md', content: '# Game 2\n' + makeWords(40) },
+					{ path: 'games/Game3.md', name: 'Game3.md', content: '# Game 3\n' + makeWords(40) },
+				],
+				writeFile: async (p, c) => { written.set(p, c); },
+				writeBinary: async () => {},
+			};
+
+			await runExports(
+				gateway,
+				{
+					...DEFAULT_SETTINGS,
+					documentTitle: 'games',
+					markdownOutputPath: 'games.md',
+					maxWordsPerFile: 100, // ~45 words/note -> Part 1 has Game1 & Game2 (~90w), Part 2 has Game3
+				},
+				['markdown'],
+				() => {}
+			);
+
+			expect([...written.keys()].sort()).toEqual([
+				'games - Part 1.md',
+				'games - Part 2.md',
+			]);
+
+			const part1 = written.get('games - Part 1.md')!;
+			expect(part1).toContain('# games (Part 1 of 2)');
+			expect(part1).toContain('1. [Game1]');
+			expect(part1).toContain('2. [Game2]');
+
+			const part2 = written.get('games - Part 2.md')!;
+			expect(part2).toContain('# games (Part 2 of 2)');
+			expect(part2).toContain('3. [Game3]');
+		});
+
+		it('splits consolidated NotebookLM text into parts when exceeding maxWordsPerFile', async () => {
+			const written = new Map<string, string>();
+			const gateway: ExportGateway = {
+				loadVaultFiles: async () => [
+					{ path: 'games/Game1.md', name: 'Game1.md', content: '# Game 1\n' + makeWords(40) },
+					{ path: 'games/Game2.md', name: 'Game2.md', content: '# Game 2\n' + makeWords(40) },
+					{ path: 'games/Game3.md', name: 'Game3.md', content: '# Game 3\n' + makeWords(40) },
+				],
+				writeFile: async (p, c) => { written.set(p, c); },
+				writeBinary: async () => {},
+			};
+
+			await runExports(
+				gateway,
+				{
+					...DEFAULT_SETTINGS,
+					documentTitle: 'games',
+					notebooklmOutputPath: 'games.txt',
+					maxWordsPerFile: 100,
+				},
+				['notebooklm'],
+				() => {}
+			);
+
+			expect([...written.keys()].sort()).toEqual([
+				'games - Part 1.txt',
+				'games - Part 2.txt',
+			]);
+
+			const part1 = written.get('games - Part 1.txt')!;
+			expect(part1).toContain('GAMES (NOTEBOOKLM EXPORT) - PART 1 OF 2');
+			expect(part1).toContain('DOCUMENT [1/3]: games/Game1.md');
+			expect(part1).toContain('DOCUMENT [2/3]: games/Game2.md');
+
+			const part2 = written.get('games - Part 2.txt')!;
+			expect(part2).toContain('GAMES (NOTEBOOKLM EXPORT) - PART 2 OF 2');
+			expect(part2).toContain('DOCUMENT [3/3]: games/Game3.md');
+		});
+
+		it('splits folder-grouped split outputs into parts when a folder exceeds maxWordsPerFile', async () => {
+			const written = new Map<string, string>();
+			const gateway: ExportGateway = {
+				loadVaultFiles: async () => [
+					{ path: 'games/Arcade.md', name: 'Arcade.md', content: '# Arcade\n' + makeWords(70) },
+					{ path: 'games/Puzzle.md', name: 'Puzzle.md', content: '# Puzzle\n' + makeWords(70) },
+					{ path: 'other/Note.md', name: 'Note.md', content: '# Other\n' + makeWords(20) },
+				],
+				writeFile: async (p, c) => { written.set(p, c); },
+				writeBinary: async () => {},
+			};
+
+			await runExports(
+				gateway,
+				{
+					...DEFAULT_SETTINGS,
+					splitMode: 'folder-grouped',
+					splitOutputFolder: 'out',
+					splitFileExtension: '.md',
+					maxWordsPerFile: 100,
+				},
+				['split'],
+				() => {}
+			);
+
+			expect([...written.keys()].sort()).toEqual([
+				'out/games - Part 1.md',
+				'out/games - Part 2.md',
+				'out/other.md',
+			]);
+
+			const games1 = written.get('out/games - Part 1.md')!;
+			expect(games1).toContain('Folder: games (Part 1 of 2)');
+
+			const games2 = written.get('out/games - Part 2.md')!;
+			expect(games2).toContain('Folder: games (Part 2 of 2)');
+
+			const other = written.get('out/other.md')!;
+			expect(other).toContain('Folder: other');
+			expect(other).not.toContain('Part');
+		});
+
+		it('preserves single un-suffixed output when word count is under the limit or disabled', async () => {
+			const written = new Map<string, string>();
+			const gateway: ExportGateway = {
+				loadVaultFiles: async () => [
+					{ path: 'games/Game1.md', name: 'Game1.md', content: '# Game 1\n' + makeWords(20) },
+				],
+				writeFile: async (p, c) => { written.set(p, c); },
+				writeBinary: async () => {},
+			};
+
+			await runExports(
+				gateway,
+				{
+					...DEFAULT_SETTINGS,
+					documentTitle: 'games',
+					markdownOutputPath: 'games.md',
+					maxWordsPerFile: 500000,
+				},
+				['markdown'],
+				() => {}
+			);
+
+			expect([...written.keys()]).toEqual(['games.md']);
+			expect(written.get('games.md')).toContain('# games');
+			expect(written.get('games.md')).not.toContain('Part 1');
+		});
+
+		it('bundles chunked part files into ZIP archive', async () => {
+			const writtenText = new Map<string, string>();
+			const writtenBinary = new Map<string, Uint8Array>();
+			const gateway: ExportGateway = {
+				loadVaultFiles: async () => [
+					{ path: 'games/Game1.md', name: 'Game1.md', content: '# Game 1\n' + makeWords(40) },
+					{ path: 'games/Game2.md', name: 'Game2.md', content: '# Game 2\n' + makeWords(40) },
+				],
+				writeFile: async (p, c) => { writtenText.set(p, c); },
+				writeBinary: async (p, c) => { writtenBinary.set(p, c); },
+			};
+
+			await runExports(
+				gateway,
+				{
+					...DEFAULT_SETTINGS,
+					documentTitle: 'games',
+					markdownOutputPath: 'games.md',
+					zipOutputPath: 'games.zip',
+					maxWordsPerFile: 50,
+				},
+				['markdown', 'zip'],
+				() => {}
+			);
+
+			expect([...writtenText.keys()].sort()).toEqual([
+				'games - Part 1.md',
+				'games - Part 2.md',
+			]);
+
+			const zipBytes = writtenBinary.get('games.zip');
+			expect(zipBytes).toBeDefined();
+			const rawZip = Buffer.from(zipBytes!);
+			expect(rawZip.includes(Buffer.from('games - Part 1.md'))).toBe(true);
+			expect(rawZip.includes(Buffer.from('games - Part 2.md'))).toBe(true);
+		});
 	});
 });
 

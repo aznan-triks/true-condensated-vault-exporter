@@ -130,6 +130,7 @@ const TRACKED_SETTING_KEYS: readonly (keyof ExporterSettings)[] = [
 	'splitMode',
 	'splitFileExtension',
 	'splitGroupFolder',
+	'maxWordsPerFile',
 	'splitSubfolderNaming' as never,
 ].filter((k): k is keyof ExporterSettings => k in DEFAULT_SETTINGS);
 
@@ -174,6 +175,7 @@ const RESETTABLE_KEYS: readonly (keyof ExporterSettings)[] = [
 	'htmlShowFooter',
 	'htmlFooterText',
 	'yieldEvery',
+	'maxWordsPerFile',
 ];
 
 export class VaultExporterSettingsTab extends PluginSettingTab {
@@ -507,6 +509,22 @@ export class VaultExporterSettingsTab extends PluginSettingTab {
 			new VaultPathSuggest(this.app, text.inputEl, () => this.plugin.gateway.getAllFiles());
 		});
 		this.track(zipOut.row, zipOut.setting, 'zipOutputPath');
+
+		const maxWords = this.createSetting(
+			outputSection,
+			'Max Words per File (NotebookLM chunking)',
+			'Automatically split exported files into parts (e.g. Part 1, Part 2) when exceeding this word count. NotebookLM allows up to 500,000 words per source. Set to 0 to disable.'
+		);
+		maxWords.setting.addText((text) => {
+			text.setPlaceholder('500000');
+			text.setValue(String(this.plugin.settings.maxWordsPerFile));
+			text.onChange((val) => {
+				const parsed = Number.parseInt(val.trim(), 10);
+				this.plugin.settings.maxWordsPerFile = Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
+				this.scheduleSave();
+			});
+		});
+		this.track(maxWords.row, maxWords.setting, 'maxWordsPerFile');
 
 		new Setting(outputSection).setName('Split Exports').setHeading();
 		this.renderSplitPresetsSetting(outputSection);

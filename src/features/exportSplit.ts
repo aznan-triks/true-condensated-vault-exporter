@@ -16,7 +16,8 @@ import {
 import { CleanedNote } from '../core/pipeline';
 import { normalizePath, pathKey } from '../core/filter';
 import { canonicalOutputPath } from '../core/outputTarget';
-import { effectiveSplitExtension, normalizeExtension } from '../core/extension';
+import { appendFileStemSuffix, effectiveSplitExtension, normalizeExtension } from '../core/extension';
+import { chunkNotesByWords, chunkSingleNote } from '../core/chunker';
 
 export interface OutputFile {
 	path: string;
@@ -445,7 +446,8 @@ export function planSplitFiles(notes: CleanedNote[], settings: ExporterSettings)
 	};
 
 	if (settings.splitMode === 'individual-files') {
-		return notes.map((note) => {
+		const plans: OutputPlan[] = [];
+		for (const note of notes) {
 			const frontmatter = !settings.stripFrontmatter && note.rawFrontmatter
 				? '---\n' + note.rawFrontmatter + '\n---\n\n'
 				: '';
@@ -453,9 +455,25 @@ export function planSplitFiles(notes: CleanedNote[], settings: ExporterSettings)
 			const parts = rawRel.split('/');
 			const lastIdx = parts.length - 1;
 			const stem = (parts[lastIdx] ?? '').replace(/\.(?:md|canvas)$/i, '');
-			const rel = [...parts.slice(0, lastIdx).map(safeSegment), safeSegment(stem) + ext].join('/');
-			return output(joinPath(base, rel), () => frontmatter + note.body, '"' + note.path + '"');
-		});
+			const relBase = parts.slice(0, lastIdx).map(safeSegment);
+
+			const chunks = settings.maxWordsPerFile > 0
+				? chunkSingleNote(note, settings.maxWordsPerFile, settings)
+				: [note];
+
+			if (chunks.length <= 1) {
+				const rel = [...relBase, safeSegment(stem) + ext].join('/');
+				plans.push(output(joinPath(base, rel), () => frontmatter + note.body, '"' + note.path + '"'));
+			} else {
+				for (let i = 0; i < chunks.length; i++) {
+					const subNote = chunks[i]!;
+					const partNum = i + 1;
+					const rel = [...relBase, safeSegment(stem) + ' - Part ' + partNum + ext].join('/');
+					plans.push(output(joinPath(base, rel), () => frontmatter + subNote.body, '"' + note.path + '" (Part ' + partNum + ')'));
+				}
+			}
+		}
+		return plans;
 	}
 
 	const groupingRoot = normalizePath(settings.splitGroupFolder) || normalizePath(settings.scopeRoot);
@@ -471,16 +489,38 @@ export function planSplitFiles(notes: CleanedNote[], settings: ExporterSettings)
 	}
 
 	const fileNames = assignGroupFileNames([...groups.keys()], style, ext);
-	return [...groups.entries()].map(([group, groupNotes]) => {
+	const plans: OutputPlan[] = [];
+	for (const [group, groupNotes] of groups.entries()) {
 		const safeName = fileNames.get(group) ?? safeSegment(group) + ext;
-		return output(joinPath(base, safeName), () => {
-			const lines = [RULE, 'Folder: ' + group, 'Documents: ' + groupNotes.length, RULE, ''];
-			for (const note of groupNotes) {
-				lines.push('', SEPARATOR, note.title + ' (' + note.path + ')', SEPARATOR, '', note.body, '');
+		const chunks = chunkNotesByWords(groupNotes, settings.maxWordsPerFile, settings);
+		if (chunks.length <= 1) {
+			plans.push(output(joinPath(base, safeName), () => {
+				const lines = [RULE, 'Folder: ' + group, 'Documents: ' + groupNotes.length, RULE, ''];
+				for (const note of groupNotes) {
+					lines.push('', SEPARATOR, note.title + ' (' + note.path + ')', SEPARATOR, '', note.body, '');
+				}
+				return lines.join('\n');
+			}, 'folder "' + group + '"'));
+		} else {
+			for (const chunk of chunks) {
+				const chunkSafeName = appendFileStemSuffix(safeName, ' - Part ' + chunk.part);
+				plans.push(output(joinPath(base, chunkSafeName), () => {
+					const lines = [
+						RULE,
+						'Folder: ' + group + ' (Part ' + chunk.part + ' of ' + chunk.totalParts + ')',
+						'Documents: ' + chunk.notes.length + ' (Notes ' + (chunk.noteOffset + 1) + ' to ' + (chunk.noteOffset + chunk.notes.length) + ' of ' + groupNotes.length + ')',
+						RULE,
+						'',
+					];
+					for (const note of chunk.notes) {
+						lines.push('', SEPARATOR, note.title + ' (' + note.path + ')', SEPARATOR, '', note.body, '');
+					}
+					return lines.join('\n');
+				}, 'folder "' + group + '" (Part ' + chunk.part + ')'));
 			}
-			return lines.join('\n');
-		}, 'folder "' + group + '"');
-	});
+		}
+	}
+	return plans;
 }
 
 /** Existing eager API for callers that need all split contents at once. */

@@ -140,6 +140,8 @@ export interface ExporterSettings {
 	htmlFooterText: string;
 	/** Number of notes processed between two UI yields (keeps Obsidian responsive, allows cancel) */
 	yieldEvery: number;
+	/** Maximum words per file before automatically splitting into parts (0 disables splitting). NotebookLM limit is 500,000. */
+	maxWordsPerFile: number;
 	/**
 	 * When set (in-memory only, never persisted by default), restrict the
 	 * export to this exact vault-relative path. Used by context commands
@@ -190,6 +192,7 @@ export const DEFAULT_SETTINGS: ExporterSettings = {
 	htmlShowFooter: true,
 	htmlFooterText: 'Vault Exporter',
 	yieldEvery: 25,
+	maxWordsPerFile: 500000,
 };
 
 const STRING_SETTING_KEYS = [
@@ -308,6 +311,14 @@ export function mergeSettings(loaded: unknown): ExporterSettings {
 	}
 	if (typeof source.yieldEvery === 'number' && Number.isFinite(source.yieldEvery)) {
 		result.yieldEvery = Math.min(1000, Math.max(1, Math.floor(source.yieldEvery)));
+	}
+	if (typeof source.maxWordsPerFile === 'number' && Number.isFinite(source.maxWordsPerFile)) {
+		result.maxWordsPerFile = Math.max(0, Math.floor(source.maxWordsPerFile));
+	} else if (typeof source.maxWordsPerFile === 'string') {
+		const parsed = Number.parseInt(source.maxWordsPerFile.trim(), 10);
+		if (Number.isFinite(parsed) && parsed >= 0) {
+			result.maxWordsPerFile = parsed;
+		}
 	}
 
 	return result;

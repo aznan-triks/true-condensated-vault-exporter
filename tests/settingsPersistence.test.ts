@@ -65,10 +65,11 @@ describe('settings persistence (VE-017)', () => {
 		['Split Group Folder', 'splitGroupFolder'],
 		['Split Files Destination Folder', 'splitOutputFolder'], ['HTML Footer Attribution', 'htmlFooterText'],
 		['Custom HTML CSS', 'customCss'], ['Yield Every N Notes', 'yieldEvery'],
+		['Max Words per File (NotebookLM chunking)', 'maxWordsPerFile'],
 	] as const)('coalesces ten changes to %s while updating live settings immediately', async (label, key) => {
 		const { plugin, tab, writes, saveSettings } = fixture();
 		for (let i = 1; i <= 10; i++) type(tab, label, '1234567890'.slice(0, i));
-		const expected = key === 'yieldEvery'
+		const expected = key === 'yieldEvery' || key === 'maxWordsPerFile'
 			? 1234567890
 			: key === 'outputExtension' || key === 'splitFileExtension'
 				? '.1234567890'
