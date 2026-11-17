@@ -17,3 +17,5 @@
 Read `AGENTS.md`, then `CONTEXT.md`. Keep all source, UI strings, commits, PRs, and documentation in English, strict TypeScript, no new dependencies or suppressed checks. Preserve source-overwrite prevention, output reservation, Unicode comparison-only keys, literal code/unsupported Dataview, exact full partial-error/cancellation results, portable named split collision errors, lazy output plans, current-panel cleanup, and ordered bounded history persistence.
 
 Generated `main.js` is ignored by Git; do not commit build/measurement artifacts. Clearing/sampling history must never delete exported files. Context command export overrides remain in-memory only.
+
+- **À faire en premier (auteur, 2026-11-17)** : alléger le contexte de démarrage du projet comme le CLAUDE.md global (table courte « besoin → compétence ou fichier » ; passages longs, procédures et formats déplacés dans des compétences ou fichiers lus à la demande, via `writing-for-agents`) ; avec discernement : ne garder que ce qui sert à chaque session, aucune règle ni piège perdu (contrôle avant/après), ne rien dupliquer du global.
