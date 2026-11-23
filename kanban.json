@@ -1,0 +1,19 @@
+{
+  "colonnes": [
+    {
+      "titre": "❓ Décisions (auteur)",
+      "source": "DECISIONS.md",
+      "type": "decisions"
+    },
+    {
+      "titre": "🚧 Dernier point (release)",
+      "source": "NEXT_SESSION.md",
+      "section": "^Release checkpoint"
+    },
+    {
+      "titre": "📐 Invariants",
+      "source": "NEXT_SESSION.md",
+      "section": "^Core invariants"
+    }
+  ]
+}
